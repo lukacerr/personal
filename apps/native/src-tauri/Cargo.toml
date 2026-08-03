@@ -1,5 +1,5 @@
 [package]
-name = "personal-native"
+name = "luka"
 version = "0.1.0"
 description = "Native shell for Luka's personal platform"
 edition = "2021"

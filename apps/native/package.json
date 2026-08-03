@@ -3,6 +3,7 @@
 	"private": true,
 	"version": "0.1.0",
 	"scripts": {
+		"icons": "tauri icon ../web/public/favicon.svg",
 		"native:android": "tauri android build --apk --target aarch64 --ci",
 		"native:linux": "tauri build --bundles appimage",
 		"native:windows": "tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --no-bundle --no-sign",

@@ -1,10 +1,18 @@
-import { Layout } from '@web/root';
+import { Layout, links } from '@web/root';
 import { LoginPanel } from '@web/routes/login';
 import { isValidElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 describe('Login', () => {
+	it('uses the LC favicon', () => {
+		expect(links()).toContainEqual({
+			rel: 'icon',
+			type: 'image/svg+xml',
+			href: '/favicon.svg',
+		});
+	});
+
 	it('uses the dark theme by default', () => {
 		const document = Layout({ children: null });
 
