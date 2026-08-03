@@ -10,6 +10,15 @@
 # production
 **/build
 **/dist
+**/target
+**/gen/android/.gradle
+**/gen/android/local.properties
+**/gen/android/keystore.properties
+**/*.jks
+**/*.keystore
+**/*.apk
+**/*.idsig
+apps/native/.local-signing/
 
 # env files
 .env

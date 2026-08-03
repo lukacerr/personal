@@ -10,12 +10,13 @@ Este archivo es documentación viva. Actualízalo cuando el trabajo o las correc
 
 ## Arquitectura
 
-El repositorio es un monorepo Bun con linker aislado y dos workspaces:
+El repositorio es un monorepo Bun con linker aislado y tres workspaces:
 
 | Workspace | Responsabilidad | Despliegue |
 | --- | --- | --- |
 | `apps/api` (`@personal/api`) | API, persistencia, integraciones y secretos | Binario compilado con Bun dentro de Docker, desplegado en Google Cloud Run |
 | `apps/web` (`@personal/web`) | SPA cliente sin servidor propio | Build estático desplegado en Cloudflare Pages |
+| `apps/native` (`@personal/native`) | Shell Tauri de la web cloud | AppImage para Linux, `.exe` portable para Windows y APK para Android |
 
 Reglas de frontera:
 
@@ -26,7 +27,9 @@ Reglas de frontera:
 - Usa `@api`, `@api/*`, `@web` y `@web/*`. Evita imports ascendentes con `../`; los imports locales con `./` son válidos.
 - Cada workspace declara sus propias dependencias. No instales dependencias de API en web ni dependencias de React en API.
 - La raíz contiene tooling compartido y el catálogo de versiones, no dependencias runtime de las aplicaciones.
-- Cuando una dependencia sea usada por ambos workspaces o deba mantener identidad/versiones sincronizadas, agrégala al catálogo raíz y usa `catalog:` en cada workspace consumidor.
+- Cuando una dependencia sea usada por varios workspaces o deba mantener identidad/versiones sincronizadas, agrégala al catálogo raíz y usa `catalog:` en cada workspace consumidor.
+- El shell Tauri carga `https://personal.luka.software` directamente y no concede capacidades IPC a contenido remoto. Los cambios web no requieren un nuevo binario nativo; reconstruye el shell solo al cambiar Tauri, permisos, iconos o configuración nativa.
+- Google OAuth no funciona dentro del webview embebido. No consideres utilizable la autenticación nativa hasta implementar navegador del sistema y retorno seguro por deep link/código de un solo uso.
 
 ## Stack Compartido
 
@@ -112,7 +115,8 @@ API:
 Web:
 
 - Cloudflare Pages construye desde la raíz.
-- Comando de instalación/build: `bun install --frozen-lockfile --filter '!./' --filter @personal/web && bun run build:web`.
+- Pages debe definir `SKIP_DEPENDENCY_INSTALL=true` y `BUN_VERSION=1.3.8` para impedir que su build system v2 ejecute npm sobre el catálogo de Bun.
+- Comando de build: `bun run build:cloudflare`, que instala únicamente `@personal/web` con el lockfile congelado y luego ejecuta el build estático.
 - Directorio publicado: `apps/web/build/client`.
 - El resultado debe seguir siendo completamente estático.
 
@@ -139,11 +143,14 @@ Ejecuta desde la raíz salvo que se indique lo contrario:
 | `bun run docker:rebuild` | Reconstruir, recrear y esperar el stack local completo |
 | `bun run format` | Aplicar Biome al repositorio |
 | `bun run lint` | Comprobar Biome sin modificar |
-| `bun run typecheck` | Comprobar ambos workspaces |
+| `bun run typecheck` | Comprobar API y web |
 | `bun run test` | Ejecutar los tests configurados |
-| `bun run build` | Construir ambos workspaces |
+| `bun run build` | Construir API y web |
 | `bun run build:api` | Compilar solo API |
 | `bun run build:web` | Construir solo web |
+| `bun run build:native:linux` | Construir AppImage en Linux con prerequisitos Tauri |
+| `bun run build:native:windows` | Cross-compilar el `.exe` portable con `cargo-xwin` |
+| `bun run build:native:android` | Construir APK arm64 con SDK/NDK configurados |
 | `bun run precommit` | Ejecutar lint-staged, typecheck y tests |
 
 Los scripts `bun run mig` y `bun run mig:push` están disponibles desde la raíz y desde `apps/api`, pero son exclusivamente para uso humano.

@@ -2,6 +2,25 @@
 
 Monorepo Bun con una API Elysia y una SPA React Router.
 
+## Cloudflare Pages
+
+Pages v2 no detecta el lockfile textual `bun.lock` y ejecuta `npm install` por defecto. Configura el proyecto desde la raíz con:
+
+```text
+Build command: bun run build:cloudflare
+Build output directory: apps/web/build/client
+```
+
+Variables de build:
+
+```text
+SKIP_DEPENDENCY_INSTALL=true
+BUN_VERSION=1.3.8
+VITE_API_URL=https://<api-domain>
+```
+
+`SKIP_DEPENDENCY_INSTALL` evita el `npm install` automático; el script instala únicamente el workspace web con Bun y el lockfile congelado.
+
 ## Entorno local con Docker
 
 El entorno de datos es completamente local: PostgreSQL 17 guarda sus datos en `./volumes/postgres` y un proxy HTTP traduce las consultas de `@neondatabase/serverless` hacia esa instancia. No requiere una cuenta ni credenciales de Neon Cloud. El proxy usa la imagen comunitaria `ghcr.io/timowilhelm/local-neon-http-proxy`, fijada por digest en Compose.

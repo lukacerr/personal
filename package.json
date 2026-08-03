@@ -1,6 +1,7 @@
 {
 	"name": "personal",
 	"private": true,
+	"packageManager": "bun@1.3.8",
 	"workspaces": {
 		"packages": [
 			"apps/*"
@@ -15,10 +16,14 @@
 		}
 	},
 	"scripts": {
-		"build": "bun run --parallel --workspaces build",
+		"build": "bun run --parallel --filter @personal/api --filter @personal/web build",
 		"build:api": "bun --filter @personal/api build",
+		"build:cloudflare": "bun install --frozen-lockfile --filter '!./' --filter @personal/web && bun run build:web",
+		"build:native:android": "bun --filter @personal/native native:android",
+		"build:native:linux": "bun --filter @personal/native native:linux",
+		"build:native:windows": "bun --filter @personal/native native:windows",
 		"build:web": "bun --filter @personal/web build",
-		"dev": "bun run --parallel --workspaces dev",
+		"dev": "bun run --parallel --filter @personal/api --filter @personal/web dev",
 		"dev:api": "bun --filter @personal/api dev",
 		"dev:web": "bun --filter @personal/web dev",
 		"docker:rebuild": "docker compose up --build --force-recreate --remove-orphans --wait",
@@ -28,8 +33,8 @@
 		"mig:push": "bun --filter @personal/api mig:push",
 		"precommit": "lint-staged && bun run typecheck && bun run test",
 		"prepare": "husky",
-		"test": "bun run --parallel --workspaces test",
-		"typecheck": "bun run --parallel --workspaces typecheck"
+		"test": "bun run --parallel --filter @personal/api --filter @personal/web test",
+		"typecheck": "bun run --parallel --filter @personal/api --filter @personal/web typecheck"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.6",
