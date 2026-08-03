@@ -1,0 +1,17 @@
+{
+	"app": {
+		"windows": [
+			{
+				"label": "main",
+				"title": "Luka",
+				"width": 1200,
+				"height": 800,
+				"minWidth": 360,
+				"minHeight": 640,
+				"resizable": true,
+				"fullscreen": false,
+				"decorations": false
+			}
+		]
+	}
+}
