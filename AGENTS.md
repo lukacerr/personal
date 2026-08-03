@@ -29,8 +29,10 @@ Reglas de frontera:
 - La raíz contiene tooling compartido y el catálogo de versiones, no dependencias runtime de las aplicaciones.
 - Cuando una dependencia sea usada por varios workspaces o deba mantener identidad/versiones sincronizadas, agrégala al catálogo raíz y usa `catalog:` en cada workspace consumidor.
 - Los Dockerfiles que ejecutan un install congelado deben copiar el `package.json` de cada workspace listado en el lockfile, aunque el install esté filtrado; no copies sus fuentes ni instales sus dependencias.
-- El shell Tauri carga `https://personal.luka.software` directamente y no concede capacidades IPC a contenido remoto. Los cambios web no requieren un nuevo binario nativo; reconstruye el shell solo al cambiar Tauri, permisos, iconos o configuración nativa.
+- El shell Tauri carga `https://personal.luka.software` directamente y no concede capacidades IPC generales a contenido remoto. La única excepción es `core:webview:allow-set-webview-zoom` en Linux, restringida a la ventana `main`; la capability necesita `local: true` porque Tauri clasifica así las llamadas de su polyfill inyectado, y mantiene el origen remoto explícito. Los cambios web no requieren un nuevo binario nativo; reconstruye el shell solo al cambiar Tauri, permisos, iconos o configuración nativa.
+- Las ventanas Tauri usan `backgroundColor: [0, 0, 0, 255]` para evitar un flash blanco antes de que cargue la web remota; conserva el valor en la configuración base y en el override Linux.
 - `apps/web/public/favicon.svg` es la fuente única de iconos web/nativos. Tras modificarlo, ejecuta `bun --filter @personal/native icons`; esto actualiza también los recursos del proyecto Android generado.
+- El proyecto Android apunta a SDK 36 y usa edge-to-edge obligatorio. Conserva el manejo de `systemBars` y `displayCutout` en `MainActivity.kt` para que el WebView no quede debajo de las barras del sistema.
 - En Linux, el shell nativo reemplaza el `GDK_BACKEND=x11` del empaquetador por `wayland,x11` cuando existe `WAYLAND_DISPLAY`.
 - `tauri.linux.conf.json` deshabilita las decoraciones nativas de la ventana Linux; conserva las decoraciones de Windows en la configuración base.
 - Google OAuth no funciona dentro del webview embebido. No consideres utilizable la autenticación nativa hasta implementar navegador del sistema y retorno seguro por deep link/código de un solo uso.

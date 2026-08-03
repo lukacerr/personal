@@ -37,4 +37,21 @@ mod tests {
 
         assert!(!context.config().app.windows[0].decorations);
     }
+
+    #[test]
+    fn native_window_starts_with_a_black_background() {
+        let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+
+        assert_eq!(
+            context.config().app.windows[0].background_color,
+            Some(tauri::utils::config::Color(0, 0, 0, 255))
+        );
+    }
+
+    #[test]
+    fn desktop_webview_enables_browser_zoom_shortcuts() {
+        let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+
+        assert!(context.config().app.windows[0].zoom_hotkeys_enabled);
+    }
 }

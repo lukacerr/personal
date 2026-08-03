@@ -1,0 +1,12 @@
+{
+	"$schema": "../gen/schemas/desktop-schema.json",
+	"identifier": "desktop-zoom",
+	"description": "Allows the Linux zoom hotkey polyfill, classified by Tauri as local, to change only the main WebView zoom level.",
+	"local": true,
+	"windows": ["main"],
+	"remote": {
+		"urls": ["https://personal.luka.software/*"]
+	},
+	"permissions": ["core:webview:allow-set-webview-zoom"],
+	"platforms": ["linux"]
+}
