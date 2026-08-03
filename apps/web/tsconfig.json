@@ -1,0 +1,16 @@
+{
+	"extends": "../../tsconfig.json",
+	"include": [
+		"app/**/*",
+		"tests/**/*",
+		".react-router/types/**/*",
+		"react-router.config.ts",
+		"vite.config.ts"
+	],
+	"compilerOptions": {
+		"jsx": "react-jsx",
+		"lib": ["DOM", "DOM.Iterable", "ESNext"],
+		"rootDirs": [".", "./.react-router/types"],
+		"types": ["node", "vite/client", "bun-types"]
+	}
+}

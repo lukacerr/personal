@@ -1,0 +1,33 @@
+{
+	"name": "@personal/api",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "bun build --compile --minify --outfile dist/server src/index.ts",
+		"dev": "bun --watch src/index.ts",
+		"mig": "bunx drizzle-kit generate",
+		"mig:push": "bunx drizzle-kit migrate",
+		"test": "docker compose -f ../../docker-compose.yml --env-file .env.test up -d --wait db-proxy cache s3 && docker compose -f ../../docker-compose.yml --env-file .env.test run --rm --no-deps s3-init && bun test --env-file .env.test",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@elysia/cors": "^1.4.2",
+		"@elysia/jwt": "^1.4.2",
+		"@elysia/openapi": "^1.4.15",
+		"@neondatabase/serverless": "^1.1.0",
+		"@t3-oss/env-core": "catalog:",
+		"@upstash/redis": "^1.38.1",
+		"drizzle-orm": "^0.45.2",
+		"elysia": "catalog:",
+		"elysia-helmet": "^3.1.0",
+		"elysia-logger": "^0.5.2",
+		"elysia-oauth2": "^2.1.0",
+		"zod": "catalog:"
+	},
+	"devDependencies": {
+		"@elysia/eden": "catalog:",
+		"bun-types": "catalog:",
+		"drizzle-kit": "^0.31.10",
+		"typescript": "catalog:"
+	}
+}

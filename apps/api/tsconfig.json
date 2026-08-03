@@ -1,0 +1,8 @@
+{
+	"extends": "../../tsconfig.json",
+	"include": ["src/**/*", "tests/**/*"],
+	"compilerOptions": {
+		"lib": ["ESNext"],
+		"types": ["bun-types"]
+	}
+}

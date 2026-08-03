@@ -1,29 +1,42 @@
 {
-  "name": "personal-web",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "build": "react-router build",
-    "dev": "react-router dev",
-    "start": "react-router-serve ./build/server/index.js",
-    "typecheck": "react-router typegen && tsc"
-  },
-  "dependencies": {
-    "@react-router/node": "^8",
-    "@react-router/serve": "^8",
-    "isbot": "^5.1.36",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "react-router": "^8"
-  },
-  "devDependencies": {
-    "@react-router/dev": "^8",
-    "@tailwindcss/vite": "^4.2.2",
-    "@types/node": "^22",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "tailwindcss": "^4.2.2",
-    "typescript": "^5.9.3",
-    "vite": "^8.0.3"
-  }
+	"name": "personal",
+	"private": true,
+	"workspaces": {
+		"packages": [
+			"apps/*"
+		],
+		"catalog": {
+			"@elysia/eden": "^1.4.10",
+			"@t3-oss/env-core": "^0.13.11",
+			"elysia": "1.4.29",
+			"typescript": "^5.9.3",
+			"zod": "^4.4.3",
+			"bun-types": "^1.3.14"
+		}
+	},
+	"scripts": {
+		"build": "bun run --parallel --workspaces build",
+		"build:api": "bun --filter @personal/api build",
+		"build:web": "bun --filter @personal/web build",
+		"dev": "bun run --parallel --workspaces dev",
+		"dev:api": "bun --filter @personal/api dev",
+		"dev:web": "bun --filter @personal/web dev",
+		"docker:rebuild": "docker compose up --build --force-recreate --remove-orphans --wait",
+		"format": "biome check --write .",
+		"lint": "biome check .",
+		"mig": "bun --filter @personal/api mig",
+		"mig:push": "bun --filter @personal/api mig:push",
+		"precommit": "lint-staged && bun run typecheck && bun run test",
+		"prepare": "husky",
+		"test": "bun run --parallel --workspaces test",
+		"typecheck": "bun run --parallel --workspaces typecheck"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.6",
+		"husky": "^9.1.7",
+		"lint-staged": "^17.3.0"
+	},
+	"lint-staged": {
+		"*.{ts,tsx,json}": "biome format --write --no-errors-on-unmatched"
+	}
 }

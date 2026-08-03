@@ -1,7 +1,34 @@
-.DS_Store
-.env
-/node_modules/
+# dependencies
+**/node_modules
+/.pnp
+.pnp.js
 
-# React Router
-/.react-router/
-/build/
+# testing
+/coverage
+/volumes
+
+# production
+**/build
+**/dist
+
+# env files
+.env
+.env.*
+!.env.example
+!**/.env.test
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# misc
+.DS_Store
+*.pem
+**/.react-router
+**/*.trace
+**/*.zip
+**/*.tar.gz
+**/*.tgz
+**/*.log
+**/*.bun

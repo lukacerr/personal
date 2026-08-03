@@ -1,0 +1,203 @@
+name: personal
+
+services:
+  volumes-init:
+    image: alpine:3.22
+    user: '0:0'
+    environment:
+      LOCAL_UID: ${LOCAL_UID:-1000}
+      LOCAL_GID: ${LOCAL_GID:-1000}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /volumes/postgres /volumes/redis /volumes/redis-insight /volumes/minio
+        chown -R "$${LOCAL_UID}:$${LOCAL_GID}" /volumes
+    volumes:
+      - ./volumes:/volumes
+
+  web:
+    build:
+      context: .
+      dockerfile: web.Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8080
+    ports:
+      - '127.0.0.1:5173:8080'
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8080/health']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: api.Dockerfile
+    env_file:
+      - ./apps/api/.env
+    environment:
+      NODE_ENV: development
+      PORT: 8080
+      DEPLOYMENT_URL: http://localhost:8080
+      WEB_URL: http://localhost:5173
+      DATABASE_URL: postgres://personal:personal-local-password@db:5432/personal
+      NEON_FETCH_ENDPOINT: http://db-proxy:4444/sql
+      UPSTASH_REDIS_REST_URL: http://cache:80
+      UPSTASH_REDIS_REST_TOKEN: ${LOCAL_UPSTASH_TOKEN:-local-upstash-token}
+      S3_ENDPOINT: http://s3:9000
+      S3_BUCKET: ${LOCAL_S3_BUCKET:-luka}
+      S3_ACCESS_KEY_ID: ${LOCAL_S3_ACCESS_KEY_ID:-personal}
+      S3_SECRET_ACCESS_KEY: ${LOCAL_S3_SECRET_ACCESS_KEY:-personal-local-secret}
+    ports:
+      - '127.0.0.1:8080:8080'
+    depends_on:
+      db-proxy:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+
+  db:
+    image: postgres:17-alpine
+    user: '${LOCAL_UID:-1000}:${LOCAL_GID:-1000}'
+    environment:
+      POSTGRES_USER: personal
+      POSTGRES_PASSWORD: personal-local-password
+      POSTGRES_DB: personal
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - ./volumes/postgres:/var/lib/postgresql/data
+    depends_on:
+      volumes-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U personal -d personal']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  db-proxy:
+    image: ghcr.io/timowilhelm/local-neon-http-proxy@sha256:cd2ae14edf2feafbc3330492de5c80506f77274c3bd013154cdef697bdeb768a
+    environment:
+      PG_CONNECTION_STRING: postgres://personal:personal-local-password@db:5432/personal
+    ports:
+      - '127.0.0.1:4444:4444'
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS
+          -H 'Neon-Connection-String: postgres://personal:personal-local-password@db:5432/personal'
+          -H 'Content-Type: application/json'
+          --data '{"query":"SELECT 1","params":[]}'
+          http://127.0.0.1:4444/sql >/dev/null
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  cache-db:
+    image: redis:7.4-alpine
+    user: '${LOCAL_UID:-1000}:${LOCAL_GID:-1000}'
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - ./volumes/redis:/data
+    depends_on:
+      volumes-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  cache:
+    image: hiett/serverless-redis-http:0.0.10
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: ${LOCAL_UPSTASH_TOKEN:-local-upstash-token}
+      SRH_CONNECTION_STRING: redis://cache-db:6379
+    ports:
+      - '127.0.0.1:8079:80'
+    depends_on:
+      cache-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'wget -qO- --header="Authorization: Bearer $${SRH_TOKEN}" --header="Content-Type: application/json" --post-data="[\"PING\"]" http://127.0.0.1:80 | grep -q PONG',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  cache-ui:
+    image: redis/redisinsight:2.70.1
+    user: '${LOCAL_UID:-1000}:${LOCAL_GID:-1000}'
+    environment:
+      RI_ACCEPT_TERMS_AND_CONDITIONS: 'true'
+      RI_REDIS_HOST: cache-db
+      RI_REDIS_PORT: 6379
+      RI_REDIS_ALIAS: personal-local
+    ports:
+      - '127.0.0.1:5540:5540'
+    volumes:
+      - ./volumes/redis-insight:/data
+    depends_on:
+      volumes-init:
+        condition: service_completed_successfully
+      cache-db:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:5540/api/health/ >/dev/null']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  s3:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    user: '${LOCAL_UID:-1000}:${LOCAL_GID:-1000}'
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ${LOCAL_S3_ACCESS_KEY_ID:-personal}
+      MINIO_ROOT_PASSWORD: ${LOCAL_S3_SECRET_ACCESS_KEY:-personal-local-secret}
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    volumes:
+      - ./volumes/minio:/data
+    depends_on:
+      volumes-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:9000/minio/health/live']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  s3-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    environment:
+      S3_BUCKET: ${LOCAL_S3_BUCKET:-luka}
+      S3_ACCESS_KEY_ID: ${LOCAL_S3_ACCESS_KEY_ID:-personal}
+      S3_SECRET_ACCESS_KEY: ${LOCAL_S3_SECRET_ACCESS_KEY:-personal-local-secret}
+    depends_on:
+      s3:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mc alias set local http://s3:9000 "$${S3_ACCESS_KEY_ID}" "$${S3_SECRET_ACCESS_KEY}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"

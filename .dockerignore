@@ -1,4 +1,12 @@
-.react-router
-build
-node_modules
-README.md
+.agents
+.git
+.husky
+volumes
+**/.env
+**/.env.*
+!**/.env.example
+**/.react-router
+**/build
+**/coverage
+**/dist
+**/node_modules
