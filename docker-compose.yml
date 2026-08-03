@@ -19,16 +19,32 @@ services:
   web:
     build:
       context: .
-      dockerfile: web.Dockerfile
-      args:
-        VITE_API_URL: http://localhost:8080
+      dockerfile: dev.Dockerfile
+    working_dir: /app/apps/web
+    command: bun run dev -- --host 0.0.0.0 --port 5173 --strictPort
+    environment:
+      DOCKER_DEV: 'true'
+      VITE_API_URL: http://localhost:8080
     ports:
-      - '127.0.0.1:5173:8080'
+      - '127.0.0.1:5173:5173'
+    volumes:
+      - ./apps/web/app:/app/apps/web/app
+      - ./apps/web/public:/app/apps/web/public
+      - ./apps/web/react-router.config.ts:/app/apps/web/react-router.config.ts
+      - ./apps/web/tsconfig.json:/app/apps/web/tsconfig.json
+      - ./apps/web/vite.config.ts:/app/apps/web/vite.config.ts
+      - ./apps/api/src:/app/apps/api/src:ro
     depends_on:
       api:
         condition: service_started
     healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8080/health']
+      test:
+        [
+          'CMD',
+          'bun',
+          '-e',
+          'const response = await fetch("http://127.0.0.1:5173"); if (!response.ok) process.exit(1)',
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -36,7 +52,9 @@ services:
   api:
     build:
       context: .
-      dockerfile: api.Dockerfile
+      dockerfile: dev.Dockerfile
+    working_dir: /app/apps/api
+    command: bun run dev
     env_file:
       - ./apps/api/.env
     environment:
@@ -53,6 +71,8 @@ services:
       S3_SECRET_ACCESS_KEY: ${LOCAL_S3_SECRET_ACCESS_KEY:-personal-local-secret}
     ports:
       - '127.0.0.1:8080:8080'
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
     depends_on:
       db-proxy:
         condition: service_healthy

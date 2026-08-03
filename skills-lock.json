@@ -62,6 +62,11 @@
 			"sourceType": "autoskills-registry",
 			"computedHash": "551eb86a35cbf35747cc1a58059ed7e73aacdf03d2fd2e12f63208ea2c0a4ae9"
 		},
+		"tauri-v2": {
+			"source": "nodnarbnitram/claude-code-extensions",
+			"sourceType": "autoskills-registry",
+			"computedHash": "2a14a5e08e521136f42265bf52cc297e49c5d877ecd4179b563ad85957bbbc07"
+		},
 		"typescript-advanced-types": {
 			"source": "wshobson/agents",
 			"sourceType": "autoskills-registry",

@@ -79,7 +79,7 @@ export default function Home() {
 						Overview / 01
 					</p>
 					<h1 className="max-w-2xl font-heading text-4xl font-semibold tracking-[-0.04em] text-balance sm:text-5xl">
-						Everything personal, connected.
+						Everything personal, connected!
 					</h1>
 					<p className="max-w-xl text-base leading-7 text-muted-foreground">
 						The foundation is online. Each system will become available here as

@@ -127,6 +127,8 @@ Web:
 Entorno local con Docker Compose:
 
 - `docker-compose.yml` levanta web, API, PostgreSQL 17, un proxy Neon HTTP local, MinIO y Redis detrás de un proxy REST compatible con Upstash.
+- Compose usa `dev.Dockerfile` para web/API: monta las fuentes, ejecuta `bun --watch` en API y React Router/Vite HMR en web. No reutilices ni conviertas `api.Dockerfile` en una imagen de desarrollo; es exclusivamente la imagen compilada de Cloud Run.
+- Las dependencias de desarrollo quedan dentro de la imagen y no se montan desde el host. Los cambios de código tienen recarga automática; cambios en manifests, lockfile o Dockerfiles requieren `bun run docker:rebuild`.
 - La base de desarrollo es completamente local y no requiere una cuenta de Neon. La API conserva `@neondatabase/serverless`: en Compose, `NEON_FETCH_ENDPOINT=http://db-proxy:4444/sql` dirige `neon()` al proxy; fuera de Docker usa `http://localhost:4444/sql`; en producción se omite para usar Neon Cloud.
 - Redis Insight expone la UI de cache en `localhost:5540`. PostgreSQL, el proxy HTTP Neon, Redis TCP, REST de cache y MinIO también se publican solo en loopback para debugging.
 - PostgreSQL, Redis, Redis Insight y MinIO persisten mediante bind mounts bajo `./volumes`; `volumes-init` prepara los permisos al levantar Compose.
@@ -144,6 +146,7 @@ Ejecuta desde la raíz salvo que se indique lo contrario:
 | `bun run dev` | Iniciar web y API |
 | `bun run dev:api` | Iniciar solo API |
 | `bun run dev:web` | Iniciar solo web |
+| `bun run docker:dev` | Iniciar el stack local en primer plano con logs y recarga automática |
 | `bun run docker:rebuild` | Reconstruir, recrear y esperar el stack local completo |
 | `bun run format` | Aplicar Biome al repositorio |
 | `bun run lint` | Comprobar Biome sin modificar |

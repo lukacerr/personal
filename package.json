@@ -26,6 +26,7 @@
 		"dev": "bun run --parallel --filter @personal/api --filter @personal/web dev",
 		"dev:api": "bun --filter @personal/api dev",
 		"dev:web": "bun --filter @personal/web dev",
+		"docker:dev": "docker compose up --build",
 		"docker:rebuild": "docker compose up --build --force-recreate --remove-orphans --wait",
 		"format": "biome check --write .",
 		"lint": "biome check .",

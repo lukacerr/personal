@@ -10,4 +10,10 @@ export default defineConfig({
 	resolve: {
 		tsconfigPaths: true,
 	},
+	server: {
+		watch: {
+			usePolling: process.env.DOCKER_DEV === 'true',
+			interval: 250,
+		},
+	},
 });

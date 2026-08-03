@@ -39,13 +39,21 @@ Los defaults funcionan directamente, por lo que este archivo no es obligatorio. 
 cp apps/api/.env.example apps/api/.env
 ```
 
-3. Levanta el stack:
+3. Levanta el stack de desarrollo:
+
+```bash
+bun run docker:dev
+```
+
+La API corre con `bun --watch` y la web con React Router/Vite HMR. Las fuentes se montan desde el host; los cambios bajo `apps/api/src`, `apps/web/app` y `apps/web/public` se reflejan sin reconstruir imágenes. Las dependencias permanecen dentro de la imagen para no mezclar `node_modules` del host.
+
+Cuando cambien manifests, lockfile o configuración de contenedores, reconstruye y recrea el stack:
 
 ```bash
 bun run docker:rebuild
 ```
 
-Este comando reconstruye las imágenes, recrea todos los contenedores y espera sus healthchecks. Los datos bajo `./volumes` se conservan.
+Este comando espera los healthchecks y deja el stack corriendo en segundo plano. Los datos bajo `./volumes` se conservan. `api.Dockerfile` sigue reservado para la imagen compilada de producción de Cloud Run; Compose usa `dev.Dockerfile`.
 
 Compose configura la API con `DATABASE_URL=postgres://personal:personal-local-password@db:5432/personal` y `NEON_FETCH_ENDPOINT=http://db-proxy:4444/sql`. El segundo valor hace que `@neondatabase/serverless` envíe las consultas de `neon()` por HTTP al proxy local; en producción se omite y el driver usa el endpoint HTTPS de la URL de Neon Cloud.
 
