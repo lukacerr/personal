@@ -14,7 +14,6 @@ export const env = createEnv({
 			.default('development'),
 		PORT: z.coerce.number().int().min(1).max(65_535).default(8080),
 		DEPLOYMENT_URL: z.url().default('http://localhost:8080'),
-		WEB_URL: z.url().default('http://localhost:5173'),
 		LUKA_SECRET: z.string().min(1),
 		ALLOWED_MAILS: z
 			.array(z.email())

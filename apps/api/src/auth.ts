@@ -51,14 +51,6 @@ const googleRouter = new Elysia({ prefix: `/google` })
 	.get(
 		'/login',
 		async ({ oauth2, query }) => {
-			const redirectUrl = new URL(query.redirect);
-			const callbackUrl = new URL('/auth/callback', env.WEB_URL);
-			if (
-				redirectUrl.origin !== callbackUrl.origin ||
-				redirectUrl.pathname !== callbackUrl.pathname
-			)
-				throw new HttpError(422, 'INVALID_REDIRECT_ORIGIN');
-
 			const url = oauth2.createURL('Google', ['openid', 'profile', 'email']);
 			const state = url.searchParams.get('state');
 			if (!state) throw new HttpError(409, 'STATE_NOT_FOUND');
