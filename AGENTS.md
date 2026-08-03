@@ -28,9 +28,11 @@ Reglas de frontera:
 - Cada workspace declara sus propias dependencias. No instales dependencias de API en web ni dependencias de React en API.
 - La raíz contiene tooling compartido y el catálogo de versiones, no dependencias runtime de las aplicaciones.
 - Cuando una dependencia sea usada por varios workspaces o deba mantener identidad/versiones sincronizadas, agrégala al catálogo raíz y usa `catalog:` en cada workspace consumidor.
+- Los Dockerfiles que ejecutan un install congelado deben copiar el `package.json` de cada workspace listado en el lockfile, aunque el install esté filtrado; no copies sus fuentes ni instales sus dependencias.
 - El shell Tauri carga `https://personal.luka.software` directamente y no concede capacidades IPC a contenido remoto. Los cambios web no requieren un nuevo binario nativo; reconstruye el shell solo al cambiar Tauri, permisos, iconos o configuración nativa.
 - `apps/web/public/favicon.svg` es la fuente única de iconos web/nativos. Tras modificarlo, ejecuta `bun --filter @personal/native icons`; esto actualiza también los recursos del proyecto Android generado.
 - En Linux, el shell nativo reemplaza el `GDK_BACKEND=x11` del empaquetador por `wayland,x11` cuando existe `WAYLAND_DISPLAY`.
+- `tauri.linux.conf.json` deshabilita las decoraciones nativas de la ventana Linux; conserva las decoraciones de Windows en la configuración base.
 - Google OAuth no funciona dentro del webview embebido. No consideres utilizable la autenticación nativa hasta implementar navegador del sistema y retorno seguro por deep link/código de un solo uso.
 
 ## Stack Compartido

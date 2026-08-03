@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY package.json bun.lock bunfig.toml tsconfig.json ./
 COPY apps/api/package.json apps/api/package.json
+COPY apps/native/package.json apps/native/package.json
 COPY apps/web/package.json apps/web/package.json
 
 RUN bun install --frozen-lockfile --production --filter @personal/api

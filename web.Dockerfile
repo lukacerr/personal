@@ -8,6 +8,7 @@ COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 
 COPY package.json bun.lock bunfig.toml tsconfig.json ./
 COPY apps/api/package.json apps/api/package.json
+COPY apps/native/package.json apps/native/package.json
 COPY apps/web/package.json apps/web/package.json
 
 RUN bun install --frozen-lockfile --filter '!./' --filter @personal/web

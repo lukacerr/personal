@@ -9,4 +9,7 @@ volumes
 **/build
 **/coverage
 **/dist
+**/gen
+**/target
 **/node_modules
+**/.local-signing

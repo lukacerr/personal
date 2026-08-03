@@ -30,4 +30,11 @@ mod tests {
         std::env::remove_var("WAYLAND_DISPLAY");
         std::env::remove_var("GDK_BACKEND");
     }
+
+    #[test]
+    fn linux_window_has_no_native_decorations() {
+        let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+
+        assert!(!context.config().app.windows[0].decorations);
+    }
 }
