@@ -14,7 +14,7 @@ describe('Health', () => {
 		if (!data || !('cacheResponse' in data))
 			throw new Error('Expected a healthy infrastructure response');
 
-		expect(data?.cacheResponse).toBe('PONG');
-		expect(data?.storageResponse).toMatchObject({ name: 'luka' });
+		expect(data.cacheResponse).toBe('PONG');
+		expect(data.storageResponse).toMatchObject({ name: 'luka' });
 	});
 });
