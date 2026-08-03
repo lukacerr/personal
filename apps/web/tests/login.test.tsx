@@ -6,11 +6,16 @@ import { describe, expect, it, vi } from 'vitest';
 
 describe('Login', () => {
 	it('uses the LC favicon', () => {
-		expect(links()).toContainEqual({
-			rel: 'icon',
-			type: 'image/svg+xml',
-			href: '/favicon.svg',
-		});
+		expect(links()).toEqual(
+			expect.arrayContaining([
+				{
+					rel: 'icon',
+					type: 'image/svg+xml',
+					href: '/favicon.svg',
+				},
+				{ rel: 'manifest', href: '/manifest.webmanifest' },
+			]),
+		);
 	});
 
 	it('uses the dark theme by default', () => {

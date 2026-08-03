@@ -96,6 +96,7 @@ Convenciones web:
 - Las rutas `/login` y `/auth/callback` son públicas; las pantallas privadas viven bajo el layout pathless `_app`, que restaura la sesión antes de renderizar su `Outlet`.
 - La sesión web guarda únicamente el refresh token versionado en `localStorage`; el access token permanece en memoria. El callback OAuth recibe los tokens en el fragmento URL y reemplaza inmediatamente esa entrada del historial.
 - Usa `authenticatedApi` desde `@web/lib/authenticated-api` para endpoints privados. Ese cliente agrega el Bearer token, deduplica refreshes concurrentes, rota ambos tokens y limpia la sesión tras un `401` irrecuperable.
+- El build web ejecuta Workbox después de `react-router build`, cuando ya existe `build/client/index.html`. Precachea solo el app shell y assets estáticos para arranque offline; no agregues caché runtime para API ni datos dinámicos salvo pedido explícito.
 
 ## Tests Y TDD
 

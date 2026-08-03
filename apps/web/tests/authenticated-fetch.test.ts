@@ -55,7 +55,7 @@ describe('Authenticated requests', () => {
 		expect(onUnauthorized).toHaveBeenCalledOnce();
 	});
 
-	it('ends the session when the refresh request cannot reach the API', async () => {
+	it('preserves the session when the refresh request cannot reach the API', async () => {
 		const onUnauthorized = vi.fn();
 		const authenticatedFetch = createAuthenticatedFetch({
 			fetcher: async () => new Response(null, { status: 401 }),
@@ -69,7 +69,7 @@ describe('Authenticated requests', () => {
 		const response = await authenticatedFetch('http://localhost/private');
 
 		expect(response.status).toBe(401);
-		expect(onUnauthorized).toHaveBeenCalledOnce();
+		expect(onUnauthorized).not.toHaveBeenCalled();
 	});
 
 	it('shares one refresh across concurrent unauthorized requests', async () => {

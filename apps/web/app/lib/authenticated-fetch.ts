@@ -28,12 +28,16 @@ export function createAuthenticatedFetch({
 		const response = await request(getAccessToken());
 		if (response.status !== 401) return response;
 
-		refreshPromise ??= refreshAccessToken()
-			.catch(() => null)
-			.finally(() => {
-				refreshPromise = null;
-			});
-		const accessToken = await refreshPromise;
+		refreshPromise ??= refreshAccessToken().finally(() => {
+			refreshPromise = null;
+		});
+
+		let accessToken: string | null;
+		try {
+			accessToken = await refreshPromise;
+		} catch {
+			return response;
+		}
 		if (!accessToken) {
 			onUnauthorized();
 			return response;

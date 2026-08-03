@@ -1,4 +1,4 @@
-import { api } from '@web/lib/api';
+import { api, isTransientApiFailure } from '@web/lib/api';
 import type { SessionTokens } from '@web/lib/session';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
@@ -45,21 +45,18 @@ export const useAuthStore = create<AuthState>()(
 				const { refreshToken } = get();
 				if (!refreshToken) return null;
 
-				try {
-					const { data, error } = await api.auth['refresh-token'].post({
-						refreshToken,
-					});
-					if (error) {
-						get().clearSession();
-						return null;
-					}
+				const { data, error } = await api.auth['refresh-token'].post({
+					refreshToken,
+				});
+				if (error) {
+					if (isTransientApiFailure(error.status)) throw error;
 
-					get().setSession(data);
-					return data.at;
-				} catch {
 					get().clearSession();
 					return null;
 				}
+
+				get().setSession(data);
+				return data.at;
 			},
 			bootstrap: async () => {
 				await useAuthStore.persist.rehydrate();
@@ -68,7 +65,11 @@ export const useAuthStore = create<AuthState>()(
 					return;
 				}
 
-				await get().refreshSession();
+				try {
+					await get().refreshSession();
+				} catch {
+					set({ accessToken: null, status: 'authenticated' });
+				}
 			},
 		}),
 		{

@@ -21,6 +21,8 @@ VITE_API_URL=https://<api-domain>
 
 `SKIP_DEPENDENCY_INSTALL` evita el `npm install` automático; el script instala únicamente el workspace web con Bun y el lockfile congelado.
 
+El build ejecuta Workbox después de React Router para precachear `index.html` y los assets estáticos. Esto permite que la web y el shell Tauri arranquen sin conexión después de una primera apertura online. Las respuestas de API no se cachean y sus errores siguen manejándose en la UI.
+
 ## Entorno local con Docker
 
 El entorno de datos es completamente local: PostgreSQL 17 guarda sus datos en `./volumes/postgres` y un proxy HTTP traduce las consultas de `@neondatabase/serverless` hacia esa instancia. No requiere una cuenta ni credenciales de Neon Cloud. El proxy usa la imagen comunitaria `ghcr.io/timowilhelm/local-neon-http-proxy`, fijada por digest en Compose.

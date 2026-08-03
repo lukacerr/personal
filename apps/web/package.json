@@ -3,7 +3,8 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"build": "react-router build",
+		"build": "react-router build && bun run build:pwa",
+		"build:pwa": "bun scripts/build-pwa.ts",
 		"dev": "react-router dev",
 		"test": "vitest run",
 		"typecheck": "react-router typegen && tsc --noEmit"
@@ -40,6 +41,7 @@
 		"tailwindcss": "^4.2.2",
 		"typescript": "catalog:",
 		"vite": "^8.0.3",
-		"vitest": "^4.1.6"
+		"vitest": "^4.1.6",
+		"workbox-build": "^7.4.1"
 	}
 }

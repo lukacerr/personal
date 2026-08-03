@@ -2,6 +2,8 @@
 
 Minimal Tauri shell for `https://personal.luka.software`. It embeds no web assets and grants no Tauri IPC capabilities to the remote page, so web deployments update the application without rebuilding the shell.
 
+The deployed web app installs a Workbox Service Worker that precaches its app shell. After one successful online launch, the shell can start offline; API data is never cached and unavailable requests still fail normally.
+
 `apps/web/public/favicon.svg` is the single icon source. Regenerate desktop and Android assets after changing it:
 
 ```bash

@@ -3,3 +3,7 @@ import { treaty } from '@elysia/eden';
 import { env } from '@web/lib/env';
 
 export const api = treaty<App>(env.VITE_API_URL);
+
+export function isTransientApiFailure(status: number) {
+	return status >= 500;
+}

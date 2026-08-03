@@ -1,4 +1,6 @@
 import { env } from '@web/lib/env';
+import { registerServiceWorker } from '@web/lib/register-service-worker';
+import { useEffect } from 'react';
 import {
 	isRouteErrorResponse,
 	Links,
@@ -13,6 +15,7 @@ import './app.css';
 
 export const links: Route.LinksFunction = () => [
 	{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+	{ rel: 'manifest', href: '/manifest.webmanifest' },
 	{ rel: 'preconnect', href: 'https://fonts.googleapis.com' },
 	{
 		rel: 'preconnect',
@@ -44,6 +47,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+	useEffect(() => {
+		if (!env.DEV && 'serviceWorker' in navigator)
+			void registerServiceWorker(navigator.serviceWorker);
+	}, []);
+
 	return <Outlet />;
 }
 
