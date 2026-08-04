@@ -1,4 +1,3 @@
-import { Button } from '@web/components/ui/button';
 import {
 	Card,
 	CardContent,
@@ -6,12 +5,10 @@ import {
 	CardHeader,
 	CardTitle,
 } from '@web/components/ui/card';
-import { useAuthStore } from '@web/lib/auth-store';
 import {
 	BotIcon,
 	CalendarDaysIcon,
 	ChartNoAxesCombinedIcon,
-	LogOutIcon,
 	SaladIcon,
 } from 'lucide-react';
 
@@ -23,7 +20,7 @@ const systems = [
 	},
 	{
 		icon: ChartNoAxesCombinedIcon,
-		title: 'Finances',
+		title: 'Finance',
 		description: 'Accounts, movement and personal decisions.',
 	},
 	{
@@ -33,7 +30,7 @@ const systems = [
 	},
 	{
 		icon: BotIcon,
-		title: 'Agents',
+		title: 'Agent',
 		description: 'Automations connected to the whole system.',
 	},
 ];
@@ -49,31 +46,9 @@ export function meta() {
 }
 
 export default function Home() {
-	const clearSession = useAuthStore(({ clearSession }) => clearSession);
-
 	return (
-		<main className="min-h-svh bg-muted/35">
-			<header className="border-b bg-background">
-				<div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5 lg:px-10">
-					<div className="flex items-center gap-3">
-						<span className="grid size-8 place-items-center rounded-full bg-primary font-heading text-xs font-semibold text-primary-foreground">
-							L
-						</span>
-						<div>
-							<p className="font-heading text-sm font-semibold">
-								Personal systems
-							</p>
-							<p className="text-xs text-muted-foreground">Private workspace</p>
-						</div>
-					</div>
-					<Button variant="ghost" size="sm" onClick={clearSession}>
-						<LogOutIcon data-icon="inline-start" aria-hidden="true" />
-						Sign out
-					</Button>
-				</div>
-			</header>
-
-			<div className="mx-auto flex max-w-6xl flex-col gap-10 px-6 py-12 lg:px-10 lg:py-16">
+		<div className="flex flex-1 bg-muted/35">
+			<div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-10 sm:px-8 sm:py-12 lg:px-12 lg:py-16">
 				<section className="flex flex-col gap-3">
 					<p className="font-heading text-xs font-semibold tracking-[0.2em] text-muted-foreground uppercase">
 						Overview / 01
@@ -117,6 +92,6 @@ export default function Home() {
 					</div>
 				</section>
 			</div>
-		</main>
+		</div>
 	);
 }

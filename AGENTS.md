@@ -20,6 +20,7 @@ El repositorio es un monorepo Bun con linker aislado y tres workspaces:
 
 Reglas de frontera:
 
+- Salvo pedido explícito, el trabajo de producto nuevo se limita a `apps/api` y `apps/web`. No modifiques `apps/native`, Docker Compose, Dockerfiles, volúmenes ni la base de desarrollo como parte incidental de una feature.
 - La web es una SPA de React Router con `ssr: false`. No introduzcas loaders, actions o código que requiera un servidor de React Router.
 - La API escucha el `PORT` validado por T3 Env. Cloud Run define ese valor en producción.
 - `apps/api/src/index.ts` contiene la aplicación, los plugins, la infraestructura, `listen` y el tipo `App` que consume Eden. El alias `@api` apunta a este archivo; no separes el contrato en otro archivo salvo pedido explícito.
@@ -82,6 +83,7 @@ Convenciones API:
 - Tailwind CSS 4.
 - Shadcn configurado con estilo `base-luma`, primitivas Base UI y aliases `@web/*`.
 - Lucide para iconos.
+- Motion para transiciones ligeras de React y layout; usa `LazyMotion`/`domAnimation` y respeta `prefers-reduced-motion`.
 - Zustand para estado cliente compartido cuando sea necesario.
 - Eden Treaty para llamadas tipadas a la API.
 - T3 Env y Zod en `apps/web/app/lib/env.ts`.
@@ -91,10 +93,15 @@ Convenciones web:
 
 - Usa primero los building blocks existentes de Shadcn y Base UI. No recrees primitivas accesibles que la librería ya ofrece.
 - Preserva los tokens, aliases y patrones de `components.json` y `app/app.css`.
-- Construye interfaces responsive y accesibles; usa las skills de frontend, Shadcn, Tailwind y accesibilidad correspondientes.
+- Prefiere pocas palabras y jerarquía visual clara: iconos reconocibles, badges, breadcrumbs, highlights y negritas donde reduzcan tiempo de lectura; evita párrafos ornamentales y copy redundante.
+- Usa motion ligero, rápido y funcional para orientar cambios de estado o navegación. Prefiere transiciones CSS de componentes para microinteracciones y Motion cuando haya entrada/salida o cambios de layout; nunca sacrifiques `prefers-reduced-motion`.
+- Construye interfaces responsive, accesibles y con espacio generoso, no compactas. Deben tolerar ventanas desktop redimensionadas, móviles 22:9 y pantallas plegadas casi cuadradas sin solapamientos, targets pequeños ni dependencia de un único breakpoint.
+- Usa las skills de frontend, Shadcn, Tailwind y accesibilidad correspondientes al trabajar UI.
 - Usa `env` para configuración; no accedas directamente a `import.meta.env` fuera de `apps/web/app/lib/env.ts`.
 - Solo las variables `VITE_*` pueden llegar al navegador. Nunca importes secretos o módulos runtime de API en la web.
 - Usa el cliente Eden existente en lugar de escribir wrappers `fetch` sin tipado.
+- El shell privado usa el Sidebar oficial de Shadcn: off-canvas en móvil, colapsable a iconos y redimensionable entre 224 y 384 px en desktop. Su estado de apertura y ancho es efímero; no lo persistas en cookies ni junto a la sesión.
+- El shell privado incluye una command palette Shadcn/cmdk accesible con `Ctrl+Space` y desde el header. La navegación de soluciones reutiliza `appNavigation`; agrega futuros comandos como grupos de la misma paleta, sin duplicar ese registro.
 - Las rutas `/login` y `/auth/callback` son públicas; las pantallas privadas viven bajo el layout pathless `_app`, que restaura la sesión antes de renderizar su `Outlet`.
 - La sesión web guarda únicamente el refresh token versionado en `localStorage`; el access token permanece en memoria. El callback OAuth recibe los tokens en el fragmento URL y reemplaza inmediatamente esa entrada del historial.
 - Usa `authenticatedApi` desde `@web/lib/authenticated-api` para endpoints privados. Ese cliente agrega el Bearer token, deduplica refreshes concurrentes, rota ambos tokens y limpia la sesión tras un `401` irrecuperable.
@@ -132,6 +139,11 @@ Entorno local con Docker Compose:
 - `docker-compose.yml` levanta web, API, PostgreSQL 17, un proxy Neon HTTP local, MinIO y Redis detrás de un proxy REST compatible con Upstash.
 - Compose usa `dev.Dockerfile` para web/API: monta las fuentes, ejecuta `bun --watch` en API y React Router/Vite HMR en web. No reutilices ni conviertas `api.Dockerfile` en una imagen de desarrollo; es exclusivamente la imagen compilada de Cloud Run.
 - Las dependencias de desarrollo quedan dentro de la imagen y no se montan desde el host. Los cambios de código tienen recarga automática; cambios en manifests, lockfile o Dockerfiles requieren `bun run docker:rebuild`.
+- Cuando agregues o cambies dependencias durante una tarea, ejecuta inmediatamente `bun run docker:rebuild` en vez de levantar un servidor host paralelo, para que la instancia visible en `localhost:5173` permanezca actualizada para el usuario.
+- Para debugging, asume primero que el stack completo ya está levantado con auto-reload. Consulta `docker compose ps` y los logs de `web`/`api` antes de iniciar procesos duplicados o reconstruir servicios.
+- La API local está disponible en `http://localhost:8080`. En `development`, `authPlugin` inyecta la identidad local y no requiere access token, por lo que se pueden probar endpoints directamente.
+- La web local está disponible en `http://localhost:5173`. Usa Puppeteer en scripts temporales para inspección visual, interacción y pruebas responsive; no agregues esos scripts ni Puppeteer al producto salvo que se conviertan explícitamente en tests mantenidos.
+- Bun y Python mediante `uv` están disponibles para automatización puntual de debugging; evita agregar dependencias al repo cuando un script temporal sea suficiente.
 - La base de desarrollo es completamente local y no requiere una cuenta de Neon. La API conserva `@neondatabase/serverless`: en Compose, `NEON_FETCH_ENDPOINT=http://db-proxy:4444/sql` dirige `neon()` al proxy; fuera de Docker usa `http://localhost:4444/sql`; en producción se omite para usar Neon Cloud.
 - Redis Insight expone la UI de cache en `localhost:5540`. PostgreSQL, el proxy HTTP Neon, Redis TCP, REST de cache y MinIO también se publican solo en loopback para debugging.
 - PostgreSQL, Redis, Redis Insight y MinIO persisten mediante bind mounts bajo `./volumes`; `volumes-init` prepara los permisos al levantar Compose.
