@@ -6,6 +6,7 @@ import {
 	GraduationCapIcon,
 	KeyRoundIcon,
 	LayoutDashboardIcon,
+	NotebookPenIcon,
 	SaladIcon,
 } from 'lucide-react';
 
@@ -17,10 +18,22 @@ export const appNavigation = [
 		icon: LayoutDashboardIcon,
 	},
 	{
+		label: 'Agent',
+		path: '/agent',
+		description: 'Work with your personal agent and MCP tools.',
+		icon: BotIcon,
+	},
+	{
 		label: 'Calendar',
 		path: '/calendar',
 		description: 'Schedule and organize tasks by day.',
 		icon: CalendarDaysIcon,
+	},
+	{
+		label: 'Notes',
+		path: '/notes',
+		description: 'Write and connect simple Markdown notes.',
+		icon: NotebookPenIcon,
 	},
 	{
 		label: 'Finance',
@@ -29,10 +42,10 @@ export const appNavigation = [
 		icon: ChartNoAxesCombinedIcon,
 	},
 	{
-		label: 'Credentials',
-		path: '/credentials',
-		description: 'Store and recover credentials securely.',
-		icon: KeyRoundIcon,
+		label: 'Nutrition',
+		path: '/nutrition',
+		description: 'Track diet, calories and weight.',
+		icon: SaladIcon,
 	},
 	{
 		label: 'Storage',
@@ -41,22 +54,16 @@ export const appNavigation = [
 		icon: FolderOpenIcon,
 	},
 	{
+		label: 'Credentials',
+		path: '/credentials',
+		description: 'Store and recover credentials securely.',
+		icon: KeyRoundIcon,
+	},
+	{
 		label: 'Studyo',
 		path: '/studyo',
 		description: 'Build AI-powered study material for exams.',
 		icon: GraduationCapIcon,
-	},
-	{
-		label: 'Nutrition',
-		path: '/nutrition',
-		description: 'Track diet, calories and weight.',
-		icon: SaladIcon,
-	},
-	{
-		label: 'Agent',
-		path: '/agent',
-		description: 'Work with your personal agent and MCP tools.',
-		icon: BotIcon,
 	},
 ] as const;
 

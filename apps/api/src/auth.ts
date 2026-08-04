@@ -39,13 +39,18 @@ const jwtPlugin = new Elysia()
 
 const googleRouter = new Elysia({ prefix: `/google` })
 	.use(
-		oauth2({
-			Google: [
-				env.GOOGLE_CLIENT_ID,
-				env.GOOGLE_CLIENT_SECRET,
-				`${env.DEPLOYMENT_URL}/auth/google/callback`,
-			],
-		}),
+		oauth2(
+			{
+				Google: [
+					env.GOOGLE_CLIENT_ID,
+					env.GOOGLE_CLIENT_SECRET,
+					`${env.DEPLOYMENT_URL}/auth/google/callback`,
+				],
+			},
+			{
+				cookie: { secure: env.NODE_ENV === 'production' },
+			},
+		),
 	)
 	.use(jwtPlugin)
 	.get(

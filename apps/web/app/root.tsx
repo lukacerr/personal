@@ -48,8 +48,21 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
 	useEffect(() => {
-		if (!env.DEV && 'serviceWorker' in navigator)
-			void registerServiceWorker(navigator.serviceWorker);
+		if (env.DEV || !('serviceWorker' in navigator)) return;
+
+		let cleanup: (() => void) | undefined;
+		let disposed = false;
+		void registerServiceWorker(navigator.serviceWorker).then(
+			(removeListener) => {
+				if (disposed) removeListener();
+				else cleanup = removeListener;
+			},
+		);
+
+		return () => {
+			disposed = true;
+			cleanup?.();
+		};
 	}, []);
 
 	return <Outlet />;

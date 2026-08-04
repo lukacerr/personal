@@ -30,7 +30,7 @@ Reglas de frontera:
 - La raíz contiene tooling compartido y el catálogo de versiones, no dependencias runtime de las aplicaciones.
 - Cuando una dependencia sea usada por varios workspaces o deba mantener identidad/versiones sincronizadas, agrégala al catálogo raíz y usa `catalog:` en cada workspace consumidor.
 - Los Dockerfiles que ejecutan un install congelado deben copiar el `package.json` de cada workspace listado en el lockfile, aunque el install esté filtrado; no copies sus fuentes ni instales sus dependencias.
-- El shell Tauri carga `https://personal.luka.software` directamente y no concede capacidades IPC generales a contenido remoto. La única excepción es `core:webview:allow-set-webview-zoom` en Linux, restringida a la ventana `main`; la capability necesita `local: true` porque Tauri clasifica así las llamadas de su polyfill inyectado, y mantiene el origen remoto explícito. Los cambios web no requieren un nuevo binario nativo; reconstruye el shell solo al cambiar Tauri, permisos, iconos o configuración nativa.
+- El shell Tauri prueba primero `http://localhost:5173/.well-known/personal-app.json` y usa la web local solo si coincide exactamente con el marker de Personal; ante timeout, puerto cerrado u otra app cae a `https://personal.luka.software`. No concede capacidades IPC generales a contenido remoto. La única excepción es `core:webview:allow-set-webview-zoom` en Linux, restringida a la ventana `main`; la capability necesita `local: true` porque Tauri clasifica así las llamadas de su polyfill inyectado, y mantiene el origen remoto explícito. Los cambios web no requieren un nuevo binario nativo; reconstruye el shell solo al cambiar Tauri, permisos, iconos o configuración nativa.
 - Las ventanas Tauri usan `backgroundColor: [0, 0, 0, 255]` para evitar un flash blanco antes de que cargue la web remota; conserva el valor en la configuración base y en el override Linux.
 - `apps/web/public/favicon.svg` es la fuente única de iconos web/nativos. Tras modificarlo, ejecuta `bun --filter @personal/native icons`; esto actualiza también los recursos del proyecto Android generado.
 - El proyecto Android apunta a SDK 36 y usa edge-to-edge obligatorio. Conserva el manejo de `systemBars` y `displayCutout` en `MainActivity.kt` para que el WebView no quede debajo de las barras del sistema.
@@ -74,6 +74,7 @@ Convenciones API:
 - Para proteger un router, importa `authPlugin` desde `@api/auth` y registra `.use(authPlugin)` antes de sus rutas privadas. `authPlugin` es un callback de Elysia, no una factory; no lo invoques como `authPlugin()`.
 - En `production`, `authPlugin` exige un Bearer token válido y expone `authPayload`. En `development`, no exige token e inyecta la identidad local de desarrollo; no reproduzcas ese bypass fuera del plugin.
 - Mantén los endpoints públicos explícitamente fuera del alcance de `authPlugin`, preferiblemente en un router separado.
+- Las cookies temporales OAuth (`state`/PKCE) conservan `HttpOnly` y `SameSite=Lax`; usan `Secure` en producción, pero no en development/test porque el callback local corre sobre HTTP.
 
 ## Stack Web
 
@@ -99,6 +100,7 @@ Convenciones web:
 - Usa las skills de frontend, Shadcn, Tailwind y accesibilidad correspondientes al trabajar UI.
 - Usa `env` para configuración; no accedas directamente a `import.meta.env` fuera de `apps/web/app/lib/env.ts`.
 - Solo las variables `VITE_*` pueden llegar al navegador. Nunca importes secretos o módulos runtime de API en la web.
+- `VITE_ENV` acepta `development`/`production` y por defecto es `production`; Compose define `development`, mientras Cloudflare no necesita configurarla. El header muestra el entorno para distinguir web local y cloud.
 - Usa el cliente Eden existente en lugar de escribir wrappers `fetch` sin tipado.
 - El shell privado usa el Sidebar oficial de Shadcn: off-canvas en móvil, colapsable a iconos y redimensionable entre 224 y 384 px en desktop. Su estado de apertura y ancho es efímero; no lo persistas en cookies ni junto a la sesión.
 - El shell privado incluye una command palette Shadcn/cmdk accesible con `Ctrl+Space` y desde el header. La navegación de soluciones reutiliza `appNavigation`; agrega futuros comandos como grupos de la misma paleta, sin duplicar ese registro.
@@ -106,6 +108,7 @@ Convenciones web:
 - La sesión web guarda únicamente el refresh token versionado en `localStorage`; el access token permanece en memoria. El callback OAuth recibe los tokens en el fragmento URL y reemplaza inmediatamente esa entrada del historial.
 - Usa `authenticatedApi` desde `@web/lib/authenticated-api` para endpoints privados. Ese cliente agrega el Bearer token, deduplica refreshes concurrentes, rota ambos tokens y limpia la sesión tras un `401` irrecuperable.
 - El build web ejecuta Workbox después de `react-router build`, cuando ya existe `build/client/index.html`. Precachea solo el app shell y assets estáticos para arranque offline; no agregues caché runtime para API ni datos dinámicos salvo pedido explícito.
+- El registro del Service Worker fuerza `updateViaCache: 'none'`, comprueba actualizaciones al abrir y al volver a primer plano, y recarga una sola vez cuando un worker nuevo toma control. Conserva `/sw.js` con `Cache-Control: no-cache, no-store, must-revalidate` en `_headers`.
 
 ## Tests Y TDD
 
@@ -143,6 +146,7 @@ Entorno local con Docker Compose:
 - Para debugging, asume primero que el stack completo ya está levantado con auto-reload. Consulta `docker compose ps` y los logs de `web`/`api` antes de iniciar procesos duplicados o reconstruir servicios.
 - La API local está disponible en `http://localhost:8080`. En `development`, `authPlugin` inyecta la identidad local y no requiere access token, por lo que se pueden probar endpoints directamente.
 - La web local está disponible en `http://localhost:5173`. Usa Puppeteer en scripts temporales para inspección visual, interacción y pruebas responsive; no agregues esos scripts ni Puppeteer al producto salvo que se conviertan explícitamente en tests mantenidos.
+- Para probar el shell Android contra desarrollo, conecta ADB por USB o Wireless Debugging y ejecuta `bun run native:android:connect`; valida el marker, configura `adb reverse` para web (`5173`) y API (`8080`) y reinicia la app para repetir el probe local. Compartir Wi-Fi sin una conexión ADB no redirige el `localhost` del teléfono. El marker estático evita confundir otro servidor en el mismo puerto con Personal.
 - Bun y Python mediante `uv` están disponibles para automatización puntual de debugging; evita agregar dependencias al repo cuando un script temporal sea suficiente.
 - La base de desarrollo es completamente local y no requiere una cuenta de Neon. La API conserva `@neondatabase/serverless`: en Compose, `NEON_FETCH_ENDPOINT=http://db-proxy:4444/sql` dirige `neon()` al proxy; fuera de Docker usa `http://localhost:4444/sql`; en producción se omite para usar Neon Cloud.
 - Redis Insight expone la UI de cache en `localhost:5540`. PostgreSQL, el proxy HTTP Neon, Redis TCP, REST de cache y MinIO también se publican solo en loopback para debugging.
@@ -173,6 +177,7 @@ Ejecuta desde la raíz salvo que se indique lo contrario:
 | `bun run build:native:linux` | Construir AppImage en Linux con prerequisitos Tauri |
 | `bun run build:native:windows` | Cross-compilar el `.exe` portable con `cargo-xwin` |
 | `bun run build:native:android` | Construir APK arm64 con SDK/NDK configurados |
+| `bun run native:android:connect` | Exponer web/API locales a un Android conectado por ADB |
 | `bun run precommit` | Ejecutar lint-staged, typecheck y tests |
 
 Los scripts `bun run mig` y `bun run mig:push` están disponibles desde la raíz y desde `apps/api`, pero son exclusivamente para uso humano.

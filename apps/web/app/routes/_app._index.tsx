@@ -5,35 +5,9 @@ import {
 	CardHeader,
 	CardTitle,
 } from '@web/components/ui/card';
-import {
-	BotIcon,
-	CalendarDaysIcon,
-	ChartNoAxesCombinedIcon,
-	SaladIcon,
-} from 'lucide-react';
+import { appNavigation } from '@web/lib/app-navigation';
 
-const systems = [
-	{
-		icon: CalendarDaysIcon,
-		title: 'Calendar',
-		description: 'Time, plans and the shape of the week.',
-	},
-	{
-		icon: ChartNoAxesCombinedIcon,
-		title: 'Finance',
-		description: 'Accounts, movement and personal decisions.',
-	},
-	{
-		icon: SaladIcon,
-		title: 'Nutrition',
-		description: 'Meals, calories and long-term signals.',
-	},
-	{
-		icon: BotIcon,
-		title: 'Agent',
-		description: 'Automations connected to the whole system.',
-	},
-];
+const systems = appNavigation.filter(({ path }) => path !== '/');
 
 export function meta() {
 	return [
@@ -67,9 +41,9 @@ export default function Home() {
 						Personal systems
 					</h2>
 					<div className="grid gap-4 sm:grid-cols-2">
-						{systems.map(({ icon: Icon, title, description }, index) => (
+						{systems.map(({ icon: Icon, label, description }, index) => (
 							<Card
-								key={title}
+								key={label}
 								className="min-h-48 justify-between shadow-none"
 							>
 								<CardHeader>
@@ -79,7 +53,7 @@ export default function Home() {
 											0{index + 1}
 										</span>
 									</div>
-									<CardTitle>{title}</CardTitle>
+									<CardTitle>{label}</CardTitle>
 									<CardDescription>{description}</CardDescription>
 								</CardHeader>
 								<CardContent>

@@ -21,6 +21,8 @@ VITE_API_URL=https://<api-domain>
 
 `SKIP_DEPENDENCY_INSTALL` evita el `npm install` automático; el script instala únicamente el workspace web con Bun y el lockfile congelado.
 
+`VITE_ENV` es opcional y usa `production` por defecto, por lo que no debe configurarse en Cloudflare. Compose lo establece como `development`; el header muestra `PROD` o `DEV` para identificar qué build está cargada.
+
 El build ejecuta Workbox después de React Router para precachear `index.html` y los assets estáticos. Esto permite que la web y el shell Tauri arranquen sin conexión después de una primera apertura online. Las respuestas de API no se cachean y sus errores siguen manejándose en la UI.
 
 ## Entorno local con Docker
@@ -48,6 +50,8 @@ bun run docker:dev
 ```
 
 La API corre con `bun --watch` y la web con React Router/Vite HMR. Las fuentes se montan desde el host; los cambios bajo `apps/api/src`, `apps/web/app` y `apps/web/public` se reflejan sin reconstruir imágenes. Las dependencias permanecen dentro de la imagen para no mezclar `node_modules` del host.
+
+Para probar la APK contra este entorno, conecta Android por ADB y ejecuta `bun run native:android:connect`. El comando revierte los puertos `5173` y `8080` y reinicia la app; `localhost` dentro de Android apunta al teléfono, no a la PC. En Android 11+ ADB puede conectarse por Wi-Fi mediante `adb pair`/`adb connect`, sin cable USB y sin publicar web/API en la LAN.
 
 Cuando cambien manifests, lockfile o configuración de contenedores, reconstruye y recrea el stack:
 

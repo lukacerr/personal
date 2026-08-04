@@ -32,6 +32,7 @@
 		"lint": "biome check .",
 		"mig": "bun --filter @personal/api mig",
 		"mig:push": "bun --filter @personal/api mig:push",
+		"native:android:connect": "bun --filter @personal/native android:connect",
 		"precommit": "lint-staged && bun run typecheck && bun run test",
 		"prepare": "husky",
 		"test": "bun run --parallel --filter @personal/api --filter @personal/web test",

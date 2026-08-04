@@ -18,3 +18,23 @@ describe('Health', () => {
 		expect(data.storageResponse).toMatchObject({ name: 'luka' });
 	});
 });
+
+describe('OAuth', () => {
+	it('sets localhost-compatible state cookies outside production', async () => {
+		const redirect = encodeURIComponent(
+			'http://localhost:5173/auth/callback?returnTo=%2F',
+		);
+		const response = await app.handle(
+			new Request(`http://localhost/auth/google/login?redirect=${redirect}`),
+		);
+		const cookies = response.headers.getSetCookie();
+
+		expect(response.status).toBe(302);
+		expect(cookies).toHaveLength(2);
+		for (const cookie of cookies) {
+			expect(cookie).toContain('HttpOnly');
+			expect(cookie).toContain('SameSite=Lax');
+			expect(cookie).not.toContain('Secure');
+		}
+	});
+});

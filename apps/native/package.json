@@ -3,6 +3,7 @@
 	"private": true,
 	"version": "0.1.0",
 	"scripts": {
+		"android:connect": "sh scripts/android-connect.sh",
 		"icons": "tauri icon ../web/public/favicon.svg",
 		"native:android": "tauri android build --apk --target aarch64 --ci",
 		"native:linux": "tauri build --bundles appimage",

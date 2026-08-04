@@ -9,13 +9,14 @@ describe('app navigation', () => {
 	it('exposes the private product areas at stable static paths', () => {
 		expect(appNavigation.map(({ label, path }) => ({ label, path }))).toEqual([
 			{ label: 'Overview', path: '/' },
-			{ label: 'Calendar', path: '/calendar' },
-			{ label: 'Finance', path: '/finance' },
-			{ label: 'Credentials', path: '/credentials' },
-			{ label: 'Storage', path: '/storage' },
-			{ label: 'Studyo', path: '/studyo' },
-			{ label: 'Nutrition', path: '/nutrition' },
 			{ label: 'Agent', path: '/agent' },
+			{ label: 'Calendar', path: '/calendar' },
+			{ label: 'Notes', path: '/notes' },
+			{ label: 'Finance', path: '/finance' },
+			{ label: 'Nutrition', path: '/nutrition' },
+			{ label: 'Storage', path: '/storage' },
+			{ label: 'Credentials', path: '/credentials' },
+			{ label: 'Studyo', path: '/studyo' },
 		]);
 	});
 

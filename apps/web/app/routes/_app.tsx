@@ -1,5 +1,6 @@
 import { AppBreadcrumb } from '@web/components/app-breadcrumb';
 import { AppCommandPalette } from '@web/components/app-command-palette';
+import { AppEnvironmentBadge } from '@web/components/app-environment-badge';
 import { AppSidebar } from '@web/components/app-sidebar';
 import { AuthLoading } from '@web/components/auth-loading';
 import {
@@ -9,6 +10,7 @@ import {
 } from '@web/components/ui/sidebar';
 import { TooltipProvider } from '@web/components/ui/tooltip';
 import { useAuthStore } from '@web/lib/auth-store';
+import { env } from '@web/lib/env';
 import { createLoginPath } from '@web/lib/session';
 import { domAnimation, LazyMotion, m } from 'motion/react';
 import { useEffect } from 'react';
@@ -44,6 +46,7 @@ export default function AuthenticatedLayout() {
 						<div className="min-w-0 flex-1">
 							<AppBreadcrumb pathname={location.pathname} />
 						</div>
+						<AppEnvironmentBadge environment={env.VITE_ENV} />
 						<AppCommandPalette />
 					</header>
 					<LazyMotion features={domAnimation} strict>

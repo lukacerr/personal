@@ -11,6 +11,7 @@ export default defineConfig({
 		tsconfigPaths: true,
 	},
 	server: {
+		host: '0.0.0.0',
 		watch: {
 			usePolling: process.env.DOCKER_DEV === 'true',
 			interval: 250,
