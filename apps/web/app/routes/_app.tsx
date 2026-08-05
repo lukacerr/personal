@@ -1,3 +1,4 @@
+import { AppAvailabilityBadges } from '@web/components/app-availability-badges';
 import { AppBreadcrumb } from '@web/components/app-breadcrumb';
 import { AppCommandPalette } from '@web/components/app-command-palette';
 import { AppEnvironmentBadge } from '@web/components/app-environment-badge';
@@ -10,6 +11,7 @@ import {
 } from '@web/components/ui/sidebar';
 import { TooltipProvider } from '@web/components/ui/tooltip';
 import { useAuthStore } from '@web/lib/auth-store';
+import { useApiHealth, usePwaAvailability } from '@web/lib/availability';
 import { env } from '@web/lib/env';
 import { createLoginPath } from '@web/lib/session';
 import { domAnimation, LazyMotion, m } from 'motion/react';
@@ -20,6 +22,8 @@ export default function AuthenticatedLayout() {
 	const status = useAuthStore(({ status }) => status);
 	const bootstrap = useAuthStore(({ bootstrap }) => bootstrap);
 	const location = useLocation();
+	const pwaAvailability = usePwaAvailability();
+	const apiHealth = useApiHealth();
 
 	useEffect(() => {
 		if (status === 'booting') void bootstrap();
@@ -41,12 +45,18 @@ export default function AuthenticatedLayout() {
 				</a>
 				<AppSidebar />
 				<SidebarInset id="main-content" tabIndex={-1} className="min-w-0">
-					<header className="flex h-16 shrink-0 items-center gap-3 border-b px-4 sm:px-6">
+					<header className="flex h-16 shrink-0 items-center gap-2 overflow-hidden border-b px-4 sm:gap-3 sm:px-6">
 						<SidebarTrigger className="size-11 md:size-8" />
 						<div className="min-w-0 flex-1">
 							<AppBreadcrumb pathname={location.pathname} />
 						</div>
-						<AppEnvironmentBadge environment={env.VITE_ENV} />
+						<div className="flex shrink-0 items-center gap-1 sm:gap-2">
+							<AppEnvironmentBadge environment={env.VITE_ENV} />
+							<AppAvailabilityBadges
+								pwaAvailability={pwaAvailability}
+								apiHealth={apiHealth}
+							/>
+						</div>
 						<AppCommandPalette />
 					</header>
 					<LazyMotion features={domAnimation} strict>

@@ -25,6 +25,7 @@ Reglas de frontera:
 - La API escucha el `PORT` validado por T3 Env. Cloud Run define ese valor en producción.
 - `apps/api/src/index.ts` contiene la aplicación, los plugins, la infraestructura, `listen` y el tipo `App` que consume Eden. El alias `@api` apunta a este archivo; no separes el contrato en otro archivo salvo pedido explícito.
 - La web importa `App` solo como tipo y crea el cliente en `apps/web/app/lib/api.ts` con Eden Treaty.
+- Deriva los tipos de respuestas HTTP desde Eden Treaty; no dupliques contratos de API manualmente ni los ocultes con assertions. Cuando el cliente reciba una unión de respuestas, discrimínala por `status` y/o guards de forma antes de usar sus datos.
 - Usa `@api`, `@api/*`, `@web` y `@web/*`. Evita imports ascendentes con `../`; los imports locales con `./` son válidos.
 - Cada workspace declara sus propias dependencias. No instales dependencias de API en web ni dependencias de React en API.
 - La raíz contiene tooling compartido y el catálogo de versiones, no dependencias runtime de las aplicaciones.
@@ -100,7 +101,7 @@ Convenciones web:
 - Usa las skills de frontend, Shadcn, Tailwind y accesibilidad correspondientes al trabajar UI.
 - Usa `env` para configuración; no accedas directamente a `import.meta.env` fuera de `apps/web/app/lib/env.ts`.
 - Solo las variables `VITE_*` pueden llegar al navegador. Nunca importes secretos o módulos runtime de API en la web.
-- `VITE_ENV` acepta `development`/`production` y por defecto es `production`; Compose define `development`, mientras Cloudflare no necesita configurarla. El header muestra el entorno para distinguir web local y cloud.
+- `VITE_ENV` acepta `development`/`production` y por defecto es `production`; Compose define `development`, mientras Cloudflare no necesita configurarla. El header muestra el entorno para distinguir web local y cloud, la conectividad de la PWA mediante `navigator.onLine` y la última salud remota de `/health`. El app shell puede estar disponible offline sin que la API lo esté.
 - Usa el cliente Eden existente en lugar de escribir wrappers `fetch` sin tipado.
 - El shell privado usa el Sidebar oficial de Shadcn: off-canvas en móvil, colapsable a iconos y redimensionable entre 224 y 384 px en desktop. Su estado de apertura y ancho es efímero; no lo persistas en cookies ni junto a la sesión.
 - El shell privado incluye una command palette Shadcn/cmdk accesible con `Ctrl+Space` y desde el header. La navegación de soluciones reutiliza `appNavigation`; agrega futuros comandos como grupos de la misma paleta, sin duplicar ese registro.

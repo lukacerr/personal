@@ -11,11 +11,13 @@ describe('Health', () => {
 		expect(status).toBe(200);
 		expect(error).toBeNull();
 
-		if (!data || !('cacheResponse' in data))
+		if (!data || !('services' in data))
 			throw new Error('Expected a healthy infrastructure response');
 
-		expect(data.cacheResponse).toBe('PONG');
-		expect(data.storageResponse).toMatchObject({ name: 'luka' });
+		expect(data.status).toBe('operational');
+		expect(data.services.dbCheck).toBe(true);
+		expect(data.services.cacheCheck).toBe(true);
+		expect(data.services.storageCheck).toBe(true);
 	});
 });
 

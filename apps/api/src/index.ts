@@ -53,12 +53,33 @@ export const app = new Elysia()
 	.use(authRouter)
 	.get(
 		'/health',
-		async () => ({
-			timestamp: new Date().toISOString(),
-			dbResponse: JSON.stringify(await db.execute('SELECT true')),
-			cacheResponse: (await cache.exec(['PING'])) as 'PONG',
-			storageResponse: await storage.list({ maxKeys: 1 }),
-		}),
+		async ({ status }) => {
+			const [dbCheck, cacheCheck, storageCheck] = await Promise.all([
+				db
+					.execute('SELECT true')
+					.then(() => true)
+					.catch(() => false),
+				cache
+					.exec(['PING'])
+					.then((result) => result === 'PONG')
+					.catch(() => false),
+				storage
+					.list({ maxKeys: 1 })
+					.then(() => true)
+					.catch(() => false),
+			]);
+
+			const services = { dbCheck, cacheCheck, storageCheck };
+			const isOperational = Object.values(services).every(Boolean);
+
+			const response = {
+				status: isOperational ? 'operational' : 'partial',
+				checkedAt: new Date().toISOString(),
+				services,
+			};
+
+			return isOperational ? response : status(503, response);
+		},
 		{ detail: { summary: 'Health check' } },
 	);
 

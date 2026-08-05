@@ -3,6 +3,7 @@ import {
 	getBreadcrumbItems,
 	getNavigationItem,
 } from '@web/lib/app-navigation';
+import { HouseIcon, NotebookPenIcon } from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 
 describe('app navigation', () => {
@@ -27,10 +28,19 @@ describe('app navigation', () => {
 	});
 
 	it('builds a workspace breadcrumb for product pages', () => {
-		expect(getBreadcrumbItems('/calendar')).toEqual([
+		const notesItems = getBreadcrumbItems('/notes');
+
+		expect(
+			notesItems.map((item) => ({
+				label: item.label,
+				path: 'path' in item ? item.path : undefined,
+			})),
+		).toEqual([
 			{ label: 'Personal', path: '/' },
-			{ label: 'Calendar' },
+			{ label: 'Notes', path: undefined },
 		]);
-		expect(getBreadcrumbItems('/')).toEqual([{ label: 'Personal' }]);
+		expect(notesItems[0]?.icon).toBe(HouseIcon);
+		expect(notesItems[1]?.icon).toBe(NotebookPenIcon);
+		expect(getBreadcrumbItems('/')[0]?.icon).toBe(HouseIcon);
 	});
 });

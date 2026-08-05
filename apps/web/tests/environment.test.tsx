@@ -15,5 +15,6 @@ describe('Application environment', () => {
 
 		expect(html).toContain('aria-label="Environment: development"');
 		expect(html).toContain('>DEV<');
+		expect(html).toContain('class="hidden sm:inline"');
 	});
 });

@@ -4,6 +4,7 @@ import {
 	ChartNoAxesCombinedIcon,
 	FolderOpenIcon,
 	GraduationCapIcon,
+	HouseIcon,
 	KeyRoundIcon,
 	LayoutDashboardIcon,
 	NotebookPenIcon,
@@ -73,7 +74,11 @@ export function getNavigationItem(pathname: string) {
 
 export function getBreadcrumbItems(pathname: string) {
 	const item = getNavigationItem(pathname);
-	if (!item || item.path === '/') return [{ label: 'Personal' }] as const;
+	if (!item || item.path === '/')
+		return [{ label: 'Personal', icon: HouseIcon }] as const;
 
-	return [{ label: 'Personal', path: '/' }, { label: item.label }] as const;
+	return [
+		{ label: 'Personal', path: '/', icon: HouseIcon },
+		{ label: item.label, icon: item.icon },
+	] as const;
 }
