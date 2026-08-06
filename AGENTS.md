@@ -6,6 +6,8 @@ Este repositorio es la plataforma personal de Luka. Alojará herramientas conect
 
 El sistema es para uso personal, pero se despliega en Internet. No sacrifiques autenticación, validación, manejo de secretos, observabilidad ni seguridad por asumir que habrá un solo usuario.
 
+El producto es single-user: el único usuario es Luka. Salvo pedido explícito, las capacidades futuras no requieren conceptos ni columnas de `owner`, `user` o `tenant`.
+
 Este archivo es documentación viva. Actualízalo cuando el trabajo o las correcciones del usuario revelen una convención, restricción, comando o decisión arquitectónica durable. No agregues detalles temporales de una tarea ni conserves información obsoleta.
 
 ## Arquitectura
@@ -26,6 +28,7 @@ Reglas de frontera:
 - `apps/api/src/index.ts` contiene la aplicación, los plugins, la infraestructura, `listen` y el tipo `App` que consume Eden. El alias `@api` apunta a este archivo; no separes el contrato en otro archivo salvo pedido explícito.
 - La web importa `App` solo como tipo y crea el cliente en `apps/web/app/lib/api.ts` con Eden Treaty.
 - Deriva los tipos de respuestas HTTP desde Eden Treaty; no dupliques contratos de API manualmente ni los ocultes con assertions. Cuando el cliente reciba una unión de respuestas, discrimínala por `status` y/o guards de forma antes de usar sus datos.
+- Infiere desde Eden Treaty los tipos compartidos entre web y API siempre que sea posible; no recrees tipos que ya expone el contrato de la API.
 - Usa `@api`, `@api/*`, `@web` y `@web/*`. Evita imports ascendentes con `../`; los imports locales con `./` son válidos.
 - Cada workspace declara sus propias dependencias. No instales dependencias de API en web ni dependencias de React en API.
 - La raíz contiene tooling compartido y el catálogo de versiones, no dependencias runtime de las aplicaciones.

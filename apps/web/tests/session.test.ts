@@ -6,7 +6,11 @@ import {
 	getOAuthSessionFromHash,
 	getSafeReturnTo,
 } from '@web/lib/session';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@web/lib/env', () => ({
+	env: { VITE_ENV: 'development' },
+}));
 
 const tokens = {
 	at: 'eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Imx1a2FAbG9jYWxob3N0In0.signature',
@@ -14,6 +18,17 @@ const tokens = {
 };
 
 describe('OAuth session', () => {
+	it('bootstraps a local development session', async () => {
+		const { useAuthStore } = await import('@web/lib/auth-store');
+
+		await useAuthStore.getState().bootstrap();
+
+		expect(useAuthStore.getState()).toMatchObject({
+			accessToken: 'dev',
+			status: 'authenticated',
+		});
+	});
+
 	it('persists only the refresh token', () => {
 		expect(
 			getPersistedAuthState({
