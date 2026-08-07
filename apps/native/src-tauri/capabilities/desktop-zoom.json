@@ -5,7 +5,7 @@
 	"local": true,
 	"windows": ["main"],
 	"remote": {
-		"urls": ["https://personal.luka.software/*"]
+		"urls": ["https://personal.luka.software/*", "http://localhost:5173/*"]
 	},
 	"permissions": ["core:webview:allow-set-webview-zoom"],
 	"platforms": ["linux"]

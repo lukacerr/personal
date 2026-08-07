@@ -4,6 +4,9 @@
 @import "@fontsource-variable/noto-sans";
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
+@import "@blocknote/shadcn/style.css";
+
+@source "../node_modules/@blocknote/shadcn";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -16,6 +19,122 @@ html,
 body {
 	@apply bg-background text-foreground;
 	color-scheme: dark;
+}
+
+.notes-editor,
+.notes-editor .bn-container,
+.notes-history-preview,
+.notes-history-preview .bn-container {
+	background: var(--background);
+}
+
+.notes-editor .bn-container[data-color-scheme="dark"],
+.notes-history-preview .bn-container[data-color-scheme="dark"] {
+	--bn-colors-editor-background: var(--background);
+}
+
+.notes-editor .bn-container {
+	min-height: 100%;
+}
+
+.notes-editor .bn-editor {
+	min-height: 100%;
+	width: 100%;
+	max-width: 58rem;
+	margin-inline: auto;
+	background: transparent;
+	padding-block: clamp(1.5rem, 3vw, 2.5rem) 4rem;
+	padding-inline: 2rem;
+	font-size: 1.0625rem;
+	line-height: 1.65;
+}
+
+.notes-history-preview .bn-container,
+.notes-history-preview .bn-editor {
+	min-height: 100%;
+}
+
+.notes-history-preview .bn-editor {
+	width: 100%;
+	max-width: 46rem;
+	margin-inline: auto;
+	background: transparent;
+	padding: clamp(1.5rem, 4vw, 3rem);
+}
+
+.notes-editor[data-font-size="small"] .bn-editor,
+.notes-history-preview[data-font-size="small"] .bn-editor {
+	font-size: 0.95rem;
+}
+
+.notes-editor[data-font-size="medium"] .bn-editor,
+.notes-history-preview[data-font-size="medium"] .bn-editor {
+	font-size: 1.0625rem;
+}
+
+.notes-editor[data-font-size="large"] .bn-editor,
+.notes-history-preview[data-font-size="large"] .bn-editor {
+	font-size: 1.1875rem;
+}
+
+.notes-editor[data-margins="small"] .bn-editor,
+.notes-history-preview[data-margins="small"] .bn-editor {
+	max-width: 66rem;
+	padding-inline: 1.25rem;
+}
+
+.notes-editor[data-margins="medium"] .bn-editor,
+.notes-history-preview[data-margins="medium"] .bn-editor {
+	max-width: 58rem;
+	padding-inline: 2rem;
+}
+
+.notes-editor[data-margins="large"] .bn-editor,
+.notes-history-preview[data-margins="large"] .bn-editor {
+	max-width: 50rem;
+	padding-inline: 3rem;
+}
+
+/* Version-history diff: what restoring the selected snapshot would do.
+   Only the block's own content is tinted, never its nested children. */
+.notes-history-preview [data-diff] > :first-child {
+	border-radius: 0.375rem;
+	box-shadow: -0.75rem 0 0 0 var(--notes-diff-color);
+	background: color-mix(in oklab, var(--notes-diff-color) 12%, transparent);
+	transition: background 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.notes-history-preview [data-diff] > :first-child {
+		transition: none;
+	}
+}
+
+.notes-history-preview [data-diff="restored"] {
+	--notes-diff-color: var(--color-emerald-400);
+}
+
+.notes-history-preview [data-diff="changed"] {
+	--notes-diff-color: var(--color-amber-400);
+}
+
+.notes-history-preview [data-diff="moved"] {
+	--notes-diff-color: var(--color-sky-400);
+}
+
+.bn-suggestion-menu {
+	max-height: min(22rem, calc(100dvh - 8rem));
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+.find-and-replace-result {
+	background-color: color-mix(in oklab, var(--primary) 25%, transparent);
+	border-radius: 0.2em;
+}
+
+.find-and-replace-result-current {
+	background-color: color-mix(in oklab, var(--primary) 50%, transparent);
 }
 
 :root {

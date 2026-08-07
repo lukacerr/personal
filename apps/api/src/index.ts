@@ -6,8 +6,19 @@ import { helmet } from 'elysia-helmet';
 import { logger } from 'elysia-logger';
 import { z } from 'zod';
 import { authRouter } from './auth';
+import { notesRouter } from './notes';
 
 export const app = new Elysia()
+	.onError(({ code, error, status }) => {
+		if (code === 'VALIDATION')
+			return status(422, { error: 'VALIDATION_ERROR' });
+		const databaseError = error as {
+			code?: string;
+			cause?: { code?: string };
+		};
+		if (databaseError.code === '23505' || databaseError.cause?.code === '23505')
+			return status(409, { error: 'UNIQUE_CONSTRAINT_VIOLATION' });
+	})
 	.use(cors())
 	.use(
 		env.NODE_ENV === 'development' &&
@@ -47,10 +58,11 @@ export const app = new Elysia()
 	.use(
 		logger({
 			level: env.NODE_ENV === 'production' ? 'warn' : 'debug',
-			logDetails: true,
+			logDetails: false,
 		}),
 	)
 	.use(authRouter)
+	.use(notesRouter)
 	.get(
 		'/health',
 		async ({ status }) => {

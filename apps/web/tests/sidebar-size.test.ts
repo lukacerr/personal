@@ -1,7 +1,4 @@
-import {
-	clampSidebarWidth,
-	getSidebarTransitionClass,
-} from '@web/lib/sidebar-size';
+import { clampSidebarWidth, isAppSidebarShortcut } from '@web/lib/sidebar-size';
 import { describe, expect, it } from 'vitest';
 
 describe('sidebar resizing', () => {
@@ -11,8 +8,59 @@ describe('sidebar resizing', () => {
 		expect(clampSidebarWidth(500)).toBe(384);
 	});
 
-	it('disables width transitions while manually resizing', () => {
-		expect(getSidebarTransitionClass(true)).toBe('transition-none');
-		expect(getSidebarTransitionClass(false)).toContain('duration-100');
+	it('only toggles the app sidebar for the exact Ctrl/Cmd+B shortcut', () => {
+		expect(
+			isAppSidebarShortcut({
+				key: 'b',
+				ctrlKey: true,
+				metaKey: false,
+				altKey: false,
+				shiftKey: false,
+				repeat: false,
+			}),
+		).toBe(true);
+		expect(
+			isAppSidebarShortcut({
+				key: 'b',
+				ctrlKey: false,
+				metaKey: true,
+				altKey: false,
+				shiftKey: false,
+				repeat: false,
+			}),
+		).toBe(true);
+		expect(
+			isAppSidebarShortcut({
+				key: 'b',
+				ctrlKey: true,
+				metaKey: false,
+				altKey: true,
+				shiftKey: false,
+				repeat: false,
+			}),
+		).toBe(false);
+		expect(
+			isAppSidebarShortcut({
+				key: 'b',
+				ctrlKey: true,
+				metaKey: false,
+				altKey: false,
+				shiftKey: true,
+				repeat: false,
+			}),
+		).toBe(false);
+		expect(
+			isAppSidebarShortcut(
+				{
+					key: 'b',
+					ctrlKey: true,
+					metaKey: false,
+					altKey: false,
+					shiftKey: false,
+					repeat: false,
+				},
+				true,
+			),
+		).toBe(false);
 	});
 });

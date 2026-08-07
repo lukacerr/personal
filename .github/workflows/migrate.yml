@@ -1,0 +1,40 @@
+name: Migrate database
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/migrations/**'
+      - 'apps/api/drizzle.config.ts'
+      - '.github/workflows/migrate.yml'
+  workflow_dispatch:
+
+# Evita que dos despliegues de migraciones se pisen entre sí.
+concurrency:
+  group: migrate-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    # Puerta de aprobación: una migración se aplica sobre la base de producción
+    # y no siempre es reversible. Configura reviewers en el environment.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.8
+
+      - name: Install dependencies
+        # Solo drizzle-kit hace falta; el resto del monorepo no se instala.
+        run: bun install --frozen-lockfile --filter '!./' --filter @personal/api
+
+      - name: Apply migrations
+        run: bun run mig:push
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}

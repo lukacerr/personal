@@ -1,5 +1,11 @@
-import { isCommandPaletteShortcut } from '@web/lib/command-palette';
-import { describe, expect, it } from 'vitest';
+import {
+	consumeCommandPaletteHistory,
+	isCommandPaletteHistoryEntry,
+	isCommandPaletteShortcut,
+	pushCommandPaletteHistory,
+	shouldRestorePaletteFocus,
+} from '@web/lib/command-palette';
+import { describe, expect, it, vi } from 'vitest';
 
 describe('command palette shortcut', () => {
 	it('accepts Ctrl+Space and Ctrl+Shift+Space without repeat', () => {
@@ -53,5 +59,35 @@ describe('command palette shortcut', () => {
 				repeat: false,
 			}),
 		).toBe(false);
+	});
+
+	it('restores focus when dismissed but not after navigation', () => {
+		expect(shouldRestorePaletteFocus('dismiss')).toBe(true);
+		expect(shouldRestorePaletteFocus('navigate')).toBe(false);
+	});
+
+	it('adds one transient history entry and consumes it on close', () => {
+		const pushState = vi.fn();
+		const back = vi.fn();
+		const history = {
+			state: { key: 'router' } as unknown,
+			pushState,
+			back,
+		};
+
+		expect(pushCommandPaletteHistory(history, '/notes?note=1')).toBe(true);
+		expect(pushState).toHaveBeenCalledWith(
+			expect.objectContaining({ key: 'router' }),
+			'',
+			'/notes?note=1',
+		);
+		const marker = pushState.mock.calls[0]?.[0];
+		expect(isCommandPaletteHistoryEntry(marker)).toBe(true);
+
+		history.state = marker;
+		expect(pushCommandPaletteHistory(history, '/notes?note=1')).toBe(false);
+		expect(pushState).toHaveBeenCalledTimes(1);
+		expect(consumeCommandPaletteHistory(history)).toBe(true);
+		expect(back).toHaveBeenCalledOnce();
 	});
 });

@@ -13,8 +13,8 @@
 			"**/*.json",
 			"!**/.agents/*",
 			"!**/migrations/*",
-			"!**/components/*",
-			"!**/hooks/*"
+			"!**/components/ui/**",
+			"!**/hooks/**"
 		]
 	},
 	"formatter": {
@@ -24,7 +24,10 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"preset": "recommended"
+			"preset": "recommended",
+			"suspicious": {
+				"useBiomeIgnoreFolder": "off"
+			}
 		}
 	},
 	"javascript": {

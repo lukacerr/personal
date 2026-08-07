@@ -1,3 +1,4 @@
+import { isTransientApiFailure } from '@web/lib/api';
 import { getPersistedAuthState } from '@web/lib/auth-store';
 import {
 	createGoogleLoginUrl,
@@ -39,15 +40,9 @@ describe('OAuth session', () => {
 		).toEqual({ refreshToken: tokens.rt });
 	});
 
-	it('decodes valid callback tokens', () => {
+	it('parses valid callback fragments and rejects malformed data', () => {
 		expect(decodeOAuthSession(btoa(JSON.stringify(tokens)))).toEqual(tokens);
-	});
-
-	it('rejects malformed callback data', () => {
 		expect(decodeOAuthSession('not-base64')).toBeNull();
-	});
-
-	it('reads callback tokens from the URL fragment', () => {
 		const encodedSession = btoa(JSON.stringify(tokens));
 
 		expect(getOAuthSessionFromHash(`#session=${encodedSession}`)).toEqual(
@@ -86,5 +81,12 @@ describe('OAuth session', () => {
 			'/login?returnTo=%2Fcalendar%3Fview%3Dweek%23today',
 		);
 		expect(createLoginPath('https://example.com')).toBe('/login?returnTo=%2F');
+	});
+
+	it('survives a transient API failure but not a rejected credential', () => {
+		expect(isTransientApiFailure(503)).toBe(true);
+		expect(isTransientApiFailure(500)).toBe(true);
+		expect(isTransientApiFailure(401)).toBe(false);
+		expect(isTransientApiFailure(403)).toBe(false);
 	});
 });

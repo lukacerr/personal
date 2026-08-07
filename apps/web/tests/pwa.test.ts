@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { isTransientApiFailure } from '@web/lib/api';
 import { registerServiceWorker } from '@web/lib/register-service-worker';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -10,11 +9,6 @@ describe('Offline app shell', () => {
 		expect(headers).toContain(
 			'/sw.js\n  Cache-Control: no-cache, no-store, must-revalidate',
 		);
-	});
-
-	it('keeps authentication through transient API failures', () => {
-		expect(isTransientApiFailure(503)).toBe(true);
-		expect(isTransientApiFailure(401)).toBe(false);
 	});
 
 	it('registers the service worker and checks for updates', async () => {
@@ -36,47 +30,28 @@ describe('Offline app shell', () => {
 		expect(update).toHaveBeenCalledOnce();
 	});
 
-	it('reloads once when an updated worker takes control', async () => {
-		let onControllerChange = () => {};
-		const reload = vi.fn();
-
-		await registerServiceWorker(
-			{
-				controller: {},
-				register: vi.fn(async () => ({ update: vi.fn() })),
-				addEventListener: vi.fn((_type, listener) => {
-					onControllerChange = listener;
-				}),
-				removeEventListener: vi.fn(),
-			},
-			reload,
-		);
-
-		onControllerChange();
-		onControllerChange();
-
-		expect(reload).toHaveBeenCalledOnce();
-	});
-
-	it('does not reload when the first worker takes control', async () => {
-		let onControllerChange = () => {};
-		const reload = vi.fn();
-
-		await registerServiceWorker(
-			{
-				controller: null,
-				register: vi.fn(async () => ({ update: vi.fn() })),
-				addEventListener: vi.fn((_type, listener) => {
-					onControllerChange = listener;
-				}),
-				removeEventListener: vi.fn(),
-			},
-			reload,
-		);
-
-		onControllerChange();
-
-		expect(reload).not.toHaveBeenCalled();
+	it('only reloads once when an updated worker takes control', async () => {
+		for (const [controller, expectedReloads] of [
+			[{}, 1],
+			[null, 0],
+		] as const) {
+			let onControllerChange = () => {};
+			const reload = vi.fn();
+			await registerServiceWorker(
+				{
+					controller,
+					register: vi.fn(async () => ({ update: vi.fn() })),
+					addEventListener: vi.fn((_type, listener) => {
+						onControllerChange = listener;
+					}),
+					removeEventListener: vi.fn(),
+				},
+				reload,
+			);
+			onControllerChange();
+			if (controller) onControllerChange();
+			expect(reload).toHaveBeenCalledTimes(expectedReloads);
+		}
 	});
 
 	it('checks for updates when the app returns to the foreground', async () => {

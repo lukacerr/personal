@@ -6,6 +6,7 @@ import {
 	CardTitle,
 } from '@web/components/ui/card';
 import { appNavigation } from '@web/lib/app-navigation';
+import { NavLink } from 'react-router';
 
 const systems = appNavigation.filter(({ path }) => path !== '/');
 
@@ -41,28 +42,42 @@ export default function Home() {
 						Personal systems
 					</h2>
 					<div className="grid gap-4 sm:grid-cols-2">
-						{systems.map(({ icon: Icon, label, description }, index) => (
-							<Card
-								key={label}
-								className="min-h-48 justify-between shadow-none"
-							>
-								<CardHeader>
-									<div className="mb-8 flex items-center justify-between text-muted-foreground">
-										<Icon aria-hidden="true" />
-										<span className="font-heading text-[0.65rem] tracking-[0.18em]">
-											0{index + 1}
-										</span>
-									</div>
-									<CardTitle>{label}</CardTitle>
-									<CardDescription>{description}</CardDescription>
-								</CardHeader>
-								<CardContent>
-									<p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
-										Planned
-									</p>
-								</CardContent>
-							</Card>
-						))}
+						{systems.map(({ icon: Icon, label, description, path }, index) => {
+							const card = (
+								<Card
+									key={path}
+									className="min-h-48 justify-between shadow-none transition-colors group-hover:bg-card/80"
+								>
+									<CardHeader>
+										<div className="mb-8 flex items-center justify-between text-muted-foreground">
+											<Icon aria-hidden="true" />
+											<span className="font-heading text-[0.65rem] tracking-[0.18em]">
+												0{index + 1}
+											</span>
+										</div>
+										<CardTitle>{label}</CardTitle>
+										<CardDescription>{description}</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
+											{path === '/notes' ? 'Available' : 'Planned'}
+										</p>
+									</CardContent>
+								</Card>
+							);
+
+							return path === '/notes' ? (
+								<NavLink
+									key={path}
+									to={path}
+									className="group rounded-4xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								>
+									{card}
+								</NavLink>
+							) : (
+								<div key={path}>{card}</div>
+							);
+						})}
 					</div>
 				</section>
 			</div>

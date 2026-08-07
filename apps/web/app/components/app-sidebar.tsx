@@ -14,6 +14,7 @@ import {
 } from '@web/components/ui/sidebar';
 import { appNavigation } from '@web/lib/app-navigation';
 import { useAuthStore } from '@web/lib/auth-store';
+import { clearLocalNotes } from '@web/lib/notes-db';
 import { LogOutIcon } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router';
 
@@ -21,6 +22,10 @@ export function AppSidebar() {
 	const clearSession = useAuthStore(({ clearSession }) => clearSession);
 	const { isMobile, setOpenMobile } = useSidebar();
 	const { pathname } = useLocation();
+	const signOut = async () => {
+		await clearLocalNotes();
+		clearSession();
+	};
 
 	return (
 		<Sidebar collapsible="icon">
@@ -80,7 +85,10 @@ export function AppSidebar() {
 			<SidebarFooter>
 				<SidebarMenu>
 					<SidebarMenuItem>
-						<SidebarMenuButton tooltip="Sign out" onClick={clearSession}>
+						<SidebarMenuButton
+							tooltip="Sign out"
+							onClick={() => void signOut()}
+						>
 							<LogOutIcon aria-hidden="true" />
 							<span>Sign out</span>
 						</SidebarMenuButton>

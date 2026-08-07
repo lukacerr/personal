@@ -7,6 +7,7 @@ import {
 	HouseIcon,
 	KeyRoundIcon,
 	LayoutDashboardIcon,
+	type LucideIcon,
 	NotebookPenIcon,
 	SaladIcon,
 } from 'lucide-react';
@@ -33,7 +34,7 @@ export const appNavigation = [
 	{
 		label: 'Notes',
 		path: '/notes',
-		description: 'Write and connect simple Markdown notes.',
+		description: 'Write structured notes that stay available offline.',
 		icon: NotebookPenIcon,
 	},
 	{
@@ -72,13 +73,40 @@ export function getNavigationItem(pathname: string) {
 	return appNavigation.find(({ path }) => path === pathname);
 }
 
-export function getBreadcrumbItems(pathname: string) {
+export type AppBreadcrumbItem = {
+	/** Stable across renders: sibling folders can repeat a label at other depths. */
+	key: string;
+	label: string;
+	path?: string;
+	icon?: LucideIcon;
+	current?: boolean;
+};
+
+/**
+ * `trail` holds the items a solution contributes for the record it has open.
+ * Navigation stays generic: it never learns what those items represent, and the
+ * last item of the composed breadcrumb is always the current page.
+ */
+export function getBreadcrumbItems(
+	pathname: string,
+	trail: AppBreadcrumbItem[] = [],
+): AppBreadcrumbItem[] {
 	const item = getNavigationItem(pathname);
 	if (!item || item.path === '/')
-		return [{ label: 'Personal', icon: HouseIcon }] as const;
+		return [{ key: 'home', label: 'Personal', icon: HouseIcon, current: true }];
 
-	return [
-		{ label: 'Personal', path: '/', icon: HouseIcon },
-		{ label: item.label, icon: item.icon },
-	] as const;
+	const items: AppBreadcrumbItem[] = [
+		{ key: 'home', label: 'Personal', path: '/', icon: HouseIcon },
+		{
+			key: item.path,
+			label: item.label,
+			icon: item.icon,
+			...(trail.length > 0 ? { path: item.path } : {}),
+		},
+		...trail,
+	];
+
+	return items.map((entry, index) =>
+		index === items.length - 1 ? { ...entry, current: true } : entry,
+	);
 }

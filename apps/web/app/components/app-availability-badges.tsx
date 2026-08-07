@@ -63,10 +63,7 @@ export function AppAvailabilityBadges({
 			<Tooltip>
 				<TooltipTrigger
 					render={
-						<Badge
-							variant="outline"
-							aria-label={`PWA ${pwaAvailability}`}
-						>
+						<Badge variant="outline" aria-label={`PWA ${pwaAvailability}`}>
 							{pwaOnline ? (
 								<WifiIcon data-icon="inline-start" aria-hidden="true" />
 							) : (

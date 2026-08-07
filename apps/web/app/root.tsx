@@ -1,5 +1,6 @@
 import { env } from '@web/lib/env';
 import { registerServiceWorker } from '@web/lib/register-service-worker';
+import { useWebviewZoom } from '@web/lib/use-webview-zoom';
 import { useEffect } from 'react';
 import {
 	isRouteErrorResponse,
@@ -47,6 +48,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+	useWebviewZoom();
+
 	useEffect(() => {
 		if (env.DEV || !('serviceWorker' in navigator)) return;
 

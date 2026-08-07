@@ -17,19 +17,35 @@ import {
 	TooltipTrigger,
 } from '@web/components/ui/tooltip';
 import { appNavigation } from '@web/lib/app-navigation';
-import { isCommandPaletteShortcut } from '@web/lib/command-palette';
+import { loadSystemCommands } from '@web/lib/app-systems';
+import {
+	consumeCommandPaletteHistory,
+	isCommandPaletteHistoryEntry,
+	isCommandPaletteShortcut,
+	pushCommandPaletteHistory,
+	shouldRestorePaletteFocus,
+} from '@web/lib/command-palette';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { SearchIcon } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 export function AppCommandPalette() {
 	const [open, setOpen] = useState(false);
 	const [tooltipOpen, setTooltipOpen] = useState(false);
-	const { pathname } = useLocation();
+	const location = useLocation();
+	const { pathname } = location;
 	const navigate = useNavigate();
 	const previousFocus = useRef<HTMLElement | null>(null);
+	const consumingHistory = useRef(false);
+	const systemGroups = useLiveQuery(loadSystemCommands, [], []);
 
 	const openPalette = () => {
+		consumingHistory.current = false;
+		pushCommandPaletteHistory(
+			window.history,
+			`${location.pathname}${location.search}${location.hash}`,
+		);
 		previousFocus.current =
 			document.activeElement instanceof HTMLElement
 				? document.activeElement
@@ -38,34 +54,57 @@ export function AppCommandPalette() {
 		setOpen(true);
 	};
 
-	const closePalette = () => {
+	const closePalette = (reason: 'dismiss' | 'navigate' = 'dismiss') => {
 		setOpen(false);
-		requestAnimationFrame(() => previousFocus.current?.focus());
+		if (reason === 'dismiss' && !consumingHistory.current) {
+			consumingHistory.current = consumeCommandPaletteHistory(window.history);
+		}
+		if (shouldRestorePaletteFocus(reason))
+			requestAnimationFrame(() => previousFocus.current?.focus());
 	};
+
+	const togglePalette = useEffectEvent(() => {
+		if (open) closePalette();
+		else openPalette();
+	});
 
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
 			if (!isCommandPaletteShortcut(event)) return;
 			event.preventDefault();
-			if (open) closePalette();
-			else openPalette();
+			togglePalette();
 		};
 
 		document.addEventListener('keydown', handleKeyDown, true);
 		return () => document.removeEventListener('keydown', handleKeyDown, true);
+	}, []);
+
+	useEffect(() => {
+		if (!open) return;
+		const handlePopState = (event: PopStateEvent) => {
+			if (isCommandPaletteHistoryEntry(event.state)) return;
+			consumingHistory.current = false;
+			setOpen(false);
+			requestAnimationFrame(() => previousFocus.current?.focus());
+		};
+		window.addEventListener('popstate', handlePopState);
+		return () => window.removeEventListener('popstate', handlePopState);
 	}, [open]);
 
 	const selectPath = (path: string) => {
-		closePalette();
-		if (path !== pathname) void navigate(path);
+		const currentPath = `${location.pathname}${location.search}${location.hash}`;
+		if (path === currentPath) {
+			closePalette();
+			return;
+		}
+		const replace = isCommandPaletteHistoryEntry(window.history.state);
+		closePalette('navigate');
+		void navigate(path, { replace });
 	};
 
 	return (
 		<>
-			<Tooltip
-				open={tooltipOpen && !open}
-				onOpenChange={setTooltipOpen}
-			>
+			<Tooltip open={tooltipOpen && !open} onOpenChange={setTooltipOpen}>
 				<TooltipTrigger
 					render={
 						<Button
@@ -80,7 +119,10 @@ export function AppCommandPalette() {
 				>
 					<SearchIcon data-icon="inline-start" aria-hidden="true" />
 					<span className="hidden sm:inline">Commands</span>
-					<KbdGroup className="hidden gap-1.5 lg:inline-flex" aria-hidden="true">
+					<KbdGroup
+						className="hidden gap-1.5 lg:inline-flex"
+						aria-hidden="true"
+					>
 						<Kbd>Ctrl</Kbd>
 						<span className="font-mono text-xs text-muted-foreground">+</span>
 						<Kbd>Space</Kbd>
@@ -100,16 +142,16 @@ export function AppCommandPalette() {
 					else closePalette();
 				}}
 				title="Command palette"
-				description="Search for a solution to open."
+				description="Search for a solution, note, or command."
 				showCloseButton
 			>
 				<Command className="rounded-none p-0">
 					<CommandInput
-						placeholder="Find a solution or command..."
+						placeholder="Find a solution, note, or command..."
 						className="h-12 pr-10 text-base"
 					/>
 					<CommandList className="max-h-[50svh] min-h-56">
-						<CommandEmpty>No solutions found.</CommandEmpty>
+						<CommandEmpty>No matching results.</CommandEmpty>
 						<CommandGroup heading="Go to">
 							{appNavigation.map(({ description, icon: Icon, label, path }) => (
 								<CommandItem
@@ -125,6 +167,32 @@ export function AppCommandPalette() {
 								</CommandItem>
 							))}
 						</CommandGroup>
+						{systemGroups.map(({ system, commands }) =>
+							commands.length === 0 ? null : (
+								<CommandGroup key={system.key} heading={system.heading}>
+									{commands.map((command) => {
+										const Icon = system.icon;
+										return (
+											<CommandItem
+												key={`${system.key}:${command.id}`}
+												value={`${command.label} ${command.detail ?? ''}`}
+												onSelect={() => selectPath(command.to)}
+											>
+												{Icon && <Icon aria-hidden="true" />}
+												<span className="min-w-0 flex-1 truncate">
+													{command.label}
+												</span>
+												{command.detail && (
+													<CommandShortcut className="max-w-48 truncate">
+														{command.detail}
+													</CommandShortcut>
+												)}
+											</CommandItem>
+										);
+									})}
+								</CommandGroup>
+							),
+						)}
 					</CommandList>
 					<Separator />
 					<div className="flex min-h-12 flex-wrap items-center justify-center gap-x-5 gap-y-2 px-4 py-2 text-xs text-muted-foreground">

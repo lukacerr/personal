@@ -11,6 +11,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@blocknote/core": "catalog:",
 		"@elysia/cors": "^1.4.2",
 		"@elysia/jwt": "^1.4.2",
 		"@elysia/openapi": "^1.4.15",
@@ -22,6 +23,7 @@
 		"elysia-helmet": "^3.1.0",
 		"elysia-logger": "^0.5.2",
 		"elysia-oauth2": "^2.1.0",
+		"jsondiffpatch": "catalog:",
 		"zod": "catalog:"
 	},
 	"devDependencies": {
