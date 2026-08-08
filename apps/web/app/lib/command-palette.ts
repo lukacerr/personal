@@ -46,7 +46,7 @@ export function shouldRestorePaletteFocus(reason: 'dismiss' | 'navigate') {
 
 export function isCommandPaletteShortcut(event: CommandPaletteShortcut) {
 	return (
-		event.key === ' ' &&
+		(event.key === ' ' || event.key === 'p') &&
 		event.ctrlKey &&
 		!event.metaKey &&
 		!event.altKey &&

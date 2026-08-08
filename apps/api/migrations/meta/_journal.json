@@ -15,6 +15,13 @@
       "when": 1786069015831,
       "tag": "20260807021655_amusing_otto_octavius",
       "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786163139497,
+      "tag": "20260808042539_ancient_talos",
+      "breakpoints": false
     }
   ]
 }

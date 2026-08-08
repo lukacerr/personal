@@ -51,8 +51,20 @@ export type NoteMetadataOperation = {
 	noteId: string;
 	title: string;
 	path: string | null;
+	isPublic: boolean;
 	createdAt: number;
 };
+
+/**
+ * What a caller wants to change, not the whole record. The queued operation is
+ * always complete, but building it from the cached note means renaming can
+ * never unpublish and publishing can never move a note back out of its folder.
+ */
+export type NoteMetadataPatch = Partial<{
+	title: string;
+	path: string | null;
+	isPublic: boolean;
+}>;
 
 export type NoteOutboxOperation = NoteSaveOperation | NoteMetadataOperation;
 
@@ -106,6 +118,7 @@ export async function createLocalNote(
 			id: crypto.randomUUID(),
 			title,
 			path,
+			isPublic: false,
 			createdAt: now,
 			updatedAt: now,
 			content: emptyDocument(),
@@ -138,12 +151,20 @@ export async function updateNoteContentDraft(
 export async function enqueueNoteMetadata(
 	db: NotesDatabase,
 	id: string,
-	metadata: { title: string; path: string | null },
+	patch: NoteMetadataPatch,
 	now = Date.now(),
 ) {
 	return db.transaction('rw', db.notes, db.outbox, async () => {
 		const local = await db.notes.get(id);
 		if (!local) throw new Error(`Cannot update missing note ${id}`);
+
+		const metadata = {
+			title: patch.title ?? local.title,
+			path: patch.path === undefined ? local.path : patch.path,
+			// Notes cached before publishing existed carry no flag at all, and
+			// sending `undefined` would fail validation on their first rename.
+			isPublic: patch.isPublic ?? local.isPublic ?? false,
+		};
 
 		await db.notes
 			.where('id')
@@ -151,6 +172,7 @@ export async function enqueueNoteMetadata(
 			.modify((note) => {
 				note.title = metadata.title;
 				note.path = metadata.path;
+				note.isPublic = metadata.isPublic;
 			});
 
 		if (local.serverUpdatedAt === undefined) return undefined;
@@ -159,8 +181,7 @@ export async function enqueueNoteMetadata(
 			key: `metadata:${id}`,
 			type: 'metadata',
 			noteId: id,
-			title: metadata.title,
-			path: metadata.path,
+			...metadata,
 			createdAt: now,
 		};
 		await db.outbox.put(operation);
@@ -258,6 +279,7 @@ export async function cacheRemoteNote(db: NotesDatabase, remote: NoteDetail) {
 			...remote,
 			title: latestMetadata?.title ?? remote.title,
 			path: latestMetadata?.path ?? remote.path,
+			isPublic: latestMetadata?.isPublic ?? remote.isPublic,
 			dirty: false,
 			draftUpdatedAt: undefined,
 			serverUpdatedAt: remote.updatedAt,

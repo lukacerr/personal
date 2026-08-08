@@ -1,6 +1,7 @@
 import type { Block } from '@blocknote/core';
 import { sql } from 'drizzle-orm';
 import {
+	boolean,
 	jsonb,
 	pgTable,
 	timestamp,
@@ -23,6 +24,8 @@ export const note = pgTable(
 		title: varchar({ length: 255 }).notNull(),
 		path: varchar({ length: 1024 }),
 		content: jsonb().$type<Block[]>().notNull(),
+		/** Readable by anyone holding the link, through the public router only. */
+		isPublic: boolean().notNull().default(false),
 		createdAt: timestamp().defaultNow().notNull(),
 		/** Timestamp of the current version; the newest entry of the note's history. */
 		updatedAt: timestamp().defaultNow().notNull(),

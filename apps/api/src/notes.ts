@@ -69,12 +69,19 @@ const blockDocument = z
 		'Note content exceeds 2 MiB',
 	);
 
-const noteMetadataBody = z.object({
+const noteNaming = z.object({
 	title: z.string().trim().min(1).max(255),
 	path: notePath,
 });
 
-const saveNoteBody = noteMetadataBody.extend({
+const noteMetadataBody = noteNaming.extend({ isPublic: z.boolean() });
+
+/**
+ * Saving content deliberately cannot change visibility: publishing is a metadata
+ * decision, and accepting the flag here would let a stale client unpublish a
+ * note just by writing to it.
+ */
+const saveNoteBody = noteNaming.extend({
 	createdAt: timestampMs,
 	content: blockDocument,
 });
@@ -94,6 +101,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 					id: note.id,
 					title: note.title,
 					path: note.path,
+					isPublic: note.isPublic,
 					createdAt: note.createdAt,
 					updatedAt: note.updatedAt,
 				})
@@ -160,7 +168,12 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 				.update(note)
 				.set(body)
 				.where(eq(note.id, params.id))
-				.returning({ id: note.id, title: note.title, path: note.path });
+				.returning({
+					id: note.id,
+					title: note.title,
+					path: note.path,
+					isPublic: note.isPublic,
+				});
 
 			if (!updated) return status(404, { error: 'NOTE_NOT_FOUND' });
 			return updated;
@@ -180,6 +193,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 					id: note.id,
 					title: note.title,
 					path: note.path,
+					isPublic: note.isPublic,
 					createdAt: note.createdAt,
 					updatedAt: note.updatedAt,
 					content: note.content,
@@ -329,6 +343,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 				id: note.id,
 				title: note.title,
 				path: note.path,
+				isPublic: note.isPublic,
 				createdAt: note.createdAt,
 				updatedAt: note.updatedAt,
 				content: note.content,

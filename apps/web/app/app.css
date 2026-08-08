@@ -96,6 +96,91 @@ body {
 	padding-inline: 3rem;
 }
 
+/* Code blocks. Shiki colours the tokens inline, so only the surface, the type
+   and the language picker are ours. */
+.notes-editor .bn-block-content[data-content-type="codeBlock"],
+.notes-history-preview .bn-block-content[data-content-type="codeBlock"] {
+	color: var(--foreground);
+	background: color-mix(in oklab, var(--foreground) 6%, var(--background));
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+}
+
+.notes-editor .bn-block-content[data-content-type="codeBlock"] > pre,
+.notes-history-preview .bn-block-content[data-content-type="codeBlock"] > pre {
+	/* Reaching the end of a wide line must not hand the gesture to the page. */
+	overscroll-behavior-x: contain;
+	padding: 2.25rem 1rem 1rem;
+	font-family: var(--font-mono);
+	font-size: 0.875em;
+	line-height: 1.6;
+}
+
+/* The `<pre>` already asks for `pre`, but BlockNote gives the `<code>` inside it
+   the same `.bn-inline-content` rule as prose, whose `pre-wrap` wins on the
+   element that actually holds the text. Long lines scroll instead of wrapping. */
+.notes-editor .bn-block-content[data-content-type="codeBlock"] > pre > code,
+.notes-history-preview
+	.bn-block-content[data-content-type="codeBlock"]
+	> pre
+	> code {
+	white-space: pre;
+}
+
+/* The library hides the picker until hover and delays it a second, which on a
+   touch screen means it cannot be reached at all. */
+.notes-editor .bn-block-content[data-content-type="codeBlock"] > div > select,
+.notes-history-preview
+	.bn-block-content[data-content-type="codeBlock"]
+	> div
+	> select {
+	color-scheme: dark;
+	opacity: 1;
+	color: var(--muted-foreground);
+	top: 0.25rem;
+	left: 0.5rem;
+	min-height: 1.75rem;
+	padding-inline: 0.25rem;
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+	transition: color 120ms ease-out;
+}
+
+.notes-editor
+	.bn-block-content[data-content-type="codeBlock"]
+	> div
+	> select:hover,
+.notes-editor
+	.bn-block-content[data-content-type="codeBlock"]
+	> div
+	> select:focus-visible {
+	color: var(--foreground);
+}
+
+.notes-editor
+	.bn-block-content[data-content-type="codeBlock"]
+	> div
+	> select
+	> option,
+.notes-history-preview
+	.bn-block-content[data-content-type="codeBlock"]
+	> div
+	> select
+	> option {
+	color: var(--popover-foreground);
+	background-color: var(--popover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.notes-editor .bn-block-content[data-content-type="codeBlock"] > div > select,
+	.notes-history-preview
+		.bn-block-content[data-content-type="codeBlock"]
+		> div
+		> select {
+		transition: none;
+	}
+}
+
 /* Version-history diff: what restoring the selected snapshot would do.
    Only the block's own content is tinted, never its nested children. */
 .notes-history-preview [data-diff] > :first-child {

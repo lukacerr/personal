@@ -9,12 +9,18 @@ import { BlockNoteView } from '@blocknote/shadcn';
 import { NoteFind } from '@web/components/notes/note-find';
 import { NoteHistory } from '@web/components/notes/note-history';
 import { mathSlashMenuItems } from '@web/components/notes/note-math';
+import { NoteShare } from '@web/components/notes/note-share';
 import { Button } from '@web/components/ui/button';
 import {
 	InputGroup,
 	InputGroupAddon,
 	InputGroupInput,
 } from '@web/components/ui/input-group';
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from '@web/components/ui/popover';
 import { Spinner } from '@web/components/ui/spinner';
 import { usePwaAvailability } from '@web/lib/availability';
 import {
@@ -50,6 +56,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import {
 	CloudIcon,
 	CloudOffIcon,
+	EllipsisIcon,
 	FileTextIcon,
 	FolderIcon,
 	HistoryIcon,
@@ -442,6 +449,7 @@ export function NoteDocument({
 					<Button
 						size="icon-sm"
 						variant="ghost"
+						className="sm:inline-flex"
 						onClick={onRefresh}
 						disabled={refreshing}
 						aria-busy={refreshing}
@@ -449,9 +457,21 @@ export function NoteDocument({
 					>
 						{refreshing ? <Spinner /> : <RefreshCwIcon />}
 					</Button>
+					<NoteShare
+						noteId={note.id}
+						// A note cached before publishing existed carries no flag, and an
+						// undefined `pressed` would silently make the toggle uncontrolled.
+						isPublic={Boolean(note.isPublic)}
+						canPublish={note.serverUpdatedAt !== undefined}
+						onChange={(isPublic) =>
+							updateAndSyncNoteMetadata(note.id, { isPublic })
+						}
+						className="hidden sm:inline-flex"
+					/>
 					<Button
 						size="sm"
 						variant="ghost"
+						className="hidden sm:inline-flex"
 						onClick={() => setHistoryOpen(true)}
 					>
 						<HistoryIcon /> <span className="hidden sm:inline">History</span>
@@ -468,11 +488,56 @@ export function NoteDocument({
 					<Button
 						size="icon-sm"
 						variant="ghost"
+						className="hidden sm:inline-flex"
 						onClick={onRequestDelete}
 						aria-label="Delete note"
 					>
 						<Trash2Icon />
 					</Button>
+					<Popover>
+						<PopoverTrigger
+							render={
+								<Button
+									size="icon-sm"
+									variant="ghost"
+									className="sm:hidden"
+									aria-label="More note actions"
+								/>
+							}
+						>
+							<EllipsisIcon />
+						</PopoverTrigger>
+						<PopoverContent align="end" className="w-48 p-1.5">
+							<div className="grid gap-1">
+								<NoteShare
+									noteId={note.id}
+									isPublic={Boolean(note.isPublic)}
+									canPublish={note.serverUpdatedAt !== undefined}
+									onChange={(isPublic) =>
+										updateAndSyncNoteMetadata(note.id, { isPublic })
+									}
+									variant="menu"
+								/>
+								<Button
+									variant="ghost"
+									className="justify-start"
+									onClick={() => setHistoryOpen(true)}
+								>
+									<HistoryIcon />
+									History
+								</Button>
+								<Button
+									variant="ghost"
+									className="justify-start text-destructive hover:text-destructive"
+									onClick={onRequestDelete}
+									aria-label="Delete note"
+								>
+									<Trash2Icon />
+									Delete note
+								</Button>
+							</div>
+						</PopoverContent>
+					</Popover>
 				</div>
 			</div>
 			<div className="relative min-h-0 flex-1">

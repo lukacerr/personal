@@ -11,6 +11,7 @@
 	},
 	"dependencies": {
 		"@base-ui/react": "^1.6.0",
+		"@blocknote/code-block": "catalog:",
 		"@blocknote/core": "catalog:",
 		"@blocknote/react": "catalog:",
 		"@blocknote/shadcn": "catalog:",

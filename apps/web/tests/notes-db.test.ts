@@ -7,6 +7,7 @@ import {
 	enqueueNoteMetadata,
 	enqueueNoteSave,
 	flushNoteOutbox,
+	type LocalNote,
 	NotesDatabase,
 	reconcileNoteSummaries,
 	updateNoteContentDraft,
@@ -44,6 +45,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Draft',
 			path: null,
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 1,
 			content: content('Saved'),
@@ -61,6 +63,7 @@ describe('NotesDatabase', () => {
 			id: 'existing',
 			title: 'Untitled',
 			path: 'work',
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 1,
 			dirty: false,
@@ -99,6 +102,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Saved',
 			path: null,
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 10,
 			serverUpdatedAt: 10,
@@ -133,6 +137,7 @@ describe('NotesDatabase', () => {
 				id: operation.noteId,
 				title: operation.title,
 				path: operation.path,
+				isPublic: false,
 			};
 		});
 		await started;
@@ -165,6 +170,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Latest title',
 			path: 'latest',
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 100,
 			serverUpdatedAt: 1,
@@ -187,6 +193,7 @@ describe('NotesDatabase', () => {
 				noteId: 'note-1',
 				title: 'Latest title',
 				path: 'latest',
+				isPublic: false,
 				createdAt: 101,
 			},
 		]);
@@ -197,6 +204,7 @@ describe('NotesDatabase', () => {
 						id: 'note-1',
 						title: 'Old title',
 						path: 'old',
+						isPublic: false,
 						createdAt: 1,
 						updatedAt: 100,
 						content: operation.content,
@@ -205,6 +213,7 @@ describe('NotesDatabase', () => {
 						id: 'note-1',
 						title: operation.title,
 						path: operation.path,
+						isPublic: false,
 					},
 		);
 
@@ -220,6 +229,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Saved',
 			path: null,
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 1,
 			serverUpdatedAt: 1,
@@ -250,6 +260,7 @@ describe('NotesDatabase', () => {
 				id: operation.noteId,
 				title: operation.title,
 				path: operation.path,
+				isPublic: false,
 			};
 		});
 
@@ -274,6 +285,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Draft',
 			path: 'work',
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 1,
 			serverUpdatedAt: 1,
@@ -303,6 +315,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Draft',
 			path: null,
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 1,
 			content: content('First'),
@@ -321,6 +334,7 @@ describe('NotesDatabase', () => {
 				id: operation.noteId,
 				title: operation.title,
 				path: operation.path,
+				isPublic: false,
 				createdAt: 1,
 				updatedAt: operation.createdAt,
 				content: operation.content,
@@ -341,6 +355,7 @@ describe('NotesDatabase', () => {
 				id: 'pending',
 				title: 'Local title',
 				path: null,
+				isPublic: false,
 				createdAt: 1,
 				updatedAt: 20,
 				content: content('Pending'),
@@ -350,6 +365,7 @@ describe('NotesDatabase', () => {
 				id: 'stale',
 				title: 'Removed remotely',
 				path: null,
+				isPublic: false,
 				createdAt: 1,
 				updatedAt: 1,
 				dirty: false,
@@ -370,6 +386,7 @@ describe('NotesDatabase', () => {
 				id: 'pending',
 				title: 'Server title',
 				path: 'server',
+				isPublic: false,
 				createdAt: 1,
 				updatedAt: 10,
 			},
@@ -389,6 +406,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Local',
 			path: null,
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 100,
 			content: content('Saved'),
@@ -400,6 +418,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Remote',
 			path: null,
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 200,
 			content: content('Remote'),
@@ -417,6 +436,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Saved',
 			path: null,
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 50,
 			content: content('Saved'),
@@ -429,6 +449,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Remote',
 			path: 'remote',
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 200,
 			content: remoteContent,
@@ -448,6 +469,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Local',
 			path: null,
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 50,
 			draftUpdatedAt: 100,
@@ -460,6 +482,7 @@ describe('NotesDatabase', () => {
 				id: 'note-1',
 				title: 'Remote',
 				path: 'remote',
+				isPublic: false,
 				createdAt: 1,
 				updatedAt: 200,
 			},
@@ -478,6 +501,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Draft',
 			path: null,
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 10,
 			serverUpdatedAt: 5_000,
@@ -495,6 +519,7 @@ describe('NotesDatabase', () => {
 			id: 'note-1',
 			title: 'Note',
 			path: null,
+			isPublic: false,
 			createdAt: 1,
 			updatedAt: 10,
 			serverUpdatedAt: 10,
@@ -503,7 +528,14 @@ describe('NotesDatabase', () => {
 		});
 
 		await reconcileNoteSummaries(db, [
-			{ id: 'note-1', title: 'Note', path: null, createdAt: 1, updatedAt: 20 },
+			{
+				id: 'note-1',
+				title: 'Note',
+				path: null,
+				isPublic: false,
+				createdAt: 1,
+				updatedAt: 20,
+			},
 		]);
 
 		expect(await db.notes.get('note-1')).toMatchObject({
@@ -513,12 +545,109 @@ describe('NotesDatabase', () => {
 		});
 	});
 
+	it('carries the fields a metadata change does not mention', async () => {
+		await db.notes.put({
+			id: 'note-1',
+			title: 'Shared',
+			path: 'study',
+			isPublic: true,
+			createdAt: 1,
+			updatedAt: 10,
+			serverUpdatedAt: 10,
+			dirty: false,
+		});
+
+		const renamed = await enqueueNoteMetadata(
+			db,
+			'note-1',
+			{ title: 'Renamed' },
+			100,
+		);
+
+		// Renaming a note must not unpublish it, and publishing one must not move it.
+		expect(renamed).toMatchObject({
+			title: 'Renamed',
+			path: 'study',
+			isPublic: true,
+		});
+		expect(await db.notes.get('note-1')).toMatchObject({
+			title: 'Renamed',
+			path: 'study',
+			isPublic: true,
+		});
+
+		const published = await enqueueNoteMetadata(
+			db,
+			'note-1',
+			{ isPublic: false },
+			101,
+		);
+
+		expect(published).toMatchObject({
+			title: 'Renamed',
+			path: 'study',
+			isPublic: false,
+		});
+	});
+
+	it('treats a note cached before publishing existed as private', async () => {
+		// Written by a build that had no such column, so the row genuinely lacks
+		// the field rather than storing `false`.
+		await db.notes.put({
+			id: 'note-1',
+			title: 'Old cache',
+			path: null,
+			createdAt: 1,
+			updatedAt: 10,
+			serverUpdatedAt: 10,
+			dirty: false,
+		} as LocalNote);
+
+		const renamed = await enqueueNoteMetadata(
+			db,
+			'note-1',
+			{ title: 'Renamed' },
+			100,
+		);
+
+		// Sending `undefined` here would cost a 422 on the first rename of every
+		// note that predates the column.
+		expect(renamed?.isPublic).toBe(false);
+	});
+
+	it('keeps a queued publication when a remote snapshot arrives first', async () => {
+		await db.notes.put({
+			id: 'note-1',
+			title: 'Shared',
+			path: null,
+			isPublic: false,
+			createdAt: 1,
+			updatedAt: 10,
+			serverUpdatedAt: 10,
+			dirty: false,
+		});
+		await enqueueNoteMetadata(db, 'note-1', { isPublic: true }, 100);
+
+		await cacheRemoteNote(db, {
+			id: 'note-1',
+			title: 'Shared',
+			path: null,
+			isPublic: false,
+			createdAt: 1,
+			updatedAt: 20,
+			content: content('Remote'),
+		});
+
+		expect(await db.notes.get('note-1')).toMatchObject({ isPublic: true });
+	});
+
 	it('drops terminally rejected work instead of stalling the queue behind it', async () => {
 		for (const id of ['rejected', 'later']) {
 			await db.notes.put({
 				id,
 				title: id,
 				path: null,
+				isPublic: false,
 				createdAt: 1,
 				updatedAt: 1,
 				content: content(id),
@@ -538,6 +667,7 @@ describe('NotesDatabase', () => {
 				id: operation.noteId,
 				title: operation.title,
 				path: operation.path,
+				isPublic: false,
 				createdAt: 1,
 				updatedAt: operation.createdAt,
 				content: operation.content,

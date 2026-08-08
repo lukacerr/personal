@@ -28,6 +28,7 @@ import {
 	FilePlus2Icon,
 	FileTextIcon,
 	FolderIcon,
+	Globe2Icon,
 	GripVerticalIcon,
 	PanelLeftCloseIcon,
 	PencilIcon,
@@ -136,6 +137,12 @@ function NoteTreeItem({
 					>
 						<FileTextIcon className="text-muted-foreground" />
 						<span className="truncate">{note.title}</span>
+						{note.isPublic && (
+							<Globe2Icon
+								className="ml-auto size-3.5 shrink-0 text-muted-foreground"
+								aria-label="Shared publicly"
+							/>
+						)}
 					</Button>
 				)}
 				{!editing && (

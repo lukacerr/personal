@@ -21,6 +21,7 @@ const note = (id: string, title: string, path: string | null): NoteSummary => ({
 	id,
 	title,
 	path,
+	isPublic: false,
 	createdAt: 1,
 	updatedAt: 1,
 });

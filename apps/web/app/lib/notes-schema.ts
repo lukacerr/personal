@@ -1,12 +1,24 @@
+import { codeBlockOptions } from '@blocknote/code-block';
 import {
 	BlockNoteSchema,
+	createCodeBlockSpec,
 	defaultBlockSpecs,
 	defaultInlineContentSpecs,
 } from '@blocknote/core';
 import { equationBlock, latexInline } from '@web/components/notes/note-math';
 
+/**
+ * BlockNote ships the highlighting plugin but leaves it inert: its default code
+ * block is `createCodeBlockSpec()` with no highlighter and no language list, so
+ * it renders plain text and hides its language picker. Passing the official
+ * Shiki options turns both on, and the languages load lazily on first use.
+ */
 export const notesSchema = BlockNoteSchema.create({
-	blockSpecs: { ...defaultBlockSpecs, equation: equationBlock() },
+	blockSpecs: {
+		...defaultBlockSpecs,
+		codeBlock: createCodeBlockSpec(codeBlockOptions),
+		equation: equationBlock(),
+	},
 	inlineContentSpecs: { ...defaultInlineContentSpecs, latex: latexInline },
 });
 

@@ -12,6 +12,8 @@ import {
 import userEvent from '@testing-library/user-event';
 import { NoteDocument } from '@web/components/notes/note-document';
 import { type LocalNote, notesDb } from '@web/lib/notes-db';
+import { updateAndSyncNoteMetadata } from '@web/lib/notes-sync';
+import { toast } from 'sonner';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const findCommands = vi.hoisted(() => ({
@@ -100,15 +102,36 @@ vi.mock('@web/lib/notes-sync', () => ({
 	updateAndSyncNoteMetadata: vi.fn(async () => true),
 }));
 
+vi.mock('sonner', () => ({
+	toast: { error: vi.fn(), success: vi.fn() },
+}));
+
 const note: LocalNote = {
 	id: 'note-1',
 	title: 'Saved note',
 	path: null,
+	isPublic: false,
 	createdAt: 1,
 	updatedAt: 1,
 	content: editor.document,
 	dirty: false,
 };
+
+let clipboard = '';
+
+function documentProps(current: LocalNote) {
+	return {
+		note: current,
+		preferences: { fontSize: 'medium', margins: 'medium' } as const,
+		focusTitle: false,
+		treeOpen: true,
+		refreshing: false,
+		onRefresh: vi.fn(),
+		onTitleFocused: vi.fn(),
+		onRequestDelete: vi.fn(),
+		isTitleTaken: () => false,
+	};
+}
 
 describe('NoteDocument', () => {
 	beforeEach(async () => {
@@ -125,6 +148,18 @@ describe('NoteDocument', () => {
 		editor.setTextCursorPosition.mockClear();
 		editor.focus.mockClear();
 		for (const command of Object.values(findCommands)) command.mockClear();
+		vi.mocked(updateAndSyncNoteMetadata).mockClear();
+		vi.mocked(toast.error).mockClear();
+		clipboard = '';
+		Object.defineProperty(navigator, 'clipboard', {
+			configurable: true,
+			value: {
+				writeText: async (text: string) => {
+					clipboard = text;
+				},
+				readText: async () => clipboard,
+			},
+		});
 		await notesDb.delete();
 		await notesDb.open();
 		await notesDb.notes.put(note);
@@ -492,6 +527,108 @@ describe('NoteDocument', () => {
 			screen.getByRole('searchbox', { name: 'Find in note' }),
 		).toBeTruthy();
 		expect(screen.queryByRole('textbox', { name: 'Replace with' })).toBeNull();
+	});
+
+	it('keeps sharing and destructive actions in a mobile actions menu', async () => {
+		const user = userEvent.setup();
+		const onRefresh = vi.fn();
+		const onRequestDelete = vi.fn();
+		render(
+			<NoteDocument
+				{...documentProps(note)}
+				onRefresh={onRefresh}
+				onRequestDelete={onRequestDelete}
+			/>,
+		);
+
+		// Desktop controls remain mounted for their wider layout, but CSS removes
+		// them from the mobile action row before it can wrap to a third line.
+		expect(
+			screen.getByRole('button', { name: 'Refresh from server' }).className,
+		).toContain('sm:inline-flex');
+		expect(
+			screen.getByRole('button', { name: 'Share note' }).className,
+		).toContain('hidden sm:inline-flex');
+		expect(
+			screen.getByRole('button', { name: 'Delete note' }).className,
+		).toContain('hidden sm:inline-flex');
+
+		await user.click(
+			screen.getByRole('button', { name: 'Refresh from server' }),
+		);
+		expect(onRefresh).toHaveBeenCalledOnce();
+
+		await user.click(screen.getByRole('button', { name: 'More note actions' }));
+		const mobileShare = screen
+			.getAllByRole('button', { name: 'Share note' })
+			.at(-1);
+		if (!mobileShare) throw new Error('Missing mobile share action');
+		await user.click(mobileShare);
+		expect(screen.getAllByRole('dialog').length).toBeGreaterThan(0);
+		await user.keyboard('{Escape}');
+
+		await user.click(screen.getByRole('button', { name: 'More note actions' }));
+		const mobileDelete = screen
+			.getAllByRole('button', { name: 'Delete note' })
+			.at(-1);
+		if (!mobileDelete) throw new Error('Missing mobile delete action');
+		await user.click(mobileDelete);
+		expect(onRequestDelete).toHaveBeenCalledOnce();
+	});
+
+	it('publishes a note and only then offers its public link', async () => {
+		const user = userEvent.setup();
+		const synced: LocalNote = { ...note, serverUpdatedAt: 1 };
+		const view = render(<NoteDocument {...documentProps(synced)} />);
+
+		await user.click(screen.getByRole('button', { name: 'Share note' }));
+		expect(
+			screen.queryByRole('button', { name: 'Copy public link' }),
+		).toBeNull();
+
+		await user.click(screen.getByRole('button', { name: 'Public link' }));
+
+		expect(updateAndSyncNoteMetadata).toHaveBeenCalledWith(note.id, {
+			isPublic: true,
+		});
+
+		view.rerender(
+			<NoteDocument {...documentProps({ ...synced, isPublic: true })} />,
+		);
+		await user.click(screen.getByRole('button', { name: 'Copy public link' }));
+
+		await waitFor(async () =>
+			expect(await navigator.clipboard.readText()).toBe(
+				`${window.location.origin}/public/notes?note=${note.id}`,
+			),
+		);
+	});
+
+	it('refuses to publish a note the server has never seen', async () => {
+		const user = userEvent.setup();
+		render(<NoteDocument {...documentProps(note)} />);
+
+		await user.click(screen.getByRole('button', { name: 'Share note' }));
+
+		// Its link would point at a note that does not exist yet.
+		expect(
+			screen
+				.getByRole('button', { name: 'Public link' })
+				.hasAttribute('disabled'),
+		).toBe(true);
+	});
+
+	it('reports a rejected publication instead of silently reverting it', async () => {
+		const user = userEvent.setup();
+		vi.mocked(updateAndSyncNoteMetadata).mockResolvedValueOnce(false);
+		render(
+			<NoteDocument {...documentProps({ ...note, serverUpdatedAt: 1 })} />,
+		);
+
+		await user.click(screen.getByRole('button', { name: 'Share note' }));
+		await user.click(screen.getByRole('button', { name: 'Public link' }));
+
+		await waitFor(() => expect(toast.error).toHaveBeenCalled());
 	});
 
 	it('opens find and replace with Ctrl+H', async () => {

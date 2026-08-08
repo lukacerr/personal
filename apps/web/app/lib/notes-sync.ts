@@ -5,6 +5,7 @@ import {
 	enqueueNoteMetadata,
 	type NoteDetail,
 	type NoteMetadata,
+	type NoteMetadataPatch,
 	type NoteOutboxOperation,
 	type NoteSaveOperation,
 	notesDb,
@@ -70,6 +71,7 @@ async function sendNoteMetadata(
 		.patch({
 			title: operation.title,
 			path: operation.path,
+			isPublic: operation.isPublic,
 		});
 
 	if (response.status !== 200 || !response.data || !('title' in response.data))
@@ -95,9 +97,9 @@ export function syncNoteOutbox() {
 
 export async function updateAndSyncNoteMetadata(
 	id: string,
-	metadata: { title: string; path: string | null },
+	patch: NoteMetadataPatch,
 ) {
-	await enqueueNoteMetadata(notesDb, id, metadata);
+	await enqueueNoteMetadata(notesDb, id, patch);
 	if (!navigator.onLine) return false;
 	try {
 		await syncNoteOutbox();

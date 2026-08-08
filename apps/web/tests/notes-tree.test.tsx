@@ -7,7 +7,14 @@ import type { NoteSummary } from '@web/lib/notes-db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const notes: NoteSummary[] = [
-	{ id: 'note-1', title: 'Saved note', path: null, createdAt: 1, updatedAt: 1 },
+	{
+		id: 'note-1',
+		title: 'Saved note',
+		path: null,
+		isPublic: false,
+		createdAt: 1,
+		updatedAt: 1,
+	},
 ];
 
 function renderTree(props: { refreshing: boolean; onRefresh: () => void }) {

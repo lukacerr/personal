@@ -50,6 +50,17 @@ async function saveNote({
 	return { response, id, title, path, createdAt, content };
 }
 
+async function patchNote(
+	id: string,
+	metadata: { title: string; path: string | null; isPublic?: boolean },
+) {
+	return request(`/notes/${id}`, {
+		method: 'PATCH',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ isPublic: false, ...metadata }),
+	});
+}
+
 afterEach(async () => {
 	if (createdNoteIds.size > 0)
 		await db.delete(note).where(inArray(note.id, [...createdNoteIds]));
@@ -170,17 +181,15 @@ describe('Notes', () => {
 		const saved = await saveNote({ title: 'Draft', path: 'work' });
 		await saveNote({ title: 'Existing', path: 'archive' });
 
-		const renamed = await request(`/notes/${saved.id}`, {
-			method: 'PATCH',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ title: 'Renamed', path: 'archive' }),
+		const renamed = await patchNote(saved.id, {
+			title: 'Renamed',
+			path: 'archive',
 		});
 		const detail = await request(`/notes/${saved.id}`);
 		const history = await request(`/notes/${saved.id}/mutations`);
-		const conflict = await request(`/notes/${saved.id}`, {
-			method: 'PATCH',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ title: 'existing', path: 'ARCHIVE' }),
+		const conflict = await patchNote(saved.id, {
+			title: 'existing',
+			path: 'ARCHIVE',
 		});
 
 		expect(renamed.status).toBe(200);
@@ -188,6 +197,7 @@ describe('Notes', () => {
 			id: saved.id,
 			title: 'Renamed',
 			path: 'archive',
+			isPublic: false,
 		});
 		expect(await detail.json()).toMatchObject({
 			title: 'Renamed',
@@ -199,6 +209,51 @@ describe('Notes', () => {
 			hasMore: false,
 		});
 		expect(conflict.status).toBe(409);
+	});
+
+	it('publishes a note through its metadata and reports it everywhere it is read', async () => {
+		const saved = await saveNote({ title: 'Shared', path: 'study' });
+
+		const published = await patchNote(saved.id, {
+			title: 'Shared',
+			path: 'study',
+			isPublic: true,
+		});
+		const detail = await request(`/notes/${saved.id}`);
+		const summaries = await request('/notes');
+
+		expect(published.status).toBe(200);
+		expect(await published.json()).toMatchObject({ isPublic: true });
+		expect(await detail.json()).toMatchObject({ isPublic: true });
+		const summary = (
+			(await summaries.json()) as Array<{ id: string; isPublic: boolean }>
+		).find((item) => item.id === saved.id);
+		expect(summary).toMatchObject({ isPublic: true });
+	});
+
+	it('starts a note private and never lets a content save change that', async () => {
+		const saved = await saveNote({ title: 'Private', path: 'study' });
+		const created = (await saved.response.json()) as { isPublic: boolean };
+		await patchNote(saved.id, {
+			title: 'Private',
+			path: 'study',
+			isPublic: true,
+		});
+
+		// The save response feeds the local cache, so it has to carry the flag or
+		// every save would quietly unpublish the note on the device that wrote it.
+		const edited = await saveNote({
+			id: saved.id,
+			title: 'Private',
+			path: 'study',
+			createdAt: saved.createdAt + 1_000,
+			content: document('Edited after publishing'),
+		});
+		const detail = await request(`/notes/${saved.id}`);
+
+		expect(created.isPublic).toBe(false);
+		expect(await edited.response.json()).toMatchObject({ isPublic: true });
+		expect(await detail.json()).toMatchObject({ isPublic: true });
 	});
 
 	it('returns 422 for invalid input instead of crashing in the logger', async () => {

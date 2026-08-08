@@ -197,10 +197,7 @@ export default function Notes() {
 		if (!normalizedTitle) return 'A note title cannot be empty.';
 		if (hasDuplicateNoteTitle(notes, note.id, normalizedTitle, note.path))
 			return 'A note with this title already exists in this folder.';
-		await updateAndSyncNoteMetadata(note.id, {
-			title: normalizedTitle,
-			path: note.path,
-		});
+		await updateAndSyncNoteMetadata(note.id, { title: normalizedTitle });
 		return undefined;
 	};
 
@@ -213,7 +210,7 @@ export default function Notes() {
 		const moving = notes.find((note) => note.id === id);
 		if (!moving) return 'missing';
 		try {
-			await updateAndSyncNoteMetadata(id, { title: moving.title, path });
+			await updateAndSyncNoteMetadata(id, { path });
 			return 'moved';
 		} catch {
 			return 'failed';

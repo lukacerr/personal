@@ -7,6 +7,7 @@ import { logger } from 'elysia-logger';
 import { z } from 'zod';
 import { authRouter } from './auth';
 import { notesRouter } from './notes';
+import { publicNotesRouter } from './public-notes';
 
 export const app = new Elysia()
 	.onError(({ code, error, status }) => {
@@ -63,6 +64,7 @@ export const app = new Elysia()
 	)
 	.use(authRouter)
 	.use(notesRouter)
+	.use(publicNotesRouter)
 	.get(
 		'/health',
 		async ({ status }) => {
