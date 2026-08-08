@@ -12,6 +12,7 @@ import {
 } from '@web/components/ui/sidebar';
 import { Toaster } from '@web/components/ui/sonner';
 import { TooltipProvider } from '@web/components/ui/tooltip';
+import { rememberAppLocation, useStartupRedirect } from '@web/lib/app-location';
 import { useAuthStore } from '@web/lib/auth-store';
 import { useApiHealth, usePwaAvailability } from '@web/lib/availability';
 import { env } from '@web/lib/env';
@@ -26,16 +27,29 @@ export default function AuthenticatedLayout() {
 	const location = useLocation();
 	const pwaAvailability = usePwaAvailability();
 	const apiHealth = useApiHealth();
+	const startupRedirect = useStartupRedirect(
+		`${location.pathname}${location.search}`,
+		window.localStorage,
+	);
 
 	useEffect(() => {
 		if (status === 'booting') void bootstrap();
 	}, [bootstrap, status]);
+
+	useEffect(() => {
+		if (startupRedirect) return;
+		rememberAppLocation(
+			window.localStorage,
+			`${location.pathname}${location.search}${location.hash}`,
+		);
+	}, [location.hash, location.pathname, location.search, startupRedirect]);
 
 	if (status === 'booting') return <AuthLoading />;
 	if (status === 'unauthenticated') {
 		const returnTo = `${location.pathname}${location.search}${location.hash}`;
 		return <Navigate replace to={createLoginPath(returnTo)} />;
 	}
+	if (startupRedirect) return <Navigate replace to={startupRedirect} />;
 	return (
 		<TooltipProvider>
 			<SidebarProvider>

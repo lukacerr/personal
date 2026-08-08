@@ -145,7 +145,7 @@ export function AppCommandPalette() {
 				description="Search for a solution, note, or command."
 				showCloseButton
 			>
-				<Command className="rounded-none p-0">
+				<Command loop className="rounded-none p-0">
 					<CommandInput
 						placeholder="Find a solution, note, or command..."
 						className="h-12 pr-10 text-base"

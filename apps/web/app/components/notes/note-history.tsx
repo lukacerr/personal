@@ -1,4 +1,3 @@
-import type { Block } from '@blocknote/core';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { Button } from '@web/components/ui/button';
@@ -13,6 +12,7 @@ import { Spinner } from '@web/components/ui/spinner';
 import { authenticatedApi } from '@web/lib/authenticated-api';
 import { diffNoteVersions, type NoteVersionDiff } from '@web/lib/notes-diff';
 import type { NotesPreferences } from '@web/lib/notes-preferences';
+import { type NoteBlock, notesSchema } from '@web/lib/notes-schema';
 import {
 	type RefObject,
 	useEffect,
@@ -30,8 +30,11 @@ const versionFormat = new Intl.DateTimeFormat(undefined, {
 	timeStyle: 'short',
 });
 
-function HistorySnapshotPreview({ content }: { content: Block[] }) {
-	const editor = useCreateBlockNote({ initialContent: content });
+function HistorySnapshotPreview({ content }: { content: NoteBlock[] }) {
+	const editor = useCreateBlockNote({
+		initialContent: content,
+		schema: notesSchema,
+	});
 	return (
 		<BlockNoteView
 			editor={editor}
@@ -129,23 +132,23 @@ export function NoteHistory({
 	preferences: NotesPreferences;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onRestore: (content: Block[]) => Promise<void>;
+	onRestore: (content: NoteBlock[]) => Promise<void>;
 	/** Read when the dialog opens, so the diff compares against what is on screen. */
-	getCurrentContent: () => Block[];
+	getCurrentContent: () => NoteBlock[];
 }) {
 	const [versions, setVersions] = useState<number[]>([]);
 	const [selectedVersion, setSelectedVersion] = useState<number>();
-	const [preview, setPreview] = useState<Block[]>();
+	const [preview, setPreview] = useState<NoteBlock[]>();
 	const [listLoading, setListLoading] = useState(false);
 	const [hasMore, setHasMore] = useState(false);
 	const [loadingMore, setLoadingMore] = useState(false);
 	const [previewLoading, setPreviewLoading] = useState(false);
 	const [error, setError] = useState('');
 	const readCurrentContent = useEffectEvent(getCurrentContent);
-	const previewCache = useRef(new Map<number, Block[]>());
+	const previewCache = useRef(new Map<number, NoteBlock[]>());
 	const previewRequest = useRef(0);
 	const previewContainer = useRef<HTMLDivElement>(null);
-	const [currentContent, setCurrentContent] = useState<Block[]>([]);
+	const [currentContent, setCurrentContent] = useState<NoteBlock[]>([]);
 	// Memoised so the highlight effect runs when the comparison changes, not on
 	// every render of the dialog.
 	const diff = useMemo(

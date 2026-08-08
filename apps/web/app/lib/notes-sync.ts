@@ -32,6 +32,16 @@ class NotesApiError extends Error {
 	}
 }
 
+/**
+ * The API stores a note document as opaque JSON and never reads a block's type,
+ * so an equation crosses it unchanged. Its contract is nonetheless typed with
+ * BlockNote's default schema, which has no equation block, and this request is
+ * the single place where the two views of the same document have to meet.
+ */
+function toApiContent(content: NoteSaveOperation['content']) {
+	return content as unknown as NoteDetail['content'];
+}
+
 async function sendNoteSave(operation: NoteSaveOperation): Promise<NoteDetail> {
 	const response = await authenticatedApi
 		.notes({ id: operation.noteId })
@@ -39,7 +49,7 @@ async function sendNoteSave(operation: NoteSaveOperation): Promise<NoteDetail> {
 			title: operation.title,
 			path: operation.path,
 			createdAt: operation.createdAt,
-			content: operation.content,
+			content: toApiContent(operation.content),
 		});
 
 	if (

@@ -28,7 +28,7 @@ export function AppSidebar() {
 	};
 
 	return (
-		<Sidebar collapsible="icon">
+		<Sidebar collapsible="offcanvas">
 			<SidebarHeader>
 				<SidebarMenu>
 					<SidebarMenuItem>
@@ -65,7 +65,6 @@ export function AppSidebar() {
 									<SidebarMenuItem key={path}>
 										<SidebarMenuButton
 											isActive={pathname === path}
-											tooltip={label}
 											render={<NavLink to={path} end={path === '/'} />}
 											onClick={() => {
 												if (isMobile) setOpenMobile(false);
@@ -85,10 +84,7 @@ export function AppSidebar() {
 			<SidebarFooter>
 				<SidebarMenu>
 					<SidebarMenuItem>
-						<SidebarMenuButton
-							tooltip="Sign out"
-							onClick={() => void signOut()}
-						>
+						<SidebarMenuButton onClick={() => void signOut()}>
 							<LogOutIcon aria-hidden="true" />
 							<span>Sign out</span>
 						</SidebarMenuButton>

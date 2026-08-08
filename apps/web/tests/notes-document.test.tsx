@@ -61,7 +61,8 @@ vi.mock('@blocknote/core/extensions', () => ({
 	filterSuggestionItems: vi.fn(() => []),
 }));
 
-vi.mock('@blocknote/react', () => ({
+vi.mock('@blocknote/react', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@blocknote/react')>()),
 	getDefaultReactSlashMenuItems: vi.fn(() => []),
 	SuggestionMenuController: () => null,
 	useCreateBlockNote: () => editor,

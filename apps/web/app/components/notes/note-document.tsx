@@ -1,4 +1,3 @@
-import type { Block } from '@blocknote/core';
 import { filterSuggestionItems } from '@blocknote/core/extensions';
 import {
 	getDefaultReactSlashMenuItems,
@@ -9,6 +8,7 @@ import {
 import { BlockNoteView } from '@blocknote/shadcn';
 import { NoteFind } from '@web/components/notes/note-find';
 import { NoteHistory } from '@web/components/notes/note-history';
+import { mathSlashMenuItems } from '@web/components/notes/note-math';
 import { Button } from '@web/components/ui/button';
 import {
 	InputGroup,
@@ -35,6 +35,7 @@ import {
 	cutCurrentBlock,
 	deleteCurrentBlock,
 	NoteFindExtension,
+	NoteMathExtension,
 	type NoteSyncState,
 	normalizePath,
 	noteCompactStatusLabel,
@@ -43,6 +44,7 @@ import {
 	unavailableSlashItems,
 } from '@web/lib/notes-editor';
 import type { NotesPreferences } from '@web/lib/notes-preferences';
+import { type NoteBlock, notesSchema } from '@web/lib/notes-schema';
 import { syncNoteOutbox, updateAndSyncNoteMetadata } from '@web/lib/notes-sync';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
@@ -90,7 +92,8 @@ export function NoteDocument({
 }) {
 	const editor = useCreateBlockNote({
 		initialContent: note.content,
-		extensions: [NoteFindExtension],
+		extensions: [NoteFindExtension, NoteMathExtension],
+		schema: notesSchema,
 	});
 	const [title, setTitle] = useState(note.title);
 	const [path, setPath] = useState(note.path ?? '');
@@ -113,7 +116,7 @@ export function NoteDocument({
 			};
 		},
 	});
-	const draftRef = useRef<Block[]>(editor.document);
+	const draftRef = useRef<NoteBlock[]>(editor.document as NoteBlock[]);
 	const titleInputRef = useRef<HTMLInputElement>(null);
 	const editorViewportRef = useRef<HTMLDivElement>(null);
 	const focusTitleOnMount = useRef(focusTitle);
@@ -315,9 +318,9 @@ export function NoteDocument({
 		return () => document.removeEventListener('keydown', handleKeyDown, true);
 	}, [findOpen]);
 
-	const restore = async (content: Block[]) => {
+	const restore = async (content: NoteBlock[]) => {
 		editor.replaceBlocks(editor.document, content);
-		draftRef.current = editor.document;
+		draftRef.current = editor.document as NoteBlock[];
 		draftChanged.current = true;
 		await save();
 	};
@@ -530,7 +533,7 @@ export function NoteDocument({
 						formattingToolbar={!findOpen}
 						slashMenu={false}
 						onChange={() => {
-							draftRef.current = editor.document;
+							draftRef.current = editor.document as NoteBlock[];
 							if (applyingRemote.current) return;
 							scheduleDraft();
 						}}
@@ -539,9 +542,12 @@ export function NoteDocument({
 							triggerCharacter="/"
 							getItems={async (query) =>
 								filterSuggestionItems(
-									getDefaultReactSlashMenuItems(editor).filter(
-										(item) => !unavailableSlashItems.has(item.title),
-									),
+									[
+										...getDefaultReactSlashMenuItems(editor).filter(
+											(item) => !unavailableSlashItems.has(item.title),
+										),
+										...mathSlashMenuItems(editor),
+									],
 									query,
 								)
 							}

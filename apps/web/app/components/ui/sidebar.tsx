@@ -253,6 +253,7 @@ function Sidebar({
       />
       <div
         data-slot="sidebar-container"
+        inert={collapsible === "offcanvas" && state === "collapsed" ? true : undefined}
         data-side={side}
         className={cn(
           "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
@@ -364,7 +365,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "in-data-[side=left]:cursor-ew-resize in-data-[side=right]:cursor-ew-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
-        "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full hover:group-data-[collapsible=offcanvas]:bg-sidebar",
+        "group-data-[collapsible=offcanvas]:hidden",
         "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
         "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
         className

@@ -82,3 +82,25 @@ export function describeNotesFailure(failure: NotesRefreshFailure) {
 		return 'The server could not be reached. Try again in a moment.';
 	return 'Something went wrong. Try again in a moment.';
 }
+
+/**
+ * Why a selected note has nothing to show.
+ *
+ * `missing` is terminal and the others are worth retrying, so they must never
+ * collapse into one state: only the server can say a note is gone, and calling
+ * a dropped connection a deletion tells the user their note is lost while it
+ * sits safely on the server.
+ */
+export type NoteLoadFailure = 'missing' | 'offline' | 'failed';
+
+export function classifyNoteLoadFailure(
+	error: unknown,
+	online: boolean,
+): NoteLoadFailure {
+	const status = (error as { status?: number } | null | undefined)?.status;
+	// A 404 is an answer, so it means the server was reached whatever the browser
+	// currently believes about connectivity.
+	if (status === 404) return 'missing';
+	if (!online) return 'offline';
+	return 'failed';
+}

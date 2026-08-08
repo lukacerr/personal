@@ -1,6 +1,6 @@
-import type { Block } from '@blocknote/core';
 import type { authenticatedApi } from '@web/lib/authenticated-api';
 import { nextAvailableNoteTitle } from '@web/lib/notes';
+import type { NoteBlock } from '@web/lib/notes-schema';
 import Dexie, { type Table } from 'dexie';
 
 type TreatyData<T> = T extends (...args: infer _Args) => infer Result
@@ -27,7 +27,7 @@ export type NoteMetadata = Extract<
 >;
 
 export type LocalNote = NoteSummary & {
-	content?: Block[];
+	content?: NoteBlock[];
 	dirty: boolean;
 	draftUpdatedAt?: number;
 	serverUpdatedAt?: number;
@@ -42,7 +42,7 @@ export type NoteSaveOperation = {
 	title: string;
 	path: string | null;
 	createdAt: number;
-	content: Block[];
+	content: NoteBlock[];
 };
 
 export type NoteMetadataOperation = {
@@ -79,7 +79,7 @@ export async function clearLocalNotes() {
 	});
 }
 
-function emptyDocument(): Block[] {
+function emptyDocument(): NoteBlock[] {
 	return [
 		{
 			id: crypto.randomUUID(),
@@ -121,7 +121,7 @@ export async function createLocalNote(
 export async function updateNoteContentDraft(
 	db: NotesDatabase,
 	id: string,
-	content: Block[],
+	content: NoteBlock[],
 	now = Date.now(),
 ) {
 	const updated = await db.notes

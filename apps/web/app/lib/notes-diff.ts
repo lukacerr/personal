@@ -1,4 +1,4 @@
-import type { Block } from '@blocknote/core';
+import type { NoteBlock } from '@web/lib/notes-schema';
 import { create } from 'jsondiffpatch';
 
 /**
@@ -33,10 +33,10 @@ export type NoteVersionDiff = {
 	status: Record<string, NoteBlockStatus>;
 };
 
-type FlatBlock = { block: Block; parentId: string | null; index: number };
+type FlatBlock = { block: NoteBlock; parentId: string | null; index: number };
 
 function flatten(
-	blocks: Block[],
+	blocks: NoteBlock[],
 	parentId: string | null = null,
 	into: FlatBlock[] = [],
 ) {
@@ -48,7 +48,7 @@ function flatten(
 }
 
 /** Compares a block on its own, so a changed child does not mark its parent. */
-function withoutChildren(block: Block) {
+function withoutChildren(block: NoteBlock) {
 	const { children: _children, ...rest } = block;
 	return rest;
 }
@@ -61,8 +61,8 @@ function withoutChildren(block: Block) {
  * cannot be mapped back onto the blocks BlockNote renders.
  */
 export function diffNoteVersions(
-	snapshot: Block[],
-	current: Block[],
+	snapshot: NoteBlock[],
+	current: NoteBlock[],
 ): NoteVersionDiff {
 	const snapshotBlocks = flatten(snapshot);
 	const currentBlocks = flatten(current);

@@ -93,6 +93,46 @@ describe('Notes block clipboard', () => {
 		);
 	});
 
+	it('copies an equation as its LaTeX source', () => {
+		const data = clipboard();
+		const equation = {
+			id: 'equation',
+			type: 'equation',
+			props: { latex: 'e = mc^2' },
+			content: undefined,
+			children: [],
+		} as unknown as Block;
+		const sourceEditor = editor([equation]);
+		sourceEditor.getTextCursorPosition.mockReturnValue({ block: equation });
+
+		copyCurrentBlock(sourceEditor, data, false);
+
+		expect(data.values.get('text/plain')).toBe('e = mc^2');
+	});
+
+	it('keeps an inline equation in the copied plain text', () => {
+		const data = clipboard();
+		const paragraph = {
+			id: 'paragraph',
+			type: 'paragraph',
+			props: {},
+			content: [
+				{ type: 'text', text: 'Euler: ', styles: {} },
+				{ type: 'latex', props: { latex: 'e^{i\\pi} + 1 = 0' } },
+				{ type: 'text', text: ' holds', styles: {} },
+			],
+			children: [],
+		} as unknown as Block;
+		const sourceEditor = editor([paragraph]);
+		sourceEditor.getTextCursorPosition.mockReturnValue({ block: paragraph });
+
+		copyCurrentBlock(sourceEditor, data, false);
+
+		expect(data.values.get('text/plain')).toBe(
+			'Euler: $e^{i\\pi} + 1 = 0$ holds',
+		);
+	});
+
 	it('cuts the whole block only when no text is selected', () => {
 		const data = clipboard();
 		const targetEditor = editor([

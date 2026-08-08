@@ -1,4 +1,5 @@
 import {
+	classifyNoteLoadFailure,
 	createNotesRefresh,
 	describeNotesFailure,
 } from '@web/lib/notes-refresh';
@@ -113,5 +114,27 @@ describe('Notes refresh', () => {
 		expect(
 			describeNotesFailure({ status: 'failed', error: new Error('nope') }),
 		).toBe('Something went wrong. Try again in a moment.');
+	});
+});
+
+/**
+ * A note that cannot be opened is not one failure. Only the server can say a
+ * note is gone, and treating a dropped connection as a deletion would tell the
+ * user their note no longer exists while it sits safely on the server.
+ */
+describe('Why a note could not be opened', () => {
+	it.each([
+		['a deletion the server confirmed', { status: 404 }, true, 'missing'],
+		['a deletion seen while offline', { status: 404 }, false, 'missing'],
+		['a server error', { status: 500 }, true, 'failed'],
+		['an unreachable server', { status: 500 }, false, 'offline'],
+		['a dropped connection', undefined, false, 'offline'],
+		['an unexplained failure', undefined, true, 'failed'],
+	])('reads %s as %s', (_case, status, online, expected) => {
+		const error = status
+			? Object.assign(new Error('failed'), status)
+			: new Error('failed');
+
+		expect(classifyNoteLoadFailure(error, online)).toBe(expected);
 	});
 });

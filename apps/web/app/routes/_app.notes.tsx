@@ -1,4 +1,5 @@
 import { NoteDocument } from '@web/components/notes/note-document';
+import { NoteUnavailable } from '@web/components/notes/note-unavailable';
 import {
 	type NoteMoveResult,
 	NotesTree,
@@ -43,7 +44,11 @@ import {
 } from '@web/lib/notes-db';
 import { normalizePath } from '@web/lib/notes-editor';
 import { useNotesPreferences } from '@web/lib/notes-preferences';
-import { describeNotesFailure } from '@web/lib/notes-refresh';
+import {
+	classifyNoteLoadFailure,
+	describeNotesFailure,
+	type NoteLoadFailure,
+} from '@web/lib/notes-refresh';
 import {
 	fetchRemoteNote,
 	refreshNoteIndex,
@@ -91,6 +96,11 @@ export default function Notes() {
 	const [refreshing, setRefreshing] = useState(false);
 	const [folderAction, setFolderAction] = useState<FolderAction>();
 	const [noteDeletion, setNoteDeletion] = useState<NoteDeletion>();
+	const [unavailable, setUnavailable] = useState<{
+		id: string;
+		reason: NoteLoadFailure;
+	}>();
+	const [loadAttempt, setLoadAttempt] = useState(0);
 	const notes = useLiveQuery(
 		() => notesDb.notes.orderBy('title').toArray(),
 		[],
@@ -110,32 +120,56 @@ export default function Notes() {
 	const selectedPendingCount = selectedStateIsCurrent
 		? selectedState.pendingCount
 		: 0;
+	// Keyed by the note it happened to, so moving to another note drops the answer
+	// without a second effect racing the one that produced it.
+	const noteUnavailable =
+		unavailable && (!selectedId || selectedId === unavailable.id)
+			? unavailable.reason
+			: undefined;
+	// An id with no local copy at all also lands here, through `!selectedNote?`:
+	// it may be a note opened from another device before its index arrived, and
+	// only the server can say whether it exists. Waiting for Dexie to answer first
+	// keeps a pending lookup from being read as an absent note.
 	const shouldFetchSelectedNote = Boolean(
-		selectedNote &&
+		selectedId &&
+			selectedStateIsCurrent &&
 			selectedPendingCount === 0 &&
-			(!selectedNote.dirty ||
+			(!selectedNote?.dirty ||
 				!selectedNote.content ||
 				selectedNote.updatedAt >
 					(selectedNote.draftUpdatedAt ?? selectedNote.updatedAt)),
 	);
 
 	useEffect(() => {
-		if (selectedId || notes.length === 0) return;
+		// While a note is reported as unavailable, auto-selecting the remembered one
+		// would replace that answer with an unrelated document.
+		if (selectedId || noteUnavailable || notes.length === 0) return;
 		const remembered = getLastSelectedNoteId(notes, window.localStorage);
 		if (remembered) setSearchParams({ note: remembered }, { replace: true });
-	}, [notes, selectedId, setSearchParams]);
+	}, [notes, noteUnavailable, selectedId, setSearchParams]);
 
 	useEffect(() => {
 		if (!selectedId || !notes.some((note) => note.id === selectedId)) return;
 		rememberSelectedNote(window.localStorage, selectedId);
 	}, [notes, selectedId]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `loadAttempt` is the retry trigger. Asking for the same note again changes nothing else, so without it a retry could never re-run this effect.
 	useEffect(() => {
 		if (!selectedId || !shouldFetchSelectedNote) return;
+		let current = true;
 		void fetchRemoteNote(selectedId).catch((error: unknown) => {
-			toast.error(describeNotesFailure({ status: 'failed', error }));
+			if (!current) return;
+			const reason = classifyNoteLoadFailure(error, navigator.onLine);
+			setUnavailable({ id: selectedId, reason });
+			// A note that is gone must not stay in the URL, or reopening the app
+			// lands straight back on this screen. The panel outlives the parameter.
+			if (reason === 'missing') setSearchParams({}, { replace: true });
+			else toast.error(describeNotesFailure({ status: 'failed', error }));
 		});
-	}, [selectedId, shouldFetchSelectedNote]);
+		return () => {
+			current = false;
+		};
+	}, [loadAttempt, selectedId, setSearchParams, shouldFetchSelectedNote]);
 
 	const refresh = async () => {
 		if (refreshing) return;
@@ -367,6 +401,15 @@ export default function Notes() {
 					isTitleTaken={(title, path) =>
 						hasDuplicateNoteTitle(notes, selectedNote.id, title, path)
 					}
+				/>
+			) : noteUnavailable ? (
+				<NoteUnavailable
+					reason={noteUnavailable}
+					onRetry={() => {
+						setUnavailable(undefined);
+						setLoadAttempt((attempt) => attempt + 1);
+					}}
+					onCreate={() => void createNote(null)}
 				/>
 			) : selectedId ? (
 				<div className="grid flex-1 place-items-center">

@@ -5,6 +5,7 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 @import "@blocknote/shadcn/style.css";
+@import "katex/dist/katex.min.css";
 
 @source "../node_modules/@blocknote/shadcn";
 
