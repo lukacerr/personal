@@ -139,7 +139,7 @@ function NoteTreeItem({
 						<span className="truncate">{note.title}</span>
 						{note.isPublic && (
 							<Globe2Icon
-								className="ml-auto size-3.5 shrink-0 text-muted-foreground"
+								className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-opacity ${actionVisibility}`}
 								aria-label="Shared publicly"
 							/>
 						)}

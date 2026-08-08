@@ -29,7 +29,7 @@ Reglas de frontera:
 - La web importa `App` solo como tipo y crea el cliente en `apps/web/app/lib/api.ts` con Eden Treaty.
 - Deriva los tipos de respuestas HTTP desde Eden Treaty; no dupliques contratos de API manualmente ni los ocultes con assertions. Cuando el cliente reciba una unión de respuestas, discrimínala por `status` y/o guards de forma antes de usar sus datos.
 - Infiere desde Eden Treaty los tipos compartidos entre web y API siempre que sea posible; no recrees tipos que ya expone el contrato de la API.
-- Usa `@api`, `@api/*`, `@web` y `@web/*`. Evita imports ascendentes con `../`; los imports locales con `./` son válidos.
+- Usa `@api`, `@api/scripts/*`, `@api/*`, `@web` y `@web/*`. Evita imports ascendentes con `../`; los imports locales con `./` son válidos.
 - Cada workspace declara sus propias dependencias. No instales dependencias de API en web ni dependencias de React en API.
 - La raíz contiene tooling compartido y el catálogo de versiones, no dependencias runtime de las aplicaciones.
 - Cuando una dependencia sea usada por varios workspaces o deba mantener identidad/versiones sincronizadas, agrégala al catálogo raíz y usa `catalog:` en cada workspace consumidor.
@@ -181,7 +181,7 @@ Migraciones:
 
 - `.github/workflows/migrate.yml` aplica las migraciones generadas contra la base de producción cuando `main` recibe cambios en `apps/api/migrations/**` o `apps/api/drizzle.config.ts`, y también por `workflow_dispatch`. Ejecuta `bun run mig:push`, que es `drizzle-kit migrate` (aplica los archivos de `migrations`), no `drizzle-kit push`.
 - `apps/api/drizzle.config.ts` se mantiene desacoplado de `@api/env` y solo exige `DATABASE_URL`, para que el workflow no necesite el resto de los secretos. Conserva esa separación.
-- `drizzle-kit migrate` no funciona contra el stack local: usa el driver websocket de `@neondatabase/serverless` y Compose solo expone el proxy HTTP de Neon. Por eso la base local no tiene tabla `__migrations`. `drizzle-kit generate` sí funciona porque solo diffea el esquema contra el snapshot. Para aplicar cambios en local, corre el SQL de `apps/api/migrations` directamente contra PostgreSQL; en producción el workflow usa Neon Cloud, donde el driver sí conecta.
+- `drizzle-kit migrate` no funciona contra el stack local: usa el driver websocket de `@neondatabase/serverless` y Compose solo expone el proxy HTTP de Neon. Por eso local nunca escribe su propia tabla `__migrations`; la que tiene llegó copiada por `db:pull` y refleja el ledger de producción, no lo que se aplicó en local. `drizzle-kit generate` sí funciona porque solo diffea el esquema contra el snapshot. Para aplicar cambios en local, corre el SQL de `apps/api/migrations` directamente contra PostgreSQL; en producción el workflow usa Neon Cloud, donde el driver sí conecta.
 
 Web:
 
@@ -206,6 +206,10 @@ Entorno local con Docker Compose:
 - Redis Insight expone la UI de cache en `localhost:5540`. PostgreSQL, el proxy HTTP Neon, Redis TCP, REST de cache y MinIO también se publican solo en loopback para debugging.
 - PostgreSQL, Redis, Redis Insight y MinIO persisten mediante bind mounts bajo `./volumes`; `volumes-init` prepara los permisos al levantar Compose.
 - El compose crea el bucket local de MinIO, pero nunca ejecuta migraciones de base de datos.
+- `bun run db:pull` (`apps/api/scripts/db-pull.ts`) reemplaza la base local por una copia de producción, para volver a un estado sano después de romper local. Es unidireccional y destructivo sin backup: dropea el esquema `public` local y lo reconstruye desde el dump. Nunca escribe hacia producción. `.env` y `.env.test` apuntan a la misma base, así que un pull también reemplaza lo que ven los tests de API.
+- `db-pull` aborta si el destino no es un host local; ese guard es lo único que separa "resetear local" de "borrar producción", así que no lo relajes. El dump se toma antes de tocar local y el drop más el restore corren en una sola transacción: un dump fallido deja local intacto y un restore fallido hace rollback en vez de dejar una base vacía.
+- `pg_dump` se conecta al endpoint directo de Neon, no al pooler: el pooler es PgBouncer en modo transacción y no sirve el trabajo a nivel sesión que `pg_dump` necesita. El script deriva ese host sacando `-pooler`.
+- Las contraseñas viajan por `PGPASSWORD` y no dentro del connection string, para que no queden expuestas en `ps`.
 
 No despliegues servicios salvo pedido explícito del usuario.
 
@@ -221,6 +225,7 @@ Ejecuta desde la raíz salvo que se indique lo contrario:
 | `bun run dev:web` | Iniciar solo web |
 | `bun run docker:dev` | Iniciar el stack local en primer plano con logs y recarga automática |
 | `bun run docker:rebuild` | Reconstruir, recrear y esperar el stack local completo |
+| `bun run db:pull` | Reemplazar la base local por una copia de producción (destructivo, solo local) |
 | `bun run format` | Aplicar Biome al repositorio |
 | `bun run lint` | Comprobar Biome sin modificar |
 | `bun run typecheck` | Comprobar API y web |

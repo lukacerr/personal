@@ -4,6 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"build": "bun build --compile --minify --outfile dist/server src/index.ts",
+		"db:pull": "bun scripts/db-pull.ts",
 		"dev": "bun --watch src/index.ts",
 		"mig": "bunx drizzle-kit generate",
 		"mig:push": "bunx drizzle-kit migrate",

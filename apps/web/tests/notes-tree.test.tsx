@@ -17,15 +17,25 @@ const notes: NoteSummary[] = [
 	},
 ];
 
-function renderTree(props: { refreshing: boolean; onRefresh: () => void }) {
+function renderTree({
+	refreshing,
+	onRefresh,
+	notes: items = notes,
+	selectedId = 'note-1',
+}: {
+	refreshing: boolean;
+	onRefresh: () => void;
+	notes?: NoteSummary[];
+	selectedId?: string | null;
+}) {
 	return render(
 		<NotesTree
-			notes={notes}
-			selectedId="note-1"
+			notes={items}
+			selectedId={selectedId}
 			preferences={{ fontSize: 'medium', margins: 'medium' }}
 			setPreference={vi.fn()}
-			refreshing={props.refreshing}
-			onRefresh={props.onRefresh}
+			refreshing={refreshing}
+			onRefresh={onRefresh}
 			onSelect={vi.fn()}
 			onCreate={vi.fn()}
 			onRenameNote={vi.fn(async () => undefined)}
@@ -57,5 +67,28 @@ describe('NotesTree', () => {
 		const button = screen.getByRole('button', { name: 'Refresh from server' });
 		expect(button.getAttribute('aria-busy')).toBe('true');
 		expect(button.hasAttribute('disabled')).toBe(true);
+	});
+
+	// The marker used to sit on every public note at once, which read as noise
+	// on the notes the reader was not looking at.
+	it('keeps the public marker hidden until its note is selected or hovered', () => {
+		const shared: NoteSummary[] = [{ ...notes[0], isPublic: true }];
+		renderTree({ refreshing: false, onRefresh: vi.fn(), notes: shared });
+
+		expect(screen.getByLabelText('Shared publicly').className).not.toContain(
+			'opacity-0',
+		);
+
+		cleanup();
+		renderTree({
+			refreshing: false,
+			onRefresh: vi.fn(),
+			notes: shared,
+			selectedId: null,
+		});
+
+		const marker = screen.getByLabelText('Shared publicly').className;
+		expect(marker).toContain('opacity-0');
+		expect(marker).toContain('group-hover/note:opacity-100');
 	});
 });

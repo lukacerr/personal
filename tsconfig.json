@@ -7,6 +7,7 @@
 		"noEmit": true,
 		"paths": {
 			"@api": ["./apps/api/src/index.ts"],
+			"@api/scripts/*": ["./apps/api/scripts/*"],
 			"@api/*": ["./apps/api/src/*"],
 			"@web": ["./apps/web/app"],
 			"@web/*": ["./apps/web/app/*"]

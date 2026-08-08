@@ -28,6 +28,7 @@
 		"build:native:linux": "bun --filter @personal/native native:linux",
 		"build:native:windows": "bun --filter @personal/native native:windows",
 		"build:web": "bun --filter @personal/web build",
+		"db:pull": "bun --filter @personal/api db:pull",
 		"dev": "bun run --parallel --filter @personal/api --filter @personal/web dev",
 		"dev:api": "bun --filter @personal/api dev",
 		"dev:web": "bun --filter @personal/web dev",
