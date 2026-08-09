@@ -9,6 +9,7 @@ import { appNavigation } from '@web/lib/app-navigation';
 import { NavLink } from 'react-router';
 
 const systems = appNavigation.filter(({ path }) => path !== '/');
+const availableSystems = new Set(['/notes', '/storage']);
 
 export function meta() {
 	return [
@@ -60,13 +61,13 @@ export default function Home() {
 									</CardHeader>
 									<CardContent>
 										<p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
-											{path === '/notes' ? 'Available' : 'Planned'}
+											{availableSystems.has(path) ? 'Available' : 'Planned'}
 										</p>
 									</CardContent>
 								</Card>
 							);
 
-							return path === '/notes' ? (
+							return availableSystems.has(path) ? (
 								<NavLink
 									key={path}
 									to={path}

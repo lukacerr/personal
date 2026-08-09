@@ -27,7 +27,16 @@ export const env = createEnv({
 		UPSTASH_REDIS_REST_URL: z.url(),
 		UPSTASH_REDIS_REST_TOKEN: z.string().min(1),
 		S3_ENDPOINT: z.url(),
+		/**
+		 * The endpoint a browser can reach, when it differs from the one the API
+		 * uses. SigV4 signs the host, so a URL signed for an internal name cannot
+		 * be rewritten afterwards without invalidating the signature. Unset in
+		 * production, where R2 answers on the same endpoint for both.
+		 */
+		S3_PUBLIC_ENDPOINT: z.url().optional(),
 		S3_BUCKET: z.string().min(1).default('luka'),
+		/** R2 ignores the region but SigV4 still signs it. MinIO accepts any value. */
+		S3_REGION: z.string().min(1).default('auto'),
 		S3_ACCESS_KEY_ID: z.string().min(1),
 		S3_SECRET_ACCESS_KEY: z.string().min(1),
 		NOVITA_API_KEY: z.string().min(1),
@@ -71,3 +80,16 @@ export const storage = new S3Client({
 	bucket: env.S3_BUCKET,
 	endpoint: env.S3_ENDPOINT,
 });
+
+/**
+ * Signs URLs the browser follows. Identical to `storage` except for the
+ * endpoint, which has to be one the browser can actually resolve.
+ */
+export const presigner = env.S3_PUBLIC_ENDPOINT
+	? new S3Client({
+			accessKeyId: env.S3_ACCESS_KEY_ID,
+			secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+			bucket: env.S3_BUCKET,
+			endpoint: env.S3_PUBLIC_ENDPOINT,
+		})
+	: storage;

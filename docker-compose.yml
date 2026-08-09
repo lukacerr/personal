@@ -67,6 +67,9 @@ services:
       UPSTASH_REDIS_REST_URL: http://cache:80
       UPSTASH_REDIS_REST_TOKEN: ${LOCAL_UPSTASH_TOKEN:-local-upstash-token}
       S3_ENDPOINT: http://s3:9000
+      # The browser cannot resolve `s3`, and SigV4 signs the host, so presigned
+      # URLs have to be signed for the endpoint the browser will actually call.
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_BUCKET: ${LOCAL_S3_BUCKET:-luka}
       S3_ACCESS_KEY_ID: ${LOCAL_S3_ACCESS_KEY_ID:-personal}
       S3_SECRET_ACCESS_KEY: ${LOCAL_S3_SECRET_ACCESS_KEY:-personal-local-secret}

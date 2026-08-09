@@ -1,5 +1,6 @@
 import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
 import { notesSystem } from '@web/lib/notes-system';
+import { storageSystem } from '@web/lib/storage-system';
 import type { LucideIcon } from 'lucide-react';
 
 export type SystemCommand = {
@@ -39,7 +40,7 @@ export type AppSystem = {
 	) => Promise<AppBreadcrumbItem[]>;
 };
 
-export const appSystems: AppSystem[] = [notesSystem];
+export const appSystems: AppSystem[] = [notesSystem, storageSystem];
 
 export type SystemCommandGroup = {
 	system: AppSystem;

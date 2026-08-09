@@ -243,6 +243,56 @@ describe('NoteDocument', () => {
 		expect(editor.focus).not.toHaveBeenCalled();
 	});
 
+	it('tabs from the title into the note, not into the toolbar', async () => {
+		render(
+			<NoteDocument
+				note={note}
+				preferences={{ fontSize: 'medium', margins: 'medium' }}
+				focusTitle
+				treeOpen
+				refreshing={false}
+				onRefresh={vi.fn()}
+				onTitleFocused={vi.fn()}
+				onRequestDelete={vi.fn()}
+				isTitleTaken={() => false}
+			/>,
+		);
+		const title = await screen.findByRole('textbox', { name: 'Note title' });
+		await waitFor(() => expect(document.activeElement).toBe(title));
+		editor.focus.mockClear();
+
+		await userEvent.tab();
+
+		expect(editor.focus).toHaveBeenCalledOnce();
+		expect(document.activeElement).toBe(title);
+	});
+
+	it('leaves Shift+Tab out of the title to the header controls', async () => {
+		render(
+			<NoteDocument
+				note={note}
+				preferences={{ fontSize: 'medium', margins: 'medium' }}
+				focusTitle
+				treeOpen
+				refreshing={false}
+				onRefresh={vi.fn()}
+				onTitleFocused={vi.fn()}
+				onRequestDelete={vi.fn()}
+				isTitleTaken={() => false}
+			/>,
+		);
+		const title = await screen.findByRole('textbox', { name: 'Note title' });
+		await waitFor(() => expect(document.activeElement).toBe(title));
+		editor.focus.mockClear();
+
+		await userEvent.tab({ shift: true });
+
+		expect(editor.focus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(
+			screen.getByRole('textbox', { name: 'Folder path' }),
+		);
+	});
+
 	it('does not autofocus an existing note on a coarse pointer', async () => {
 		vi.mocked(window.matchMedia).mockReturnValue({
 			matches: false,

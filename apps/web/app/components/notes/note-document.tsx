@@ -389,6 +389,14 @@ export function NoteDocument({
 								setTitle(event.target.value);
 								scheduleMetadata();
 							}}
+							onKeyDown={(event) => {
+								// Tabbing forward out of the title continues into the note,
+								// which is what comes next when writing one; the header
+								// controls stay reachable backwards and from the editor.
+								if (event.key !== 'Tab' || event.shiftKey) return;
+								event.preventDefault();
+								editor.focus();
+							}}
 							aria-label="Note title"
 							aria-invalid={Boolean(titleError)}
 							title={titleError || undefined}

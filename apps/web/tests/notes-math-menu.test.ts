@@ -1,11 +1,22 @@
 import { mathSlashMenuItems } from '@web/components/notes/note-math';
 import { describe, expect, it, vi } from 'vitest';
 
-function mathEditor() {
-	const block = { id: 'block-1', type: 'paragraph' };
+/** The menu deletes its query before the item runs, leaving the trigger behind. */
+function mathEditor(text = '/') {
+	const block = {
+		id: 'block-1',
+		type: 'paragraph',
+		props: {},
+		content: text ? [{ type: 'text', text, styles: {} }] : [],
+		children: [],
+	};
+	const inserted = { id: 'block-2', type: 'equation' };
 	return {
 		block,
+		inserted,
 		insertInlineContent: vi.fn(),
+		insertBlocks: vi.fn(() => [inserted]),
+		setTextCursorPosition: vi.fn(),
 		updateBlock: vi.fn(),
 		getTextCursorPosition: vi.fn(() => ({ block })),
 	};
@@ -31,15 +42,37 @@ describe('Notes math slash menu', () => {
 		]);
 	});
 
-	it('turns the current block into a display equation', () => {
-		const editor = mathEditor();
+	it.each(['/', ''])(
+		'turns a block holding only %s into a display equation',
+		(text) => {
+			const editor = mathEditor(text);
+
+			itemFor(editor, 'Equation').onItemClick();
+
+			expect(editor.updateBlock).toHaveBeenCalledWith(editor.block, {
+				type: 'equation',
+				props: { latex: '' },
+			});
+			expect(editor.insertBlocks).not.toHaveBeenCalled();
+		},
+	);
+
+	/**
+	 * A display equation replaces its whole block, so taking over one that still
+	 * holds text would delete it — the same rule the `$$` shorthand already obeys.
+	 */
+	it('adds the equation after a block that still holds text', () => {
+		const editor = mathEditor('/keep me');
 
 		itemFor(editor, 'Equation').onItemClick();
 
-		expect(editor.updateBlock).toHaveBeenCalledWith(editor.block, {
-			type: 'equation',
-			props: { latex: '' },
-		});
+		expect(editor.updateBlock).not.toHaveBeenCalled();
+		expect(editor.insertBlocks).toHaveBeenCalledWith(
+			[{ type: 'equation', props: { latex: '' } }],
+			editor.block,
+			'after',
+		);
+		expect(editor.setTextCursorPosition).toHaveBeenCalledWith(editor.inserted);
 	});
 
 	/** A grouped item keeps the menu from rendering a nameless, keyless section. */

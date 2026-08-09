@@ -113,7 +113,10 @@ bun -e '
 
 "$adb_bin" -s "$serial" reverse tcp:5173 tcp:5173 >/dev/null
 "$adb_bin" -s "$serial" reverse tcp:8080 tcp:8080 >/dev/null
+# Presigned upload and preview URLs point directly at local MinIO rather than
+# passing through the API, so Android needs the storage port too.
+"$adb_bin" -s "$serial" reverse tcp:9000 tcp:9000 >/dev/null
 "$adb_bin" -s "$serial" shell am force-stop software.luka.personal
 "$adb_bin" -s "$serial" shell am start -n software.luka.personal/.MainActivity >/dev/null
 
-printf '%s\n' "Android ($serial) is using Personal web/API from localhost."
+printf '%s\n' "Android ($serial) is using Personal web/API/storage from localhost."
