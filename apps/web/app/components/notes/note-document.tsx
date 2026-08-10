@@ -6,6 +6,7 @@ import {
 	useEditorState,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
+import { credentialSlashMenuItems } from '@web/components/notes/note-credential';
 import {
 	attachFilesToNote,
 	attachPastedImages,
@@ -769,6 +770,7 @@ export function NoteDocument({
 											),
 											...mathSlashMenuItems(editor),
 											...fileSlashMenuItems(editor),
+											...credentialSlashMenuItems(editor),
 										],
 										query,
 									)

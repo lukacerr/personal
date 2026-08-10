@@ -1,4 +1,5 @@
 import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
+import { credentialsSystem } from '@web/lib/credentials-system';
 import { notesSystem } from '@web/lib/notes-system';
 import { storageSystem } from '@web/lib/storage-system';
 import type { LucideIcon } from 'lucide-react';
@@ -55,7 +56,11 @@ export type AppSystem = {
 	subscribe?: (onChange: () => void) => () => void;
 };
 
-export const appSystems: AppSystem[] = [notesSystem, storageSystem];
+export const appSystems: AppSystem[] = [
+	credentialsSystem,
+	notesSystem,
+	storageSystem,
+];
 
 let systemDataRevision = 0;
 const revisionListeners = new Set<() => void>();

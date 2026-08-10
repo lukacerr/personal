@@ -8,8 +8,22 @@ Lee este archivo antes de modificar:
 
 | System | Archivos |
 | --- | --- |
+| Credentials | `src/credentials.ts`, `src/credentials-crypto.ts`, `src/schema/credential.ts` |
 | Notes | `src/notes.ts`, `src/note-versions.ts`, `src/public-notes.ts`, `src/schema/note.ts`, `src/schema/note-mutation.ts` |
 | Storage | `src/files.ts`, `src/files-multipart.ts`, `src/files-storage.ts`, `src/public-files.ts`, `src/schema/file.ts` |
+
+## Credentials
+
+- El cliente cifra y la API **solo verifica**. `credential.value` es siempre un sobre `v1.<salt>.<iv>.<ciphertext>` en base64url sin padding, y `credentials-crypto.ts` solo sabe descifrar: no existe `encryptCredentialValue` server-side y no hay que agregarlo. El texto en claro no viaja por la red, no queda en memoria más allá de la verificación y nunca aparece en una respuesta, un log ni un ejemplo de OpenAPI.
+- La verificación de escritura (`inspectEnvelope`) descifra con `env.LUKA_SECRET`, acota el claro a 4096 caracteres y descarta el texto. Es un guard de integridad, no de confidencialidad: hace **estructuralmente imposible** guardar una fila ilegible. Sin eso, un cliente con el secreto equivocado escribe algo que nadie va a poder leer nunca y la pérdida recién se descubre el día que alguien necesita el valor. Los rechazos son `422 CREDENTIAL_NOT_DECRYPTABLE` y `422 CREDENTIAL_VALUE_TOO_LARGE`, mensajes de dominio que viven en este router y no en el handler global.
+- La cota del body (`max(8192)`) es sobre el sobre y es solo un techo del request. El límite del producto es sobre el claro y solo se puede comprobar después de descifrar; no lo reemplaces por la cota del ciphertext, que es aritmética del cliente.
+- Lo que la API **no** verifica es que el `iv` no se repita entre filas: no puede saberlo sin llevar un índice de ivs, y con 12 bytes de `getRandomValues` por registro la colisión no es un escenario práctico. Quien genere sobres debe usar salt e iv nuevos en cada uno.
+- `value` es **opcional** en el PATCH a propósito: omitirlo deja el ciphertext intacto. Es lo que permite renombrar una credencial sin tener el secreto, o sea la única operación posible con el cliente bloqueado. No lo vuelvas obligatorio ni interpretes un string vacío como "borrar el valor".
+- La derivación es HKDF-SHA256 con `info: 'personal:credential:v1'` y salt por registro, no PBKDF2: `LUKA_SECRET` es material de alta entropía, no una frase memorizada, y PBKDF2 con salt por registro obligaría al cliente a gastar cientos de milisegundos por fila solo para dibujar la lista. La contrapartida es que el secreto **debe** ser aleatorio y largo.
+- El algoritmo está implementado dos veces, acá y en `apps/web/app/lib/credentials-crypto.ts`, porque la web solo puede importar tipos de la API. Lo único que impide que se separen es el **test vector conocido** que está en las dos suites: la web afirma que produce ese sobre exacto, la API que lo lee. Si tocás el formato, el sobre del vector cambia en los dos lados o una suite se pone roja.
+- Los arrays de bytes llevan `Uint8Array<ArrayBuffer>` explícito. La web alcanza `credentials-crypto.ts` por el tipo `App` que importa de `@api`, y bajo su lib DOM un `BufferSource` no acepta `ArrayBufferLike`: sin el parámetro la API typechequea sola y la web falla sobre un archivo que nunca ejecuta.
+- No hay router público y no debe haberlo. Una credencial no se comparte por link.
+- El índice único es sobre `lower(title)`: el título es lo único legible sin el secreto, así que es lo único que permite distinguir dos filas. El handler global traduce la violación a 409.
 
 ## Notes
 

@@ -1,6 +1,10 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import {
+	NoteCredentialAccessProvider,
+	publicNoteCredentialAccess,
+} from '@web/components/notes/note-credential';
+import {
 	NoteFileAccessProvider,
 	publicNoteFileAccess,
 } from '@web/components/notes/note-file';
@@ -52,12 +56,16 @@ function PublicNoteBody({ content }: { content: NoteBlock[] }) {
 		// The only URL that works here is the published one, and a file that was
 		// never shared simply does not appear.
 		<NoteFileAccessProvider value={publicNoteFileAccess}>
-			<BlockNoteView
-				editor={editor}
-				editable={false}
-				slashMenu={false}
-				theme="dark"
-			/>
+			{/* A credential is different: there is no public endpoint to fall back on
+			    and there must not be one, so the block resolves nothing at all here. */}
+			<NoteCredentialAccessProvider value={publicNoteCredentialAccess}>
+				<BlockNoteView
+					editor={editor}
+					editable={false}
+					slashMenu={false}
+					theme="dark"
+				/>
+			</NoteCredentialAccessProvider>
 		</NoteFileAccessProvider>
 	);
 }

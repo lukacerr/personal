@@ -6,6 +6,7 @@ import { helmet } from 'elysia-helmet';
 import { logger } from 'elysia-logger';
 import { z } from 'zod';
 import { authRouter } from './auth';
+import { credentialsRouter } from './credentials';
 import { filesRouter } from './files';
 import { notesRouter } from './notes';
 import { publicFilesRouter } from './public-files';
@@ -76,6 +77,7 @@ export const app = new Elysia()
 		}),
 	)
 	.use(authRouter)
+	.use(credentialsRouter)
 	.use(filesRouter)
 	.use(notesRouter)
 	.use(publicFilesRouter)

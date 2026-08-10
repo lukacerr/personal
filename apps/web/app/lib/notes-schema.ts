@@ -5,6 +5,7 @@ import {
 	defaultBlockSpecs,
 	defaultInlineContentSpecs,
 } from '@blocknote/core';
+import { credentialBlock } from '@web/components/notes/note-credential';
 import { storedFileBlock } from '@web/components/notes/note-file';
 import { equationBlock, latexInline } from '@web/components/notes/note-math';
 
@@ -18,6 +19,8 @@ export const notesSchema = BlockNoteSchema.create({
 	blockSpecs: {
 		...defaultBlockSpecs,
 		codeBlock: createCodeBlockSpec(codeBlockOptions),
+		// Holds only which credential it points at; the value never enters a prop.
+		credential: credentialBlock(),
 		equation: equationBlock(),
 		// Registered under its own key rather than over BlockNote's `file`, whose
 		// built-in block stores a URL in the document.

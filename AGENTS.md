@@ -16,8 +16,9 @@ Este archivo contiene **solo lo transversal**: arquitectura, stack, convenciones
 
 | Archivo | Cubre | Léelo antes de tocar |
 | --- | --- | --- |
-| `apps/api/AGENTS.md` | Notes y Storage server-side: modelo de versiones, deltas, multipart, reconcile, routers públicos | `apps/api/src/notes.ts`, `note-versions.ts`, `public-notes.ts`, `files*.ts`, `public-files.ts`, `schema/note*.ts`, `schema/file.ts` |
-| `apps/web/app/components/notes/AGENTS.md` | Notes en la web: base local, editor, schema BlockNote, matemática, adjuntos, historial, compartir | `apps/web/app/components/notes/**`, `app/lib/notes-*.ts`, `app/routes/_app.notes.tsx`, `app/routes/public.notes.tsx` |
+| `apps/api/AGENTS.md` | Credentials, Notes y Storage server-side: sobres cifrados y verificación de escritura, modelo de versiones, deltas, multipart, reconcile, routers públicos | `apps/api/src/credentials*.ts`, `notes.ts`, `note-versions.ts`, `public-notes.ts`, `files*.ts`, `public-files.ts`, `schema/credential.ts`, `schema/note*.ts`, `schema/file.ts` |
+| `apps/web/app/components/credentials/AGENTS.md` | Credentials en la web: cripto cliente, compuerta del secreto, enmascarado, lista, diálogos | `apps/web/app/components/credentials/**`, `app/lib/credentials*.ts`, `app/routes/_app.credentials.tsx` |
+| `apps/web/app/components/notes/AGENTS.md` | Notes en la web: base local, editor, schema BlockNote, matemática, adjuntos, credenciales referenciadas, historial, compartir | `apps/web/app/components/notes/**`, `app/lib/notes-*.ts`, `app/routes/_app.notes.tsx`, `app/routes/public.notes.tsx` |
 | `apps/web/app/components/storage/AGENTS.md` | Storage en la web: índice, subida, preview, filtros, interacción de la lista, acciones bulk | `apps/web/app/components/storage/**`, `app/lib/storage*.ts`, `app/routes/_app.storage.tsx` |
 
 Reglas:
