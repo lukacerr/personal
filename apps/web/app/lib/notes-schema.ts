@@ -5,6 +5,7 @@ import {
 	defaultBlockSpecs,
 	defaultInlineContentSpecs,
 } from '@blocknote/core';
+import { storedFileBlock } from '@web/components/notes/note-file';
 import { equationBlock, latexInline } from '@web/components/notes/note-math';
 
 /**
@@ -18,6 +19,9 @@ export const notesSchema = BlockNoteSchema.create({
 		...defaultBlockSpecs,
 		codeBlock: createCodeBlockSpec(codeBlockOptions),
 		equation: equationBlock(),
+		// Registered under its own key rather than over BlockNote's `file`, whose
+		// built-in block stores a URL in the document.
+		storedFile: storedFileBlock(),
 	},
 	inlineContentSpecs: { ...defaultInlineContentSpecs, latex: latexInline },
 });

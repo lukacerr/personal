@@ -6,6 +6,13 @@ import {
 	useEditorState,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
+import {
+	attachFilesToNote,
+	attachPastedImages,
+	editorNoteFileAccess,
+	fileSlashMenuItems,
+	NoteFileAccessProvider,
+} from '@web/components/notes/note-file';
 import { NoteFind } from '@web/components/notes/note-find';
 import { NoteHistory } from '@web/components/notes/note-history';
 import { mathSlashMenuItems } from '@web/components/notes/note-math';
@@ -31,7 +38,7 @@ import {
 } from '@web/lib/notes';
 import {
 	enqueueNoteSave,
-	type LocalNote,
+	type LoadedNote,
 	notesDb,
 	updateNoteContentDraft,
 } from '@web/lib/notes-db';
@@ -49,6 +56,8 @@ import {
 	pasteCopiedBlock,
 	unavailableSlashItems,
 } from '@web/lib/notes-editor';
+import { readClipboardImages } from '@web/lib/notes-file-upload';
+import { splitPastedImages } from '@web/lib/notes-files';
 import type { NotesPreferences } from '@web/lib/notes-preferences';
 import { type NoteBlock, notesSchema } from '@web/lib/notes-schema';
 import { syncNoteOutbox, updateAndSyncNoteMetadata } from '@web/lib/notes-sync';
@@ -65,7 +74,8 @@ import {
 	SearchIcon,
 	Trash2Icon,
 } from 'lucide-react';
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
 const serverVersionFormat = new Intl.DateTimeFormat(undefined, {
 	dateStyle: 'short',
@@ -86,7 +96,7 @@ export function NoteDocument({
 	onRequestDelete,
 	isTitleTaken,
 }: {
-	note: LocalNote;
+	note: LoadedNote;
 	preferences: NotesPreferences;
 	focusTitle: boolean;
 	treeOpen: boolean;
@@ -224,6 +234,127 @@ export function NoteDocument({
 		});
 		if (isOnline && !synced) setSyncError(true);
 	});
+
+	/**
+	 * Files that arrived by paste or drop become attachments.
+	 *
+	 * Capture phase plus `stopPropagation` is what keeps ProseMirror from ever
+	 * seeing the event: `preventDefault` alone leaves its own listener to run.
+	 * Returns whether it took the event, so the caller stops there.
+	 */
+	const attachDropped = (
+		transfer: DataTransfer | null | undefined,
+		event: { preventDefault: () => void; stopPropagation: () => void },
+	) => {
+		// `items` rather than `files` alone: the WebKit build behind the desktop
+		// shell hands a pasted screenshot over as an item and leaves `files` empty.
+		const fromItems = [...(transfer?.items ?? [])]
+			.filter((item) => item.kind === 'file')
+			.map((item) => item.getAsFile())
+			.filter((file): file is File => file !== null);
+		const selected =
+			transfer?.files && transfer.files.length > 0
+				? [...transfer.files]
+				: fromItems;
+		if (selected.length === 0) return false;
+		event.preventDefault();
+		event.stopPropagation();
+
+		const label =
+			selected.length === 1
+				? `“${selected[0]?.name}”`
+				: `${selected.length} files`;
+		toast.promise(attachFilesToNote(editor, selected), {
+			loading: `Uploading ${label}…`,
+			success: `${label} attached.`,
+			error: () =>
+				navigator.onLine
+					? `${label} could not be attached.`
+					: 'Attaching a file requires a connection.',
+		});
+		return true;
+	};
+
+	/**
+	 * Images copied off a page arrive as markup, not as files. Left alone,
+	 * BlockNote turns them into its own image block, whose reference is a URL
+	 * kept inside the note: hotlinked elsewhere, unknown to Storage, and handed
+	 * to whoever the note is shared with. They get imported instead, and the
+	 * rest of what was copied still pastes as it was.
+	 */
+	const attachPastedMarkup = (
+		transfer: DataTransfer | null | undefined,
+		event: { preventDefault: () => void; stopPropagation: () => void },
+	) => {
+		const markup = transfer?.getData('text/html');
+		if (!markup) return false;
+		const { html, sources } = splitPastedImages(markup);
+		if (sources.length === 0) return false;
+
+		event.preventDefault();
+		event.stopPropagation();
+		if (html) editor.pasteHTML(html);
+
+		void (async () => {
+			const { attached, failed } = await attachPastedImages(editor, sources);
+			if (attached > 0)
+				toast.success(
+					attached === 1 ? 'Image attached.' : `${attached} images attached.`,
+				);
+			if (failed > 0)
+				toast.error(
+					failed === 1
+						? 'An image could not be read from where it was copied.'
+						: `${failed} images could not be read from where they were copied.`,
+				);
+		})();
+		return true;
+	};
+
+	// Rebuilt only when publication changes: a fresh object every render would
+	// restart the effect that resolves every attachment's URL.
+	const fileAccess = useMemo(
+		() => ({
+			...editorNoteFileAccess,
+			// An attachment on a published note is only readable if the file itself
+			// was shared, and the block says so where it is seen.
+			notePublic: note.isPublic,
+		}),
+		[note.isPublic],
+	);
+
+	/**
+	 * A paste that carried nothing at all still might be an image.
+	 *
+	 * WebKitGTK empties `clipboardData` for images, so on the desktop shell an
+	 * image paste is indistinguishable from an empty one until the asynchronous
+	 * clipboard is asked. Gated on the event being empty, so a normal paste
+	 * never triggers a clipboard permission prompt.
+	 */
+	const attachFromAsyncClipboard = (
+		transfer: DataTransfer | null | undefined,
+		event: { preventDefault: () => void; stopPropagation: () => void },
+	) => {
+		if ((transfer?.types.length ?? 0) > 0) return false;
+		event.preventDefault();
+		event.stopPropagation();
+
+		void (async () => {
+			const selected = await readClipboardImages();
+			if (selected.length === 0) return;
+			const label =
+				selected.length === 1 ? 'Image' : `${selected.length} images`;
+			toast.promise(attachFilesToNote(editor, selected), {
+				loading: `Uploading ${label.toLowerCase()}…`,
+				success: `${label} attached.`,
+				error: () =>
+					navigator.onLine
+						? `${label} could not be attached.`
+						: 'Attaching a file requires a connection.',
+			});
+		})();
+		return true;
+	};
 
 	const scheduleDraft = () => {
 		draftChanged.current = true;
@@ -596,36 +727,55 @@ export function NoteDocument({
 						event.preventDefault();
 					}}
 					onPasteCapture={(event) => {
-						if (!pasteCopiedBlock(editor, event.clipboardData)) return;
-						event.preventDefault();
+						// Files come first: a pasted image is an attachment, not text.
+						if (attachDropped(event.clipboardData, event)) return;
+						if (attachPastedMarkup(event.clipboardData, event)) return;
+						if (pasteCopiedBlock(editor, event.clipboardData)) {
+							event.preventDefault();
+							return;
+						}
+						// Last resort, and only for an event that carried nothing.
+						attachFromAsyncClipboard(event.clipboardData, event);
+					}}
+					onDragOverCapture={(event) => {
+						// Without this the browser leaves the app to open the file.
+						if (event.dataTransfer?.types.includes('Files'))
+							event.preventDefault();
+					}}
+					onDropCapture={(event) => {
+						if (attachDropped(event.dataTransfer, event)) return;
+						attachPastedMarkup(event.dataTransfer, event);
 					}}
 				>
-					<BlockNoteView
-						editor={editor}
-						theme="dark"
-						formattingToolbar={!findOpen}
-						slashMenu={false}
-						onChange={() => {
-							draftRef.current = editor.document as NoteBlock[];
-							if (applyingRemote.current) return;
-							scheduleDraft();
-						}}
-					>
-						<SuggestionMenuController
-							triggerCharacter="/"
-							getItems={async (query) =>
-								filterSuggestionItems(
-									[
-										...getDefaultReactSlashMenuItems(editor).filter(
-											(item) => !unavailableSlashItems.has(item.title),
-										),
-										...mathSlashMenuItems(editor),
-									],
-									query,
-								)
-							}
-						/>
-					</BlockNoteView>
+					<NoteFileAccessProvider value={fileAccess}>
+						<BlockNoteView
+							editor={editor}
+							theme="dark"
+							formattingToolbar={!findOpen}
+							slashMenu={false}
+							onChange={() => {
+								draftRef.current = editor.document as NoteBlock[];
+								if (applyingRemote.current) return;
+								scheduleDraft();
+							}}
+						>
+							<SuggestionMenuController
+								triggerCharacter="/"
+								getItems={async (query) =>
+									filterSuggestionItems(
+										[
+											...getDefaultReactSlashMenuItems(editor).filter(
+												(item) => !unavailableSlashItems.has(item.title),
+											),
+											...mathSlashMenuItems(editor),
+											...fileSlashMenuItems(editor),
+										],
+										query,
+									)
+								}
+							/>
+						</BlockNoteView>
+					</NoteFileAccessProvider>
 				</div>
 			</div>
 			<NoteHistory

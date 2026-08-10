@@ -38,6 +38,7 @@ import {
 	createLocalNote,
 	deleteLocalFolder,
 	deleteLocalNote,
+	getNoteContent,
 	type NoteSummary,
 	notesDb,
 	renameLocalFolder,
@@ -107,16 +108,23 @@ export default function Notes() {
 		[],
 	);
 	const selectedId = searchParams.get('note');
+	// The document is fetched alongside the row, and only for the note on
+	// screen: it is the one place that needs it, and keeping it out of the
+	// listing query is the point of storing it separately.
 	const selectedState = useLiveQuery(async () => {
 		if (!selectedId) return undefined;
-		const [note, pendingCount] = await Promise.all([
+		const [note, content, pendingCount] = await Promise.all([
 			notesDb.notes.get(selectedId),
+			getNoteContent(notesDb, selectedId),
 			notesDb.outbox.where('noteId').equals(selectedId).count(),
 		]);
-		return { id: selectedId, note, pendingCount };
+		return { id: selectedId, note, content, pendingCount };
 	}, [selectedId]);
 	const selectedStateIsCurrent = selectedState?.id === selectedId;
 	const selectedNote = selectedStateIsCurrent ? selectedState.note : undefined;
+	const selectedContent = selectedStateIsCurrent
+		? selectedState.content
+		: undefined;
 	const selectedPendingCount = selectedStateIsCurrent
 		? selectedState.pendingCount
 		: 0;
@@ -135,7 +143,7 @@ export default function Notes() {
 			selectedStateIsCurrent &&
 			selectedPendingCount === 0 &&
 			(!selectedNote?.dirty ||
-				!selectedNote.content ||
+				!selectedContent ||
 				selectedNote.updatedAt >
 					(selectedNote.draftUpdatedAt ?? selectedNote.updatedAt)),
 	);
@@ -384,10 +392,10 @@ export default function Notes() {
 				</Button>
 			)}
 
-			{selectedNote?.content ? (
+			{selectedNote && selectedContent ? (
 				<NoteDocument
 					key={selectedNote.id}
-					note={selectedNote}
+					note={{ ...selectedNote, content: selectedContent }}
 					preferences={preferences}
 					focusTitle={selectedNote.id === titleFocusId}
 					treeOpen={treeOpen}

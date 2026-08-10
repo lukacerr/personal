@@ -11,15 +11,10 @@ import {
 import { Input } from '@web/components/ui/input';
 import { Spinner } from '@web/components/ui/spinner';
 import { Toggle } from '@web/components/ui/toggle';
-import { env } from '@web/lib/env';
-import type { StoredFile } from '@web/lib/storage-api';
+import { publicFileUrl, type StoredFile } from '@web/lib/storage-api';
 import { CopyIcon, Globe2Icon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
-
-export function publicFileUrl(id: string) {
-	return `${env.VITE_API_URL.replace(/\/$/, '')}/public/files/${id}`;
-}
 
 /** A dialog works consistently from cards, menus and narrow mobile viewports. */
 export function StorageShare({

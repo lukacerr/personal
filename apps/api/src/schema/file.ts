@@ -36,6 +36,12 @@ export const file = pgTable(
 		size: bigint({ mode: 'number' }).notNull(),
 		/** Readable by anyone holding the link, through the public router only. */
 		isPublic: boolean().notNull().default(false),
+		/**
+		 * Uploaded from the Notes editor rather than the Storage explorer. Notes
+		 * never deletes a file when its block goes away, so this is what makes it
+		 * possible to later ask which of those files nothing references anymore.
+		 */
+		uploadedFromNotes: boolean().notNull().default(false),
 		createdAt: timestamp().defaultNow().notNull(),
 		updatedAt: timestamp()
 			.defaultNow()

@@ -1,6 +1,7 @@
 import { createExtension, type PartialBlock } from '@blocknote/core';
 import { Extension, InputRule, isNodeSelection } from '@tiptap/core';
 import FindAndReplace from '@tiptap/extension-find-and-replace';
+import { STORED_FILE_BLOCK_TYPE } from '@web/lib/notes-files';
 import {
 	DISPLAY_MATH_INPUT_RULE,
 	EQUATION_BLOCK_TYPE,
@@ -374,8 +375,14 @@ function inlineText(content: NoteBlock['content']): string {
 
 /** The text a block holds, which decides whether an equation may replace it. */
 export function blockText(block: NoteBlock): string {
-	const latex = (block.props as Record<string, unknown>).latex;
-	const ownText = typeof latex === 'string' ? latex : inlineText(block.content);
+	const props = block.props as Record<string, unknown>;
+	// A block with no inline content still has something to say when it is
+	// copied: an equation is its LaTeX, and an attachment is its filename.
+	const own =
+		block.type === STORED_FILE_BLOCK_TYPE
+			? props.name
+			: (props.latex ?? undefined);
+	const ownText = typeof own === 'string' ? own : inlineText(block.content);
 	return [ownText, ...block.children.map(blockText)].filter(Boolean).join('\n');
 }
 

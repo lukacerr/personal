@@ -61,6 +61,14 @@ const visibilityOptions = [
 	['private', 'Private'],
 ] as const;
 
+const sourceOptions = [
+	['all', 'Anywhere'],
+	['manual', 'Uploaded here'],
+	['notes', 'From Notes'],
+	// The one value the client cannot work out on its own; the server answers it.
+	['notes-unused', 'From Notes, unused'],
+] as const;
+
 export function StorageToolbar({
 	view,
 	types,
@@ -73,6 +81,7 @@ export function StorageToolbar({
 	onTypesChange,
 	onVisibilityChange,
 	onUploadedChange,
+	onSourceChange,
 	onSortChange,
 	onClearFilters,
 	onRefresh,
@@ -91,6 +100,7 @@ export function StorageToolbar({
 	onTypesChange: (types: string[]) => void;
 	onVisibilityChange: (visibility: StorageView['visibility']) => void;
 	onUploadedChange: (uploaded: StorageView['uploaded']) => void;
+	onSourceChange: (source: StorageView['source']) => void;
 	onSortChange: (sort: StorageView['sort']) => void;
 	onClearFilters: () => void;
 	onRefresh: () => void;
@@ -101,7 +111,8 @@ export function StorageToolbar({
 	const activeFilters =
 		view.types.length +
 		Number(view.visibility !== 'all') +
-		Number(view.uploaded !== 'any');
+		Number(view.uploaded !== 'any') +
+		Number(view.source !== 'all');
 
 	const toggleType = (label: string) => {
 		const value = label.toLocaleLowerCase();
@@ -210,19 +221,17 @@ export function StorageToolbar({
 						</DropdownMenuContent>
 					</DropdownMenu>
 
-					<Button
-						variant="ghost"
-						className="hidden md:inline-flex"
-						onClick={onRefresh}
-						disabled={refreshing}
-						aria-busy={refreshing}
-						aria-label="Refresh files"
-					>
-						{refreshing ? <Spinner /> : <RefreshCwIcon />}
-						<span className="hidden lg:inline">Refresh</span>
-					</Button>
-
 					<div className="ml-auto hidden items-center gap-2 md:flex">
+						<Button
+							variant="ghost"
+							onClick={onRefresh}
+							disabled={refreshing}
+							aria-busy={refreshing}
+							aria-label="Refresh files"
+						>
+							{refreshing ? <Spinner /> : <RefreshCwIcon />}
+							<span className="hidden lg:inline">Refresh</span>
+						</Button>
 						<Button onClick={onUpload}>
 							<UploadIcon data-icon="inline-start" />
 							Upload
@@ -251,7 +260,7 @@ export function StorageToolbar({
 				</div>
 
 				<CollapsibleContent className="h-[var(--collapsible-panel-height)] overflow-hidden transition-[height] duration-150 ease-out data-ending-style:h-0 data-starting-style:h-0 motion-reduce:transition-none">
-					<div className="grid gap-6 rounded-xl border bg-card p-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+					<div className="flex flex-col gap-5 rounded-xl border bg-card p-4">
 						<fieldset className="min-w-0">
 							<legend className="mb-2 font-medium text-sm">File type</legend>
 							{types.length > 0 ? (
@@ -275,39 +284,58 @@ export function StorageToolbar({
 							)}
 						</fieldset>
 
-						<fieldset>
-							<legend className="mb-2 font-medium text-sm">Visibility</legend>
-							<div className="flex flex-wrap gap-2">
-								{visibilityOptions.map(([value, label]) => (
-									<Toggle
-										key={value}
-										size="sm"
-										variant="outline"
-										pressed={view.visibility === value}
-										onPressedChange={() => onVisibilityChange(value)}
-									>
-										{label}
-									</Toggle>
-								))}
-							</div>
-						</fieldset>
+						<div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+							<fieldset>
+								<legend className="mb-2 font-medium text-sm">Visibility</legend>
+								<div className="flex flex-wrap gap-2">
+									{visibilityOptions.map(([value, label]) => (
+										<Toggle
+											key={value}
+											size="sm"
+											variant="outline"
+											pressed={view.visibility === value}
+											onPressedChange={() => onVisibilityChange(value)}
+										>
+											{label}
+										</Toggle>
+									))}
+								</div>
+							</fieldset>
 
-						<fieldset>
-							<legend className="mb-2 font-medium text-sm">Uploaded</legend>
-							<div className="flex flex-wrap gap-2">
-								{uploadedOptions.map(([value, label]) => (
-									<Toggle
-										key={value}
-										size="sm"
-										variant="outline"
-										pressed={view.uploaded === value}
-										onPressedChange={() => onUploadedChange(value)}
-									>
-										{label}
-									</Toggle>
-								))}
-							</div>
-						</fieldset>
+							<fieldset>
+								<legend className="mb-2 font-medium text-sm">Source</legend>
+								<div className="flex flex-wrap gap-2">
+									{sourceOptions.map(([value, label]) => (
+										<Toggle
+											key={value}
+											size="sm"
+											variant="outline"
+											pressed={view.source === value}
+											onPressedChange={() => onSourceChange(value)}
+										>
+											{label}
+										</Toggle>
+									))}
+								</div>
+							</fieldset>
+
+							<fieldset>
+								<legend className="mb-2 font-medium text-sm">Uploaded</legend>
+								<div className="flex flex-wrap gap-2">
+									{uploadedOptions.map(([value, label]) => (
+										<Toggle
+											key={value}
+											size="sm"
+											variant="outline"
+											pressed={view.uploaded === value}
+											onPressedChange={() => onUploadedChange(value)}
+										>
+											{label}
+										</Toggle>
+									))}
+								</div>
+							</fieldset>
+						</div>
 					</div>
 				</CollapsibleContent>
 

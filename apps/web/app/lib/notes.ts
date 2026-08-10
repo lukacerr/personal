@@ -177,3 +177,24 @@ export function buildNoteTree(notes: NoteSummary[]): NoteTreeFolder {
 
 	return root;
 }
+
+/**
+ * Notes matching what someone typed into the tree's search.
+ *
+ * Searching flattens the tree rather than filtering it in place: a note three
+ * folders down is a match on its own terms, and hiding it behind collapsed
+ * parents would be answering a different question. The path comes back with it
+ * so the result still says where the note lives.
+ */
+export function searchNotes<T extends { title: string; path: string | null }>(
+	notes: T[],
+	query: string,
+) {
+	const needle = query.trim().toLocaleLowerCase();
+	if (!needle) return [];
+	return notes.filter(
+		(note) =>
+			note.title.toLocaleLowerCase().includes(needle) ||
+			note.path?.toLocaleLowerCase().includes(needle),
+	);
+}

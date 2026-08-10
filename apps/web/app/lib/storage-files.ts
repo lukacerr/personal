@@ -9,7 +9,6 @@ import {
 	deleteFiles,
 	deleteFolder,
 	getFileLink,
-	listFiles,
 	moveFiles,
 	reconcileStorage,
 	renameFolder,
@@ -18,6 +17,7 @@ import {
 	storageTransport,
 	updateFile,
 } from '@web/lib/storage-api';
+import { useStorageStore } from '@web/lib/storage-store';
 import {
 	createUploadQueue,
 	type UploadCandidate,
@@ -49,33 +49,42 @@ export function useStorageFiles({
 	/** Called when a move consumed the whole selection, so it can be dropped. */
 	onSelectionMoved: () => void;
 }) {
-	const [files, setFiles] = useState<StoredFile[]>([]);
-	const [loading, setLoading] = useState(true);
+	// The index is shared with the Notes picker and the command palette, so it
+	// is read from the store rather than fetched again here.
+	const files = useStorageStore((state) => state.files);
+	const status = useStorageStore((state) => state.status);
+	const loadError = useStorageStore((state) => state.error);
+	const load = useStorageStore((state) => state.load);
+	const upsert = useStorageStore((state) => state.upsert);
+	const drop = useStorageStore((state) => state.remove);
 	const [refreshing, setRefreshing] = useState(false);
 	const [reconciling, setReconciling] = useState(false);
-	const [loadError, setLoadError] = useState<string>();
 	const [uploads, setUploads] = useState<UploadItem[]>([]);
 
-	const reload = useCallback(async (background = false) => {
-		if (background) setRefreshing(true);
-		try {
-			setFiles(await listFiles());
-			setLoadError(undefined);
-		} catch {
-			setLoadError(
-				navigator.onLine
-					? 'Your files could not be loaded. Try again in a moment.'
-					: 'No connection. Storage needs to reach the server.',
-			);
-		} finally {
-			setLoading(false);
-			setRefreshing(false);
-		}
-	}, []);
+	const reload = useCallback(
+		async (background = false) => {
+			if (background) setRefreshing(true);
+			try {
+				await load(true);
+			} finally {
+				setRefreshing(false);
+			}
+		},
+		[load],
+	);
+
+	// A refresh that fails when there is already a list on screen says so and
+	// leaves the list alone. Replacing files the user can still act on with a
+	// full-screen error loses more than the failure cost them.
+	const failedWithNothingToShow = status === 'failed' && files.length === 0;
+	useEffect(() => {
+		if (status === 'failed' && files.length > 0 && loadError)
+			toast.error(loadError);
+	}, [files.length, loadError, status]);
 
 	useEffect(() => {
-		void reload();
-	}, [reload]);
+		void load();
+	}, [load]);
 
 	const queue = useMemo(
 		() =>
@@ -128,17 +137,18 @@ export function useStorageFiles({
 		}
 	}, []);
 
-	const setPublic = useCallback(async (file: StoredFile, isPublic: boolean) => {
-		const updated = await updateFile(file.id, {
-			name: file.name,
-			path: file.path,
-			isPublic,
-		});
-		setFiles((current) =>
-			current.map((item) => (item.id === updated.id ? updated : item)),
-		);
-		return updated;
-	}, []);
+	const setPublic = useCallback(
+		async (file: StoredFile, isPublic: boolean) => {
+			const updated = await updateFile(file.id, {
+				name: file.name,
+				path: file.path,
+				isPublic,
+			});
+			upsert([updated]);
+			return updated;
+		},
+		[upsert],
+	);
 
 	const moveMany = useCallback(
 		async (
@@ -168,15 +178,14 @@ export function useStorageFiles({
 					targets.map((file) => file.id),
 					destination,
 				);
-				const byId = new Map(moved.map((file) => [file.id, file]));
-				setFiles((current) => current.map((file) => byId.get(file.id) ?? file));
+				upsert(moved);
 				if (movedTheSelection) onSelectionMoved();
 				return 'moved';
 			} catch (error) {
 				return isConflict(error) ? 'conflict' : 'failed';
 			}
 		},
-		[files, onSelectionMoved, selectedIds],
+		[files, onSelectionMoved, selectedIds, upsert],
 	);
 
 	/** Moving a folder is a prefix rename: storage never sees it at all. */
@@ -208,9 +217,7 @@ export function useStorageFiles({
 					path: file.path,
 					isPublic: file.isPublic,
 				});
-				setFiles((current) =>
-					current.map((item) => (item.id === updated.id ? updated : item)),
-				);
+				upsert([updated]);
 				return undefined;
 			} catch (error) {
 				if (isConflict(error))
@@ -220,7 +227,7 @@ export function useStorageFiles({
 					: 'Renaming requires a connection.';
 			}
 		},
-		[files],
+		[files, upsert],
 	);
 
 	const renameFolderTo = useCallback(
@@ -240,17 +247,22 @@ export function useStorageFiles({
 		[path, reload],
 	);
 
-	const removeFile = useCallback(async (id: string) => {
-		await deleteFile(id);
-		setFiles((current) => current.filter((file) => file.id !== id));
-	}, []);
+	const removeFile = useCallback(
+		async (id: string) => {
+			await deleteFile(id);
+			drop([id]);
+		},
+		[drop],
+	);
 
-	const removeFiles = useCallback(async (ids: string[]) => {
-		const result = await deleteFiles(ids);
-		const deleted = new Set(result.deleted);
-		setFiles((current) => current.filter((file) => !deleted.has(file.id)));
-		return result;
-	}, []);
+	const removeFiles = useCallback(
+		async (ids: string[]) => {
+			const result = await deleteFiles(ids);
+			drop(result.deleted);
+			return result;
+		},
+		[drop],
+	);
 
 	const removeFolder = useCallback(
 		async (name: string) => {
@@ -287,10 +299,10 @@ export function useStorageFiles({
 
 	return {
 		files,
-		loading,
+		loading: status === 'idle' || status === 'loading',
 		refreshing,
 		reconciling,
-		loadError,
+		loadError: failedWithNothingToShow ? loadError : undefined,
 		uploads,
 		reload,
 		upload,

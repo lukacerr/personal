@@ -11,7 +11,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NoteDocument } from '@web/components/notes/note-document';
-import { type LocalNote, notesDb } from '@web/lib/notes-db';
+import { type LoadedNote, notesDb } from '@web/lib/notes-db';
 import { updateAndSyncNoteMetadata } from '@web/lib/notes-sync';
 import { toast } from 'sonner';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -106,7 +106,7 @@ vi.mock('sonner', () => ({
 	toast: { error: vi.fn(), success: vi.fn() },
 }));
 
-const note: LocalNote = {
+const note: LoadedNote = {
 	id: 'note-1',
 	title: 'Saved note',
 	path: null,
@@ -119,7 +119,7 @@ const note: LocalNote = {
 
 let clipboard = '';
 
-function documentProps(current: LocalNote) {
+function documentProps(current: LoadedNote) {
 	return {
 		note: current,
 		preferences: { fontSize: 'medium', margins: 'medium' } as const,
@@ -628,7 +628,7 @@ describe('NoteDocument', () => {
 
 	it('publishes a note and only then offers its public link', async () => {
 		const user = userEvent.setup();
-		const synced: LocalNote = { ...note, serverUpdatedAt: 1 };
+		const synced: LoadedNote = { ...note, serverUpdatedAt: 1 };
 		const view = render(<NoteDocument {...documentProps(synced)} />);
 
 		await user.click(screen.getByRole('button', { name: 'Share note' }));

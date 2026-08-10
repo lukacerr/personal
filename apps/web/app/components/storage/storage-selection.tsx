@@ -13,6 +13,10 @@ import {
  * Floats over the list instead of sitting above it: appearing in the flow
  * pushed the whole table down the moment a checkbox was ticked, which moved the
  * next row out from under the pointer that was about to tick it.
+ *
+ * Fixed to the viewport rather than to the list: the page itself is what
+ * scrolls, so anything positioned against the list ends up wherever the list
+ * ends — which with a few thousand files is a long way below the fold.
  */
 export function StorageSelection({
 	count,
@@ -41,7 +45,7 @@ export function StorageSelection({
 						animate={{ opacity: 1, y: 0 }}
 						exit={{ opacity: 0, y: offset }}
 						transition={{ duration: 0.15, ease: 'easeOut' }}
-						className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center p-4 sm:p-6"
+						className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center p-4 sm:p-6"
 					>
 						<nav
 							className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-2xl border bg-popover px-3 py-2 shadow-lg"

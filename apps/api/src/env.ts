@@ -71,7 +71,12 @@ export const db = drizzle({
 		config: { ex: 300 },
 	}),
 	casing: 'snake_case',
-	logger: env.NODE_ENV !== 'production',
+	/**
+	 * Only development. Under `test` this logged every statement with its
+	 * params, including whole note documents, which is tens of thousands of
+	 * tokens of noise for anything reading the suite's output.
+	 */
+	logger: env.NODE_ENV === 'development',
 }) as NeonHttpDatabase<typeof schema>;
 
 export const storage = new S3Client({

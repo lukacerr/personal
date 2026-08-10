@@ -1,4 +1,13 @@
 import type { StoredFile } from '@web/lib/storage-api';
+import {
+	FileArchiveIcon,
+	FileAudioIcon,
+	FileIcon,
+	FileSpreadsheetIcon,
+	FileTextIcon,
+	FileVideoIcon,
+	ImageIcon,
+} from 'lucide-react';
 
 /** Rounded to two decimals and trimmed, so 1024 reads as `1 KB`, not `1.00 KB`. */
 export function formatBytes(size: number) {
@@ -87,6 +96,26 @@ export async function readTextPrefix(response: Response, limit: number) {
 	return new TextDecoder().decode(merged.slice(0, limit));
 }
 
+/** The icon that stands for a file, shared by the explorer and by Notes. */
+export function fileTypeIcon(contentType: string) {
+	switch (previewKind(contentType)) {
+		case 'image':
+			return ImageIcon;
+		case 'video':
+			return FileVideoIcon;
+		case 'audio':
+			return FileAudioIcon;
+		case 'sheet':
+			return FileSpreadsheetIcon;
+		case 'pdf':
+		case 'document':
+		case 'text':
+			return FileTextIcon;
+		default:
+			return contentType.includes('zip') ? FileArchiveIcon : FileIcon;
+	}
+}
+
 export type StorageTree = { folders: string[]; files: StoredFile[] };
 
 export const storageSorts = [
@@ -103,13 +132,24 @@ export type StorageSort = (typeof storageSorts)[number];
 export type StorageVisibility = 'all' | 'public' | 'private';
 export type StorageUploaded = 'any' | 'today' | '7d' | '30d' | '1y';
 
+/**
+ * Where a file came from. `notes-unused` is the one value the client cannot
+ * answer on its own: only the server knows which Notes uploads no note
+ * references anymore, so it supplies the set and the rest of the filters
+ * narrow it from there.
+ */
+export type StorageSource = 'all' | 'notes' | 'manual' | 'notes-unused';
+
 export type StorageView = {
 	path: string | null;
 	query: string;
 	types: string[];
 	visibility: StorageVisibility;
 	uploaded: StorageUploaded;
+	source: StorageSource;
 	sort: StorageSort;
+	/** The file whose preview is open, so a link to it can be shared. */
+	file: string | null;
 };
 
 const storageVisibilities = new Set<StorageVisibility>([
@@ -125,6 +165,12 @@ const storageUploadedWindows = new Set<StorageUploaded>([
 	'1y',
 ]);
 const storageSortSet = new Set<StorageSort>(storageSorts);
+const storageSources = new Set<StorageSource>([
+	'all',
+	'notes',
+	'manual',
+	'notes-unused',
+]);
 
 /** Types whose subtype is unreadable, and types a person calls something else. */
 const TYPE_LABELS: Record<string, string> = {
@@ -194,6 +240,7 @@ export function collectFileTypes(files: StoredFile[]) {
 export function parseStorageView(params: URLSearchParams): StorageView {
 	const visibility = params.get('visibility') as StorageVisibility | null;
 	const uploaded = params.get('uploaded') as StorageUploaded | null;
+	const source = params.get('source') as StorageSource | null;
 	const sort = params.get('sort') as StorageSort | null;
 	// Type labels travel lowercased so the URL stays readable; every file has a
 	// content type, so there is no empty bucket to encode around.
@@ -214,7 +261,9 @@ export function parseStorageView(params: URLSearchParams): StorageView {
 			visibility && storageVisibilities.has(visibility) ? visibility : 'all',
 		uploaded:
 			uploaded && storageUploadedWindows.has(uploaded) ? uploaded : 'any',
+		source: source && storageSources.has(source) ? source : 'all',
 		sort: sort && storageSortSet.has(sort) ? sort : 'newest',
+		file: params.get('file') || null,
 	};
 }
 
@@ -224,7 +273,9 @@ type StorageViewPatch = Partial<{
 	types: string[];
 	visibility: StorageVisibility;
 	uploaded: StorageUploaded;
+	source: StorageSource;
 	sort: StorageSort;
+	file: string | null;
 }>;
 
 /** Changes one concern without throwing away the rest of the shareable view. */
@@ -239,7 +290,9 @@ export function updateStorageSearchParams(
 		['types', 'types', patch.types?.join(',') ?? null],
 		['visibility', 'visibility', patch.visibility ?? null],
 		['uploaded', 'uploaded', patch.uploaded ?? null],
+		['source', 'source', patch.source ?? null],
 		['sort', 'sort', patch.sort ?? null],
+		['file', 'file', patch.file ?? null],
 	];
 
 	for (const [field, parameter, value] of values) {
@@ -249,6 +302,7 @@ export function updateStorageSearchParams(
 			value === '' ||
 			(parameter === 'visibility' && value === 'all') ||
 			(parameter === 'uploaded' && value === 'any') ||
+			(parameter === 'source' && value === 'all') ||
 			(parameter === 'sort' && value === 'newest')
 		)
 			next.delete(parameter);
@@ -262,8 +316,14 @@ export function hasStorageFilters(view: StorageView) {
 		view.query !== '' ||
 		view.types.length > 0 ||
 		view.visibility !== 'all' ||
-		view.uploaded !== 'any'
+		view.uploaded !== 'any' ||
+		view.source !== 'all'
 	);
+}
+
+/** The set on screen comes from the server rather than from the local index. */
+export function needsUnreferencedFiles(view: Pick<StorageView, 'source'>) {
+	return view.source === 'notes-unused';
 }
 
 function isWithinFolder(item: StoredFile, folder: string | null) {
@@ -300,13 +360,14 @@ export function filterStorageFiles(
 	files: StoredFile[],
 	folder: string | null,
 	filters: Partial<
-		Pick<StorageView, 'query' | 'types' | 'visibility' | 'uploaded'>
+		Pick<StorageView, 'query' | 'types' | 'visibility' | 'uploaded' | 'source'>
 	>,
 	now = Date.now(),
 ) {
 	const query = filters.query?.trim().toLocaleLowerCase() ?? '';
 	const types = new Set(filters.types ?? []);
 	const visibility = filters.visibility ?? 'all';
+	const source = filters.source ?? 'all';
 	const cutoff = uploadedCutoff(filters.uploaded ?? 'any', now);
 
 	return files.filter((item) => {
@@ -323,6 +384,11 @@ export function filterStorageFiles(
 			return false;
 		if (visibility === 'public' && !item.isPublic) return false;
 		if (visibility === 'private' && item.isPublic) return false;
+		// `notes-unused` narrows a set the server already restricted to Notes
+		// uploads, so here it means the same thing as `notes`.
+		if (source === 'manual' && item.uploadedFromNotes) return false;
+		if (source !== 'all' && source !== 'manual' && !item.uploadedFromNotes)
+			return false;
 		return item.createdAt >= cutoff;
 	});
 }
@@ -417,9 +483,41 @@ function validateName(value: string) {
 export const validateFileName = validateName;
 export const validateFolderName = validateName;
 
+/**
+ * A name free to use in that folder, suffixed if it is not.
+ *
+ * The explorer refuses a duplicate and says so, which is the right answer when
+ * someone is uploading on purpose. Attaching a file to a note is not that
+ * moment: two notes both holding a `screenshot.png` is ordinary, and stopping
+ * the editor to argue about it is not. The suffix goes before the extension so
+ * the file keeps being what it is.
+ */
+export function uniqueFileName(
+	files: NamedFile[],
+	folder: string | null,
+	name: string,
+) {
+	if (!isDuplicateName(files, folder, name)) return name;
+
+	const dot = name.lastIndexOf('.');
+	const stem = dot > 0 ? name.slice(0, dot) : name;
+	const extension = dot > 0 ? name.slice(dot) : '';
+
+	for (let suffix = 2; suffix < 1000; suffix += 1) {
+		const candidate = `${stem} (${suffix})${extension}`;
+		if (!isDuplicateName(files, folder, candidate)) return candidate;
+	}
+	// Vanishingly unlikely, and the server would reject it anyway rather than
+	// silently overwrite something.
+	return `${stem} (${crypto.randomUUID().slice(0, 8)})${extension}`;
+}
+
+/** Only what a name check reads, so a not-yet-uploaded file can be counted. */
+type NamedFile = Pick<StoredFile, 'id' | 'name' | 'path'>;
+
 /** Mirrors the server's case-insensitive uniqueness so the UI can say so first. */
 export function isDuplicateName(
-	files: StoredFile[],
+	files: NamedFile[],
 	folder: string | null,
 	name: string,
 	exceptId?: string,

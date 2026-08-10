@@ -1,5 +1,5 @@
 import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
-import type { AppSystem } from '@web/lib/app-systems';
+import { type AppSystem, matchesCommandQuery } from '@web/lib/app-systems';
 import { notesDb } from '@web/lib/notes-db';
 import { FileTextIcon, FolderIcon } from 'lucide-react';
 
@@ -26,8 +26,18 @@ export const notesSystem: AppSystem = {
 	heading: 'Notes',
 	icon: FileTextIcon,
 
-	async loadCommands() {
-		const notes = await notesDb.notes.orderBy('title').toArray();
+	/**
+	 * Scans the rows rather than an index because a person searching for a note
+	 * means a substring of its title, which no IndexedDB index can answer. The
+	 * rows are small now — the documents live in their own table — so the scan
+	 * reads titles and paths and nothing else.
+	 */
+	async searchCommands(query, limit) {
+		const notes = await notesDb.notes
+			.orderBy('title')
+			.filter((note) => matchesCommandQuery(query, note.title, note.path))
+			.limit(limit)
+			.toArray();
 		return notes.map((note) => ({
 			id: note.id,
 			label: note.title,

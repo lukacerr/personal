@@ -13,6 +13,7 @@ import {
 	isNotesTreeShortcut,
 	nextAvailableNoteTitle,
 	rememberSelectedNote,
+	searchNotes,
 } from '@web/lib/notes';
 import type { NoteSummary } from '@web/lib/notes-db';
 import { describe, expect, it } from 'vitest';
@@ -169,5 +170,36 @@ describe('Notes', () => {
 		expect(getLastSelectedNoteId([], storage)).toBeNull();
 		rememberSelectedNote(storage, 'first');
 		expect(stored).toBe('first');
+	});
+});
+
+describe('Note search', () => {
+	const notes = [
+		{ title: 'Shopping list', path: null },
+		{ title: 'Meeting notes', path: 'work/2026' },
+		{ title: 'Recipes', path: 'personal' },
+	];
+
+	it('matches a title however it was cased', () => {
+		expect(searchNotes(notes, 'SHOPPING').map((note) => note.title)).toEqual([
+			'Shopping list',
+		]);
+	});
+
+	/** A note three folders down is a match on its own terms. */
+	it('matches on the folder a note lives in', () => {
+		expect(searchNotes(notes, 'work').map((note) => note.title)).toEqual([
+			'Meeting notes',
+		]);
+	});
+
+	it('answers an empty query with nothing, so the tree stays the tree', () => {
+		expect(searchNotes(notes, '   ')).toEqual([]);
+	});
+
+	it('matches part of a word, not just its start', () => {
+		expect(searchNotes(notes, 'cipe').map((note) => note.title)).toEqual([
+			'Recipes',
+		]);
 	});
 });

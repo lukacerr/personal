@@ -8,12 +8,19 @@ import {
 import { NotesPreferencesControl } from '@web/components/notes/note-preferences';
 import { Button } from '@web/components/ui/button';
 import { Input } from '@web/components/ui/input';
+import {
+	InputGroup,
+	InputGroupAddon,
+	InputGroupButton,
+	InputGroupInput,
+} from '@web/components/ui/input-group';
 import { Spinner } from '@web/components/ui/spinner';
 import {
 	buildNoteTree,
 	collectFolderPaths,
 	getActiveFolderPath,
 	type NoteTreeFolder,
+	searchNotes,
 } from '@web/lib/notes';
 import type { NoteSummary } from '@web/lib/notes-db';
 import type {
@@ -33,7 +40,9 @@ import {
 	PanelLeftCloseIcon,
 	PencilIcon,
 	RefreshCwIcon,
+	SearchIcon,
 	Trash2Icon,
+	XIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -64,11 +73,14 @@ function NoteTreeItem({
 	selected,
 	editing,
 	actions,
+	showPath = false,
 }: {
 	note: NoteSummary;
 	selected: boolean;
 	editing: boolean;
 	actions: NoteActions;
+	/** Search results are flat, so each one has to say where it came from. */
+	showPath?: boolean;
 }) {
 	const [title, setTitle] = useState(note.title);
 	const [error, setError] = useState('');
@@ -136,7 +148,14 @@ function NoteTreeItem({
 						onClick={() => actions.onSelect(note.id)}
 					>
 						<FileTextIcon className="text-muted-foreground" />
-						<span className="truncate">{note.title}</span>
+						<span className="min-w-0 flex-1 truncate text-left">
+							{note.title}
+							{showPath ? (
+								<span className="ml-1.5 text-[0.68rem] text-muted-foreground">
+									{note.path ?? 'Root'}
+								</span>
+							) : null}
+						</span>
 						{note.isPublic && (
 							<Globe2Icon
 								className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-opacity ${actionVisibility}`}
@@ -339,6 +358,11 @@ export function NotesTree({
 	onDeleteFolder: (path: string) => void;
 	onMoveNote: (id: string, path: string | null) => Promise<NoteMoveResult>;
 }) {
+	const [query, setQuery] = useState('');
+	const searching = query.trim() !== '';
+	// Flattened rather than filtered in place: a match three folders down is a
+	// match on its own terms, and collapsed parents would hide the answer.
+	const results = useMemo(() => searchNotes(notes, query), [notes, query]);
 	const tree = useMemo(() => buildNoteTree(notes), [notes]);
 	const folderPaths = useMemo(() => collectFolderPaths(tree), [tree]);
 	const folderPathsKey = folderPaths.join('\0');
@@ -511,6 +535,30 @@ export function NotesTree({
 						</Button>
 					)}
 				</div>
+				<div className="shrink-0 border-b px-3 py-2">
+					<InputGroup>
+						<InputGroupAddon>
+							<SearchIcon aria-hidden="true" />
+						</InputGroupAddon>
+						<InputGroupInput
+							value={query}
+							placeholder="Search notes…"
+							aria-label="Search notes by title or folder"
+							onChange={(event) => setQuery(event.target.value)}
+						/>
+						{query ? (
+							<InputGroupAddon align="inline-end">
+								<InputGroupButton
+									size="icon-xs"
+									aria-label="Clear note search"
+									onClick={() => setQuery('')}
+								>
+									<XIcon />
+								</InputGroupButton>
+							</InputGroupAddon>
+						) : null}
+					</InputGroup>
+				</div>
 				<nav className="min-h-0 flex-1 overflow-y-auto p-2" aria-label="Notes">
 					<RootDropTarget visible={Boolean(draggedId)} />
 					{notes.length === 0 ? (
@@ -528,27 +576,43 @@ export function NotesTree({
 						</div>
 					) : (
 						<ul className="space-y-0.5">
-							{tree.folders.map((folder) => (
-								<FolderBranch
-									key={folder.path}
-									folder={folder}
-									activeFolderPath={activeFolderPath}
-									expandedPaths={expandedPaths}
-									onToggle={toggleFolder}
-									onRenameFolder={onRenameFolder}
-									onDeleteFolder={onDeleteFolder}
-									actions={actions}
-								/>
-							))}
-							{tree.notes.map((note) => (
-								<NoteTreeItem
-									key={note.id}
-									note={note}
-									selected={note.id === selectedId}
-									editing={note.id === editingNoteId}
-									actions={actions}
-								/>
-							))}
+							{searching
+								? results.map((note) => (
+										<NoteTreeItem
+											key={note.id}
+											note={note}
+											selected={note.id === selectedId}
+											editing={note.id === editingNoteId}
+											actions={actions}
+											showPath
+										/>
+									))
+								: null}
+							{searching
+								? null
+								: tree.folders.map((folder) => (
+										<FolderBranch
+											key={folder.path}
+											folder={folder}
+											activeFolderPath={activeFolderPath}
+											expandedPaths={expandedPaths}
+											onToggle={toggleFolder}
+											onRenameFolder={onRenameFolder}
+											onDeleteFolder={onDeleteFolder}
+											actions={actions}
+										/>
+									))}
+							{searching
+								? null
+								: tree.notes.map((note) => (
+										<NoteTreeItem
+											key={note.id}
+											note={note}
+											selected={note.id === selectedId}
+											editing={note.id === editingNoteId}
+											actions={actions}
+										/>
+									))}
 						</ul>
 					)}
 				</nav>

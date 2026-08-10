@@ -12,6 +12,7 @@ import {
 	reconcileNoteSummaries,
 	updateNoteContentDraft,
 } from '@web/lib/notes-db';
+import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const content = (text: string) =>
@@ -29,6 +30,20 @@ const content = (text: string) =>
 		},
 	] as Block[];
 
+/**
+ * Seeds a note the way the app does now: the row in one table, the document in
+ * another. Tests keep writing them together because that is how a note reads.
+ */
+async function seed(
+	db: NotesDatabase,
+	note: LocalNote & { content?: Block[] },
+) {
+	const { content: document, ...row } = note;
+	await db.notes.put(row);
+	if (document)
+		await db.noteContent.put({ id: row.id, content: document as never });
+}
+
 describe('NotesDatabase', () => {
 	let db: NotesDatabase;
 
@@ -41,7 +56,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('persists drafts without adding them to the server outbox', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Draft',
 			path: null,
@@ -59,7 +74,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('creates an unsynced Untitled note in the requested folder', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'existing',
 			title: 'Untitled',
 			path: 'work',
@@ -98,7 +113,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('coalesces metadata and keeps a newer change made while syncing', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Saved',
 			path: null,
@@ -166,7 +181,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('keeps newer pending metadata when an older content save confirms', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Latest title',
 			path: 'latest',
@@ -225,7 +240,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('serializes concurrent syncs and drains metadata added in flight', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Saved',
 			path: null,
@@ -281,7 +296,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('queues idempotent saves with monotonic timestamps', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Draft',
 			path: 'work',
@@ -311,7 +326,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('flushes saves in order and leaves failed work queued', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Draft',
 			path: null,
@@ -350,7 +365,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('reconciles server summaries without overwriting pending local work', async () => {
-		await db.notes.bulkPut([
+		for (const note of [
 			{
 				id: 'pending',
 				title: 'Local title',
@@ -370,7 +385,8 @@ describe('NotesDatabase', () => {
 				updatedAt: 1,
 				dirty: false,
 			},
-		]);
+		])
+			await seed(db, note);
 		await db.outbox.put({
 			key: 'pending:20',
 			type: 'save',
@@ -402,7 +418,7 @@ describe('NotesDatabase', () => {
 
 	it('resolves LWW between local drafts and remote snapshots', async () => {
 		const draft = content('New local draft');
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Local',
 			path: null,
@@ -426,13 +442,16 @@ describe('NotesDatabase', () => {
 
 		expect(await db.notes.get('note-1')).toMatchObject({
 			title: 'Local',
-			content: draft,
 			dirty: true,
 			draftUpdatedAt: 300,
 		});
+		expect(await db.noteContent.get('note-1')).toMatchObject({
+			content: draft,
+		});
 
 		await db.notes.clear();
-		await db.notes.put({
+		await db.noteContent.clear();
+		await seed(db, {
 			id: 'note-1',
 			title: 'Saved',
 			path: null,
@@ -455,17 +474,19 @@ describe('NotesDatabase', () => {
 			content: remoteContent,
 		});
 
+		expect(await db.noteContent.get('note-1')).toMatchObject({
+			content: remoteContent,
+		});
 		expect(await db.notes.get('note-1')).toMatchObject({
 			title: 'Remote',
 			path: 'remote',
-			content: remoteContent,
 			dirty: false,
 			draftUpdatedAt: undefined,
 		});
 	});
 
 	it('records a newer server summary so a stale dirty note can fetch it', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Local',
 			path: null,
@@ -497,7 +518,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('outranks the last confirmed server version when queueing a save', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Draft',
 			path: null,
@@ -515,7 +536,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('drops cached content once the server reports a newer version', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Note',
 			path: null,
@@ -539,14 +560,16 @@ describe('NotesDatabase', () => {
 		]);
 
 		expect(await db.notes.get('note-1')).toMatchObject({
-			content: undefined,
 			updatedAt: 20,
 			serverUpdatedAt: 20,
 		});
+		// The document goes with the version it belonged to, rather than being
+		// shipped again under a newer timestamp.
+		expect(await db.noteContent.get('note-1')).toBeUndefined();
 	});
 
 	it('carries the fields a metadata change does not mention', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Shared',
 			path: 'study',
@@ -593,7 +616,7 @@ describe('NotesDatabase', () => {
 	it('treats a note cached before publishing existed as private', async () => {
 		// Written by a build that had no such column, so the row genuinely lacks
 		// the field rather than storing `false`.
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Old cache',
 			path: null,
@@ -616,7 +639,7 @@ describe('NotesDatabase', () => {
 	});
 
 	it('keeps a queued publication when a remote snapshot arrives first', async () => {
-		await db.notes.put({
+		await seed(db, {
 			id: 'note-1',
 			title: 'Shared',
 			path: null,
@@ -643,7 +666,7 @@ describe('NotesDatabase', () => {
 
 	it('drops terminally rejected work instead of stalling the queue behind it', async () => {
 		for (const id of ['rejected', 'later']) {
-			await db.notes.put({
+			await seed(db, {
 				id,
 				title: id,
 				path: null,
@@ -684,5 +707,84 @@ describe('NotesDatabase', () => {
 		});
 		expect(await db.notes.get('later')).toMatchObject({ updatedAt: 200 });
 		expect((await db.notes.get('later'))?.syncFailure).toBeUndefined();
+	});
+});
+
+/**
+ * The upgrade only ever runs against a database that already exists, which is
+ * to say: only in a browser that already holds someone's notes. A draft that
+ * never reached the server lives nowhere else, so losing one here loses it.
+ */
+describe('NotesDatabase upgrade', () => {
+	it('moves documents out of the rows without dropping them', async () => {
+		const name = `personal-notes-upgrade-${crypto.randomUUID()}`;
+		// Captured once: each call builds a block with a fresh id, so rebuilding
+		// it for the assertion would compare two different documents.
+		const savedBody = content('Saved body');
+		const draftBody = content('Never left this device');
+		const legacy = new Dexie(name);
+		legacy.version(1).stores({
+			notes: 'id, title, path, updatedAt',
+			outbox: '&key, noteId, createdAt, [noteId+createdAt]',
+		});
+		await legacy.open();
+		await legacy.table('notes').bulkPut([
+			{
+				id: 'saved',
+				title: 'Saved',
+				path: 'work',
+				isPublic: false,
+				createdAt: 1,
+				updatedAt: 1,
+				content: savedBody,
+				dirty: false,
+			},
+			{
+				id: 'draft',
+				title: 'Unsynced draft',
+				path: null,
+				isPublic: false,
+				createdAt: 2,
+				updatedAt: 2,
+				content: draftBody,
+				dirty: true,
+				draftUpdatedAt: 5,
+			},
+		]);
+		legacy.close();
+
+		const upgraded = new NotesDatabase(name);
+		await upgraded.open();
+
+		expect(await upgraded.noteContent.get('saved')).toMatchObject({
+			content: savedBody,
+		});
+		expect(await upgraded.noteContent.get('draft')).toMatchObject({
+			content: draftBody,
+		});
+		// The rows keep everything that was not the document.
+		expect(await upgraded.notes.get('draft')).toMatchObject({
+			title: 'Unsynced draft',
+			dirty: true,
+			draftUpdatedAt: 5,
+		});
+		await upgraded.delete();
+	});
+
+	it('opens a database that never held a document', async () => {
+		const name = `personal-notes-empty-${crypto.randomUUID()}`;
+		const legacy = new Dexie(name);
+		legacy.version(1).stores({
+			notes: 'id, title, path, updatedAt',
+			outbox: '&key, noteId, createdAt, [noteId+createdAt]',
+		});
+		await legacy.open();
+		legacy.close();
+
+		const upgraded = new NotesDatabase(name);
+		await upgraded.open();
+
+		expect(await upgraded.noteContent.count()).toBe(0);
+		await upgraded.delete();
 	});
 });

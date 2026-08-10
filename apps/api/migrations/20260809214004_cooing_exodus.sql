@@ -1,0 +1,1 @@
+ALTER TABLE "file" ADD COLUMN "uploaded_from_notes" boolean DEFAULT false NOT NULL;

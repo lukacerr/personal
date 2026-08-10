@@ -1,6 +1,5 @@
 import {
 	InlineRename,
-	iconFor,
 	type StorageActions,
 	uploadedLabel,
 } from '@web/components/storage/storage-row';
@@ -14,7 +13,12 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from '@web/components/ui/dropdown-menu';
-import { fileTypeLabel, formatBytes, parentFolder } from '@web/lib/storage';
+import {
+	fileTypeIcon,
+	fileTypeLabel,
+	formatBytes,
+	parentFolder,
+} from '@web/lib/storage';
 import type { StoredFile } from '@web/lib/storage-api';
 import {
 	ChevronLeftIcon,
@@ -22,6 +26,7 @@ import {
 	FolderIcon,
 	MoreHorizontalIcon,
 	MoveIcon,
+	NotebookPenIcon,
 	PencilIcon,
 	Share2Icon,
 	Trash2Icon,
@@ -121,7 +126,7 @@ export function StorageCards({
 				</li>
 			))}
 			{files.map((file) => {
-				const Icon = iconFor(file.contentType);
+				const Icon = fileTypeIcon(file.contentType);
 				const selected = selectedIds.has(file.id);
 				return (
 					<li
@@ -149,8 +154,16 @@ export function StorageCards({
 							>
 								<Icon className="size-6 shrink-0 text-muted-foreground" />
 								<span className="min-w-0 flex-1">
-									<span className="block truncate font-medium">
-										{file.name}
+									{/* Beside the name, like the table does: appended to the meta
+									    line it was the first thing `truncate` cut off. */}
+									<span className="flex min-w-0 items-center gap-1.5">
+										<span className="truncate font-medium">{file.name}</span>
+										{file.uploadedFromNotes ? (
+											<NotebookPenIcon
+												className="size-3.5 shrink-0 text-muted-foreground"
+												aria-label="Uploaded from Notes"
+											/>
+										) : null}
 									</span>
 									<span className="block truncate text-muted-foreground text-xs">
 										{fileTypeLabel(file.contentType)} · {formatBytes(file.size)}{' '}

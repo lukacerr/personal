@@ -45,7 +45,7 @@
 		"typecheck": "bun run --parallel --filter @personal/api --filter @personal/web typecheck"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.5.6",
+		"@biomejs/biome": "^2.5.7",
 		"husky": "^9.1.7",
 		"lint-staged": "^17.3.0"
 	},

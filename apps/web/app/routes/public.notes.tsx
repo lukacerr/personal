@@ -1,5 +1,9 @@
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
+import {
+	NoteFileAccessProvider,
+	publicNoteFileAccess,
+} from '@web/components/notes/note-file';
 import { Button } from '@web/components/ui/button';
 import { Spinner } from '@web/components/ui/spinner';
 import { api } from '@web/lib/api';
@@ -44,12 +48,17 @@ function PublicNoteBody({ content }: { content: NoteBlock[] }) {
 		schema: notesSchema,
 	});
 	return (
-		<BlockNoteView
-			editor={editor}
-			editable={false}
-			slashMenu={false}
-			theme="dark"
-		/>
+		// A visitor has no session, so an attachment cannot be signed for them.
+		// The only URL that works here is the published one, and a file that was
+		// never shared simply does not appear.
+		<NoteFileAccessProvider value={publicNoteFileAccess}>
+			<BlockNoteView
+				editor={editor}
+				editable={false}
+				slashMenu={false}
+				theme="dark"
+			/>
+		</NoteFileAccessProvider>
 	);
 }
 

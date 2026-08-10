@@ -17,7 +17,13 @@ import {
 	TooltipTrigger,
 } from '@web/components/ui/tooltip';
 import { appNavigation } from '@web/lib/app-navigation';
-import { loadSystemCommands } from '@web/lib/app-systems';
+import {
+	getSystemDataRevision,
+	matchesCommandQuery,
+	type SystemCommandGroup,
+	searchSystemCommands,
+	subscribeToSystemData,
+} from '@web/lib/app-systems';
 import {
 	consumeCommandPaletteHistory,
 	isCommandPaletteHistoryEntry,
@@ -25,10 +31,19 @@ import {
 	pushCommandPaletteHistory,
 	shouldRestorePaletteFocus,
 } from '@web/lib/command-palette';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { SearchIcon } from 'lucide-react';
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import {
+	useDeferredValue,
+	useEffect,
+	useEffectEvent,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from 'react';
 import { useLocation, useNavigate } from 'react-router';
+
+/** Enough to choose from; a palette is not a place to browse ten thousand rows. */
+const COMMAND_RESULT_LIMIT = 25;
 
 export function AppCommandPalette() {
 	const [open, setOpen] = useState(false);
@@ -38,9 +53,39 @@ export function AppCommandPalette() {
 	const navigate = useNavigate();
 	const previousFocus = useRef<HTMLElement | null>(null);
 	const consumingHistory = useRef(false);
-	const systemGroups = useLiveQuery(loadSystemCommands, [], []);
+	const [query, setQuery] = useState('');
+	const deferredQuery = useDeferredValue(query);
+	const [systemGroups, setSystemGroups] = useState<SystemCommandGroup[]>([]);
+	// A system whose data is not in Dexie reports its own changes, which is how
+	// a file index that arrives after the search ran gets into the results.
+	const systemRevision = useSyncExternalStore(
+		subscribeToSystemData,
+		getSystemDataRevision,
+		getSystemDataRevision,
+	);
+
+	// Nothing is asked for until the palette is open: the whole point of asking
+	// systems for matches instead of catalogues is that a closed palette costs
+	// nothing at all.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `systemRevision` is the signal that a system has new data, and re-running this is what it is for
+	useEffect(() => {
+		if (!open) {
+			setSystemGroups([]);
+			return;
+		}
+		let current = true;
+		void searchSystemCommands(deferredQuery, COMMAND_RESULT_LIMIT).then(
+			(groups) => {
+				if (current) setSystemGroups(groups);
+			},
+		);
+		return () => {
+			current = false;
+		};
+	}, [deferredQuery, open, systemRevision]);
 
 	const openPalette = () => {
+		setQuery('');
 		consumingHistory.current = false;
 		pushCommandPaletteHistory(
 			window.history,
@@ -90,6 +135,10 @@ export function AppCommandPalette() {
 		window.addEventListener('popstate', handlePopState);
 		return () => window.removeEventListener('popstate', handlePopState);
 	}, [open]);
+
+	const navigation = appNavigation.filter(({ description, label }) =>
+		matchesCommandQuery(deferredQuery, label, description),
+	);
 
 	const selectPath = (path: string) => {
 		const currentPath = `${location.pathname}${location.search}${location.hash}`;
@@ -145,15 +194,19 @@ export function AppCommandPalette() {
 				description="Search for a solution, note, or command."
 				showCloseButton
 			>
-				<Command loop className="rounded-none p-0">
+				{/* Filtering happens where the records live, so cmdk is told not to
+				    do it again over a list that is already the answer. */}
+				<Command loop shouldFilter={false} className="rounded-none p-0">
 					<CommandInput
+						value={query}
+						onValueChange={setQuery}
 						placeholder="Find a solution, note, or command..."
 						className="h-12 pr-10 text-base"
 					/>
 					<CommandList className="max-h-[50svh] min-h-56">
 						<CommandEmpty>No matching results.</CommandEmpty>
 						<CommandGroup heading="Go to">
-							{appNavigation.map(({ description, icon: Icon, label, path }) => (
+							{navigation.map(({ description, icon: Icon, label, path }) => (
 								<CommandItem
 									key={path}
 									value={`${label} ${description}`}

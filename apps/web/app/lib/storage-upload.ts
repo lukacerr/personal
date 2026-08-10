@@ -12,6 +12,8 @@ export type UploadRequest = {
 	path: string | null;
 	contentType: string;
 	size: number;
+	/** Set by the Notes editor so Storage can tell where a file came from. */
+	uploadedFromNotes?: boolean;
 };
 
 export type UploadCandidate = UploadRequest & { body: Blob };

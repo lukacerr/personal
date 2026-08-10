@@ -109,9 +109,23 @@ export async function updateAndSyncNoteMetadata(
 	}
 }
 
+/**
+ * What the server last called the index, so a refresh that changed nothing
+ * costs a round trip and no payload. Held in memory rather than persisted: a
+ * cold start has no cached summaries to validate it against anyway.
+ */
+let noteIndexTag: string | undefined;
+
 export async function refreshNoteIndex() {
 	await syncNoteOutbox();
-	const response = await authenticatedApi.notes.get();
+	// Through `fetch` rather than `headers`: Eden types the latter as the one
+	// header its own contract knows about, and this one is the browser's.
+	const response = await authenticatedApi.notes.get(
+		noteIndexTag
+			? { fetch: { headers: { 'if-none-match': noteIndexTag } } }
+			: {},
+	);
+	if (response.status === 304) return;
 	if (
 		response.status !== 200 ||
 		!response.data ||
@@ -119,6 +133,7 @@ export async function refreshNoteIndex() {
 	)
 		throw new NotesApiError(response.status);
 
+	noteIndexTag = response.response.headers.get('etag') ?? undefined;
 	await reconcileNoteSummaries(notesDb, response.data);
 }
 

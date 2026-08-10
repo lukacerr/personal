@@ -5,24 +5,18 @@ import { Checkbox } from '@web/components/ui/checkbox';
 import { Input } from '@web/components/ui/input';
 import { Spinner } from '@web/components/ui/spinner';
 import { TableCell, TableRow } from '@web/components/ui/table';
-import { fileTypeLabel, formatBytes, previewKind } from '@web/lib/storage';
+import { fileTypeIcon, fileTypeLabel, formatBytes } from '@web/lib/storage';
 import type { StoredFile } from '@web/lib/storage-api';
 import { cn } from '@web/lib/utils';
 import {
 	CheckIcon,
 	ChevronLeftIcon,
 	DownloadIcon,
-	FileArchiveIcon,
-	FileAudioIcon,
-	FileIcon,
-	FileSpreadsheetIcon,
-	FileTextIcon,
-	FileVideoIcon,
 	FolderIcon,
 	Globe2Icon,
 	GripVerticalIcon,
-	ImageIcon,
 	LockIcon,
+	NotebookPenIcon,
 	PencilIcon,
 	Trash2Icon,
 	XIcon,
@@ -59,26 +53,9 @@ export function droppablePath(id: string) {
 		: undefined;
 }
 
-export function iconFor(contentType: string) {
-	switch (previewKind(contentType)) {
-		case 'image':
-			return ImageIcon;
-		case 'video':
-			return FileVideoIcon;
-		case 'audio':
-			return FileAudioIcon;
-		case 'sheet':
-			return FileSpreadsheetIcon;
-		case 'pdf':
-		case 'document':
-		case 'text':
-			return FileTextIcon;
-		default:
-			return contentType.includes('zip') ? FileArchiveIcon : FileIcon;
-	}
-}
-
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
+export const dateFormat = new Intl.DateTimeFormat(undefined, {
+	dateStyle: 'medium',
+});
 const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
 
 export function uploadedLabel(timestamp: number) {
@@ -370,7 +347,7 @@ export function FileDesktopRow({
 	onCancelEdit: () => void;
 	onHandleClick: () => void;
 }) {
-	const Icon = iconFor(file.contentType);
+	const Icon = fileTypeIcon(file.contentType);
 	const { ref, handleRef, isDragging } = useDraggable({
 		id: `file:${file.id}`,
 	});
@@ -421,6 +398,12 @@ export function FileDesktopRow({
 									onClick={() => actions.onPreview(file)}
 								>
 									<span className="truncate font-medium">{file.name}</span>
+									{file.uploadedFromNotes ? (
+										<NotebookPenIcon
+											className="size-3.5 shrink-0 text-muted-foreground"
+											aria-label="Uploaded from Notes"
+										/>
+									) : null}
 								</Button>
 								{resultMode ? (
 									<Button

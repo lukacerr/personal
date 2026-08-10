@@ -1,5 +1,6 @@
 import { authPlugin } from '@api/auth';
 import { db } from '@api/env';
+import { entityTag, isUnchanged } from '@api/http-cache';
 import {
 	isKeyframe,
 	reconstructVersion,
@@ -94,7 +95,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 	.use(authPlugin)
 	.get(
 		'/',
-		async () => {
+		async ({ request, set }) => {
 			// Both timestamps live on the note itself, so listing needs no history.
 			const notes = await db
 				.select({
@@ -109,11 +110,14 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 				.orderBy(note.path, note.title)
 				.$withCache(false);
 
-			return notes.map((item) => ({
+			const payload = notes.map((item) => ({
 				...item,
 				createdAt: timestamp(item.createdAt),
 				updatedAt: timestamp(item.updatedAt),
 			}));
+			const tag = entityTag(payload);
+			set.headers.etag = tag;
+			return isUnchanged(request, tag) ? status(304) : payload;
 		},
 		{ detail: { summary: 'List note summaries' } },
 	)

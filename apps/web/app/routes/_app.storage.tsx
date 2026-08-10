@@ -23,6 +23,7 @@ import {
 	filterStorageFiles,
 	hasStorageFilters,
 	joinPath,
+	needsUnreferencedFiles,
 	parseStorageView,
 	reconcileStorageSelection,
 	sortStorageFiles,
@@ -31,7 +32,7 @@ import {
 	validateFileName,
 	validateFolderName,
 } from '@web/lib/storage';
-import type { StoredFile } from '@web/lib/storage-api';
+import { listUnreferencedFiles, type StoredFile } from '@web/lib/storage-api';
 import {
 	BulkDownloadError,
 	downloadStorageZip,
@@ -58,7 +59,6 @@ export default function Storage() {
 	const [queryInput, setQueryInput] = useState(view.query);
 	const deferredQuery = useDeferredValue(queryInput);
 	const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-	const [preview, setPreview] = useState<StoredFile>();
 	const [sharing, setSharing] = useState<StoredFile>();
 	const [moving, setMoving] = useState<StorageMoveTarget>();
 	const [deleting, setDeleting] = useState<StorageDeleteTarget>();
@@ -82,6 +82,28 @@ export default function Storage() {
 		onSelectionMoved: clearSelection,
 	});
 	const { files } = storage;
+
+	// A maintenance view rather than a folder: the set comes from the server and
+	// says which Notes uploads no note references anymore.
+	const unusedMode = needsUnreferencedFiles(view);
+	const [unused, setUnused] = useState<StoredFile[]>([]);
+	const [unusedLoading, setUnusedLoading] = useState(false);
+	const reloadUnused = useCallback(async () => {
+		setUnusedLoading(true);
+		try {
+			setUnused(await listUnreferencedFiles());
+		} catch {
+			toast.error('The unused files could not be listed.');
+		} finally {
+			setUnusedLoading(false);
+		}
+	}, []);
+
+	useEffect(() => {
+		if (unusedMode) void reloadUnused();
+	}, [reloadUnused, unusedMode]);
+
+	const indexFiles = unusedMode ? unused : files;
 
 	// A refresh can retire files the selection still names.
 	useEffect(() => {
@@ -112,33 +134,43 @@ export default function Storage() {
 	const activeView = { ...view, query: queryInput };
 	const resultMode = hasStorageFilters(activeView);
 	const baseTree = useMemo(
-		() => buildStorageTree(files, view.path),
-		[files, view.path],
+		() => buildStorageTree(indexFiles, view.path),
+		[indexFiles, view.path],
 	);
 	const visibleFiles = useMemo(() => {
 		const candidates = resultMode
-			? filterStorageFiles(files, view.path, {
-					query: deferredQuery,
-					types: view.types,
-					visibility: view.visibility,
-					uploaded: view.uploaded,
-				})
+			? filterStorageFiles(
+					indexFiles,
+					// The unused view is about the whole bucket, not the open folder:
+					// these files live wherever Notes put them.
+					unusedMode ? null : view.path,
+					{
+						query: deferredQuery,
+						types: view.types,
+						visibility: view.visibility,
+						uploaded: view.uploaded,
+						source: view.source,
+					},
+				)
 			: baseTree.files;
 		return sortStorageFiles(candidates, view.sort);
 	}, [
 		baseTree.files,
 		deferredQuery,
-		files,
+		indexFiles,
 		resultMode,
+		unusedMode,
 		view.path,
 		view.sort,
+		view.source,
 		view.types,
 		view.uploaded,
 		view.visibility,
 	]);
 	const visibleFolders = resultMode ? [] : baseTree.folders;
 	const summary = storageSummary(visibleFiles);
-	const types = useMemo(() => collectFileTypes(files), [files]);
+	const types = useMemo(() => collectFileTypes(indexFiles), [indexFiles]);
+	const preview = indexFiles.find((file) => file.id === view.file);
 	const folderPaths = useMemo(() => collectFolderPaths(files), [files]);
 	const selectedFiles = files.filter((file) => selectedIds.has(file.id));
 
@@ -202,6 +234,8 @@ export default function Storage() {
 				);
 				// Whatever failed stays selected, so retrying is one click away.
 				setSelectedIds(new Set(result.failed.map((failure) => failure.id)));
+				const gone = new Set(result.deleted);
+				setUnused((current) => current.filter((file) => !gone.has(file.id)));
 				if (result.failed.length > 0) {
 					setDeleteError(
 						`${result.deleted.length} deleted; ${result.failed.length} failed. Retry the remaining files.`,
@@ -210,6 +244,9 @@ export default function Storage() {
 				}
 			} else if (deleting.kind === 'file') {
 				await storage.removeFile(deleting.file.id);
+				setUnused((current) =>
+					current.filter((file) => file.id !== deleting.file.id),
+				);
 			} else {
 				await storage.removeFolder(deleting.name);
 			}
@@ -321,11 +358,20 @@ export default function Storage() {
 					onTypesChange={(next) => setView({ types: next })}
 					onVisibilityChange={(visibility) => setView({ visibility })}
 					onUploadedChange={(uploaded) => setView({ uploaded })}
+					onSourceChange={(source) => setView({ source })}
 					onSortChange={(sort) => setView({ sort })}
 					onClearFilters={() =>
-						setView({ types: [], visibility: 'all', uploaded: 'any' })
+						setView({
+							types: [],
+							visibility: 'all',
+							uploaded: 'any',
+							source: 'all',
+						})
 					}
-					onRefresh={() => void storage.reload(true)}
+					onRefresh={() => {
+						void storage.reload(true);
+						if (unusedMode) void reloadUnused();
+					}}
 					onReconcile={() => setConfirmReconcile(true)}
 					onUpload={() => fileInputRef.current?.click()}
 				/>
@@ -347,7 +393,7 @@ export default function Storage() {
 					onDismiss={storage.dismissUpload}
 				/>
 
-				{storage.loading ? (
+				{storage.loading || (unusedMode && unusedLoading) ? (
 					<div className="flex flex-1 items-center justify-center gap-3 text-muted-foreground text-sm">
 						<Spinner /> Loading files…
 					</div>
@@ -369,7 +415,7 @@ export default function Storage() {
 						onSelectAll={selectAll}
 						onOpenFolder={(name) => openFolder(joinPath(view.path, name))}
 						onNavigatePath={openFolder}
-						onPreview={setPreview}
+						onPreview={(file) => setView({ file: file.id })}
 						onDownload={(file) => void storage.download(file)}
 						onShare={setSharing}
 						onMove={(selection) =>
@@ -413,7 +459,7 @@ export default function Storage() {
 			/>
 
 			{draggingUpload ? (
-				<div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-xl border-2 border-primary border-dashed bg-primary/10 backdrop-blur-[1px]">
+				<div className="pointer-events-none fixed inset-x-0 top-4 z-40 flex justify-center">
 					<p className="rounded-xl bg-popover px-4 py-3 font-medium text-sm shadow-lg">
 						Drop to upload into {view.path ?? 'Storage'}
 					</p>
@@ -422,7 +468,7 @@ export default function Storage() {
 
 			<StoragePreview
 				file={preview}
-				onClose={() => setPreview(undefined)}
+				onClose={() => setView({ file: null })}
 				onDownload={(file) => void storage.download(file)}
 			/>
 			<StorageShare

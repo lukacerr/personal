@@ -1,4 +1,5 @@
 import { authenticatedApi } from '@web/lib/authenticated-api';
+import { env } from '@web/lib/env';
 import type {
 	PutOptions,
 	UploadedPart,
@@ -20,15 +21,56 @@ type StoredFiles = Extract<
 /** The contract itself, never a hand-written copy of it. */
 export type StoredFile = StoredFiles[number];
 
+/**
+ * The one URL for a file that never expires and needs no session. It only
+ * answers for a published file; everything else gets the same 404 a file that
+ * never existed would.
+ */
+export function publicFileUrl(id: string) {
+	return `${env.VITE_API_URL.replace(/\/$/, '')}/public/files/${id}`;
+}
+
 export class StorageApiError extends Error {
 	constructor(readonly status: number) {
 		super(`Storage API returned ${status}`);
 	}
 }
 
-export async function listFiles(): Promise<StoredFile[]> {
-	const response = await authenticatedApi.files.get();
+/**
+ * The index, or word that the copy already held is still current.
+ *
+ * Every upload, move, rename and delete refreshes this list, so answering the
+ * repeat with a 304 is the common path rather than an optimisation for a rare
+ * one.
+ */
+export async function listFiles(
+	knownTag?: string,
+): Promise<{ files: StoredFile[]; tag?: string } | 'unchanged'> {
+	// Through `fetch` rather than `headers`: Eden types the latter as the one
+	// header its own contract knows about, and this one is the browser's.
+	const response = await authenticatedApi.files.get(
+		knownTag ? { fetch: { headers: { 'if-none-match': knownTag } } } : {},
+	);
+	if (response.status === 304) return 'unchanged';
 	if (response.status !== 200 || !Array.isArray(response.data))
+		throw new StorageApiError(response.status);
+	return {
+		files: response.data,
+		tag: response.response.headers.get('etag') ?? undefined,
+	};
+}
+
+/** Notes uploads no note references anymore; only the server can tell. */
+export async function listUnreferencedFiles(): Promise<StoredFile[]> {
+	const response = await authenticatedApi.files.unreferenced.get();
+	if (response.status !== 200 || !Array.isArray(response.data))
+		throw new StorageApiError(response.status);
+	return response.data;
+}
+
+export async function getFile(id: string): Promise<StoredFile> {
+	const response = await authenticatedApi.files({ id }).get();
+	if (response.status !== 200 || !response.data || !('name' in response.data))
 		throw new StorageApiError(response.status);
 	return response.data;
 }
@@ -161,7 +203,11 @@ function putWithProgress(url: string, body: Blob, options: PutOptions) {
 export const storageTransport: UploadTransport = {
 	async reserve(requests: UploadRequest[]) {
 		const response = await authenticatedApi.files.uploads.post({
-			files: requests,
+			// The explorer leaves the flag off; the contract still wants it said.
+			files: requests.map((request) => ({
+				...request,
+				uploadedFromNotes: request.uploadedFromNotes ?? false,
+			})),
 		});
 		if (
 			response.status !== 200 ||

@@ -2,11 +2,12 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { cache, db, storage } from '@api/env';
 import { nameKey, objectKey, uploadKey } from '@api/files-storage';
 import { app } from '@api/index';
-import { file } from '@api/schema';
+import { file, note } from '@api/schema';
 import { randomUUIDv7 } from 'bun';
 import { inArray } from 'drizzle-orm';
 
 const touchedIds = new Set<string>();
+const noteIds = new Set<string>();
 
 async function request(path: string, init?: RequestInit) {
 	return app.handle(new Request(`http://localhost${path}`, init));
@@ -37,6 +38,7 @@ async function reserve(
 		path?: string | null;
 		contentType?: string;
 		size?: number;
+		uploadedFromNotes?: boolean;
 	}>,
 ) {
 	const payload = files.map((entry) => {
@@ -48,6 +50,9 @@ async function reserve(
 			path: entry.path === undefined ? 'work' : entry.path,
 			contentType: entry.contentType ?? 'application/pdf',
 			size: entry.size ?? 12,
+			...(entry.uploadedFromNotes === undefined
+				? {}
+				: { uploadedFromNotes: entry.uploadedFromNotes }),
 		};
 	});
 	const response = await json('/files/uploads', 'POST', { files: payload });
@@ -72,9 +77,10 @@ async function uploadSingle({
 	path = 'work' as string | null,
 	contentType = 'text/plain',
 	body = 'hello storage',
+	uploadedFromNotes = undefined as boolean | undefined,
 } = {}) {
 	const { results } = await reserve([
-		{ name, path, contentType, size: body.length },
+		{ name, path, contentType, size: body.length, uploadedFromNotes },
 	]);
 	const [reservation] = results.results;
 	if (!reservation?.url) throw new Error('Expected a presigned upload URL');
@@ -84,7 +90,44 @@ async function uploadSingle({
 	return { id: reservation.id, completed, body, name, path, contentType };
 }
 
+/**
+ * A note whose document references the given file ids through the block prop
+ * the editor writes. Only the shape matters here: the API stores the document
+ * as opaque JSON and never reads a block's type.
+ */
+async function saveNoteReferencing(fileIds: string[]) {
+	const id = randomUUIDv7();
+	noteIds.add(id);
+	const response = await json(`/notes/${id}/mutations`, 'POST', {
+		title: `Note ${id.slice(0, 8)}`,
+		path: null,
+		createdAt: Date.now(),
+		content: [
+			{
+				id: randomUUIDv7(),
+				type: 'paragraph',
+				props: {},
+				content: [],
+				children: [],
+			},
+			...fileIds.map((fileId) => ({
+				id: randomUUIDv7(),
+				type: 'storedFile',
+				props: { fileId, name: 'attached.txt', contentType: 'text/plain' },
+				children: [],
+			})),
+		],
+	});
+	if (response.status !== 201)
+		throw new Error(`Expected the note to save, got ${response.status}`);
+	return id;
+}
+
 afterEach(async () => {
+	const notes = [...noteIds];
+	noteIds.clear();
+	if (notes.length > 0) await db.delete(note).where(inArray(note.id, notes));
+
 	const ids = [...touchedIds];
 	touchedIds.clear();
 	if (ids.length === 0) return;
@@ -591,6 +634,39 @@ describe('Files', () => {
 		expect(typeof entry?.updatedAt).toBe('number');
 	});
 
+	/**
+	 * Every upload, move, rename and delete asks for this list again, so the
+	 * repeat is the common case. A client holding the same answer is told so
+	 * rather than being sent it twice.
+	 */
+	it('answers a repeated listing with nothing to download', async () => {
+		await uploadSingle({ name: 'listed-again.txt', path: 'work' });
+
+		const first = await request('/files');
+		const tag = first.headers.get('etag');
+		if (!tag) throw new Error('Expected the listing to carry an entity tag');
+		const repeated = await request('/files', {
+			headers: { 'if-none-match': tag },
+		});
+
+		expect(first.status).toBe(200);
+		expect(repeated.status).toBe(304);
+		expect(await repeated.text()).toBe('');
+	});
+
+	it('sends the list again once it has actually changed', async () => {
+		await uploadSingle({ name: 'before-change.txt', path: 'work' });
+		const tag = (await request('/files')).headers.get('etag') ?? '';
+
+		await uploadSingle({ name: 'after-change.txt', path: 'work' });
+		const repeated = await request('/files', {
+			headers: { 'if-none-match': tag },
+		});
+
+		expect(repeated.status).toBe(200);
+		expect(((await repeated.json()) as unknown[]).length).toBeGreaterThan(1);
+	});
+
 	it('answers 404 for a file that does not exist', async () => {
 		expect((await request(`/files/${randomUUIDv7()}`)).status).toBe(404);
 	});
@@ -716,6 +792,105 @@ describe('Files', () => {
 		const response = await json('/files/uploads', 'POST', { files });
 
 		expect(response.status).toBe(422);
+	});
+});
+
+describe('Files uploaded from Notes', () => {
+	it('records where an upload came from, defaulting to the explorer', async () => {
+		const manual = await uploadSingle({ name: 'by-hand.txt', path: 'work' });
+		const fromNotes = await uploadSingle({
+			name: 'attached.txt',
+			path: 'Notes',
+			uploadedFromNotes: true,
+		});
+
+		expect(await manual.completed.json()).toMatchObject({
+			uploadedFromNotes: false,
+		});
+		expect(await fromNotes.completed.json()).toMatchObject({
+			uploadedFromNotes: true,
+		});
+	});
+
+	/**
+	 * The point of the endpoint: a file that Notes uploaded and no note mentions
+	 * anymore is almost certainly rubbish, and nothing else can tell you that.
+	 */
+	it('reports a Notes upload no note references', async () => {
+		const orphan = await uploadSingle({
+			name: 'orphan.txt',
+			path: 'Notes',
+			uploadedFromNotes: true,
+		});
+
+		const response = await request('/files/unreferenced');
+		const listed = (await response.json()) as Array<{ id: string }>;
+
+		expect(response.status).toBe(200);
+		expect(listed.map((entry) => entry.id)).toContain(orphan.id);
+	});
+
+	it('leaves out a file a note still references', async () => {
+		const attached = await uploadSingle({
+			name: 'in-use.txt',
+			path: 'Notes',
+			uploadedFromNotes: true,
+		});
+		await saveNoteReferencing([attached.id]);
+
+		const listed = (await (
+			await request('/files/unreferenced')
+		).json()) as Array<{ id: string }>;
+
+		expect(listed.map((entry) => entry.id)).not.toContain(attached.id);
+	});
+
+	/**
+	 * A file uploaded by hand and used nowhere is not an orphan, it is a file.
+	 * Only Notes uploads carry the expectation of belonging to something.
+	 */
+	it('never reports a file that was uploaded by hand', async () => {
+		const manual = await uploadSingle({ name: 'standalone.txt', path: 'work' });
+
+		const listed = (await (
+			await request('/files/unreferenced')
+		).json()) as Array<{ id: string }>;
+
+		expect(listed.map((entry) => entry.id)).not.toContain(manual.id);
+	});
+
+	it('reports a file again once the note that held it lets it go', async () => {
+		const attached = await uploadSingle({
+			name: 'released.txt',
+			path: 'Notes',
+			uploadedFromNotes: true,
+		});
+		const noteId = await saveNoteReferencing([attached.id]);
+		const whileReferenced = (await (
+			await request('/files/unreferenced')
+		).json()) as Array<{ id: string }>;
+
+		// The block is removed from the note; the file is deliberately left alone.
+		await json(`/notes/${noteId}/mutations`, 'POST', {
+			title: 'Emptied',
+			path: null,
+			createdAt: Date.now() + 1,
+			content: [
+				{
+					id: randomUUIDv7(),
+					type: 'paragraph',
+					props: {},
+					content: [],
+					children: [],
+				},
+			],
+		});
+		const afterRemoval = (await (
+			await request('/files/unreferenced')
+		).json()) as Array<{ id: string }>;
+
+		expect(whileReferenced.map((entry) => entry.id)).not.toContain(attached.id);
+		expect(afterRemoval.map((entry) => entry.id)).toContain(attached.id);
 	});
 });
 

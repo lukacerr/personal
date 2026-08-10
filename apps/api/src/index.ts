@@ -22,7 +22,11 @@ export const app = new Elysia()
 		if (databaseError.code === '23505' || databaseError.cause?.code === '23505')
 			return status(409, { error: 'UNIQUE_CONSTRAINT_VIOLATION' });
 	})
-	.use(cors())
+	.use(
+		// `ETag` is not a header the browser hands to JavaScript on its own, so a
+		// cross-origin client cannot revalidate without being told it may read it.
+		cors({ exposeHeaders: ['etag'] }),
+	)
 	.use(
 		env.NODE_ENV === 'development' &&
 			openapi({
@@ -60,7 +64,14 @@ export const app = new Elysia()
 	.use(env.NODE_ENV === 'production' && helmet())
 	.use(
 		logger({
-			level: env.NODE_ENV === 'production' ? 'warn' : 'debug',
+			level: env.NODE_ENV === 'development' ? 'debug' : 'warn',
+			/**
+			 * Two INFO lines per request, and `level` cannot turn them off: with the
+			 * console transport `Logger.log` writes straight to the stream and never
+			 * consults pino. `autoLogging` is the only switch the plugin checks, and
+			 * it leaves `onError` alone, so warnings and exceptions still surface.
+			 */
+			autoLogging: env.NODE_ENV === 'development',
 			logDetails: false,
 		}),
 	)

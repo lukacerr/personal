@@ -16,6 +16,7 @@ import {
 	sortStorageFiles,
 	storageBreadcrumb,
 	storageSummary,
+	uniqueFileName,
 	updateStorageSearchParams,
 	validateFileName,
 	validateFolderName,
@@ -31,6 +32,7 @@ function entry(name: string, path: string | null, contentType = 'text/plain') {
 		contentType,
 		size: 10,
 		isPublic: false,
+		uploadedFromNotes: false,
 		createdAt: 0,
 		updatedAt: 0,
 	};
@@ -279,6 +281,45 @@ describe('File types', () => {
 	});
 });
 
+/**
+ * Storage refuses a duplicate name and says so, which is the right answer when
+ * someone is uploading on purpose. Inserting an image into a note is not that
+ * moment: two notes both holding a `screenshot.png` is ordinary, and a dead end
+ * in the editor is not.
+ */
+describe('Unique file names', () => {
+	const existing = [
+		entry('screenshot.png', 'Notes'),
+		entry('screenshot (2).png', 'Notes'),
+		entry('README', 'Notes'),
+		entry('elsewhere.png', 'work'),
+	];
+
+	it.each([
+		['a free name', 'diagram.png', 'diagram.png'],
+		['a taken name', 'screenshot.png', 'screenshot (3).png'],
+		// Uniqueness is case-insensitive like the server's, but the name the user
+		// gave the file is theirs and survives intact.
+		['a name taken in another case', 'SCREENSHOT.PNG', 'SCREENSHOT (3).PNG'],
+		['a name with no extension', 'README', 'README (2)'],
+		['a compound extension', 'archive.tar.gz', 'archive.tar.gz'],
+	])('resolves %s', (_case, name, expected) => {
+		expect(uniqueFileName(existing, 'Notes', name)).toBe(expected);
+	});
+
+	it('only counts names in the destination folder', () => {
+		expect(uniqueFileName(existing, 'work', 'screenshot.png')).toBe(
+			'screenshot.png',
+		);
+	});
+
+	it('keeps the suffix before the extension so the type survives', () => {
+		expect(uniqueFileName([entry('a.png', null)], null, 'a.png')).toBe(
+			'a (2).png',
+		);
+	});
+});
+
 describe('Folder drop targets', () => {
 	it.each([
 		['a sibling folder', 'work/reports', 'archive', true],
@@ -297,7 +338,7 @@ describe('Storage view parameters', () => {
 	it('parses a complete view from the URL', () => {
 		const view = parseStorageView(
 			new URLSearchParams(
-				'path=work&q=invoice&types=pdf,word&visibility=public&uploaded=30d&sort=path-asc',
+				'path=work&q=invoice&types=pdf,word&visibility=public&uploaded=30d&source=notes&sort=path-asc&file=abc',
 			),
 		);
 
@@ -307,14 +348,18 @@ describe('Storage view parameters', () => {
 			types: ['pdf', 'word'],
 			visibility: 'public',
 			uploaded: '30d',
+			source: 'notes',
 			sort: 'path-asc',
+			file: 'abc',
 		});
 	});
 
 	it('falls back safely when URL values are unknown', () => {
 		expect(
 			parseStorageView(
-				new URLSearchParams('visibility=secret&uploaded=forever&sort=random'),
+				new URLSearchParams(
+					'visibility=secret&uploaded=forever&source=elsewhere&sort=random',
+				),
 			),
 		).toEqual({
 			path: null,
@@ -322,7 +367,9 @@ describe('Storage view parameters', () => {
 			types: [],
 			visibility: 'all',
 			uploaded: 'any',
+			source: 'all',
 			sort: 'newest',
+			file: null,
 		});
 	});
 
@@ -385,6 +432,41 @@ describe('Storage filtering', () => {
 		expect(
 			filterStorageFiles(files, 'work', { query: 'private' }, now),
 		).toEqual([]);
+	});
+
+	/**
+	 * Where a file came from is a property of the file, so it filters like every
+	 * other one. `notes-unused` is the exception the UI has to know about: the
+	 * set comes from the server, and the client only narrows it further.
+	 */
+	it('filters by where the file came from', () => {
+		const mixed = [
+			{ ...entry('manual.pdf', 'work', 'application/pdf') },
+			{
+				...entry('attached.png', 'Notes', 'image/png'),
+				uploadedFromNotes: true,
+			},
+		];
+
+		expect(
+			filterStorageFiles(mixed, null, { source: 'notes' }, now).map(
+				(item) => item.name,
+			),
+		).toEqual(['attached.png']);
+		expect(
+			filterStorageFiles(mixed, null, { source: 'manual' }, now).map(
+				(item) => item.name,
+			),
+		).toEqual(['manual.pdf']);
+		expect(
+			filterStorageFiles(mixed, null, { source: 'all' }, now),
+		).toHaveLength(2);
+		// The server already narrowed it; narrowing again must not drop anything.
+		expect(
+			filterStorageFiles(mixed, null, { source: 'notes-unused' }, now).map(
+				(item) => item.name,
+			),
+		).toEqual(['attached.png']);
 	});
 
 	it('filters by recorded type, visibility and upload window', () => {

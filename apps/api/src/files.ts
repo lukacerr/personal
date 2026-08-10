@@ -23,8 +23,9 @@ import {
 	UPLOAD_TTL_SECONDS,
 	uploadKey,
 } from '@api/files-storage';
-import { file } from '@api/schema';
-import { and, eq, inArray, or, sql } from 'drizzle-orm';
+import { entityTag, isUnchanged } from '@api/http-cache';
+import { file, note } from '@api/schema';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import Elysia, { status } from 'elysia';
 import { z } from 'zod';
 
@@ -93,6 +94,8 @@ const uploadRequest = z.object({
 	path: filePath,
 	contentType,
 	size: fileSize,
+	/** Set by the Notes editor; the explorer leaves it alone. */
+	uploadedFromNotes: z.boolean().default(false),
 });
 
 const fileMetadataBody = z.object({
@@ -128,6 +131,7 @@ const fileColumns = {
 	contentType: file.contentType,
 	size: file.size,
 	isPublic: file.isPublic,
+	uploadedFromNotes: file.uploadedFromNotes,
 	createdAt: file.createdAt,
 	updatedAt: file.updatedAt,
 };
@@ -139,6 +143,7 @@ type FileRow = {
 	contentType: string;
 	size: number;
 	isPublic: boolean;
+	uploadedFromNotes: boolean;
 	createdAt: Date;
 	updatedAt: Date;
 };
@@ -199,7 +204,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 	.use(authPlugin)
 	.get(
 		'/',
-		async () => {
+		async ({ request, set }) => {
 			// No filter: every row here has its object in storage by construction.
 			const files = await db
 				.select(fileColumns)
@@ -207,9 +212,52 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 				.orderBy(file.path, file.name)
 				.$withCache(false);
 
-			return files.map(serialize);
+			const payload = files.map(serialize);
+			const tag = entityTag(payload);
+			set.headers.etag = tag;
+			return isUnchanged(request, tag) ? status(304) : payload;
 		},
 		{ detail: { summary: 'List stored files' } },
+	)
+	.get(
+		// Declared before `/:id`: that route parses its parameter as a uuid, so
+		// reaching it first would answer 422 rather than falling through to here.
+		'/unreferenced',
+		async () => {
+			// Notes never deletes a file when its block goes away, so the only way
+			// to find what is left over is to ask which ones nothing points at.
+			//
+			// The extraction runs in Postgres rather than here: `note.content` is
+			// jsonb and a note may hold two megabytes, so pulling every document
+			// into the API to walk it in JavaScript is exactly what to avoid.
+			// `$.**` descends through the whole block tree, and `#>> '{}'` unwraps
+			// the jsonb string into text so it can be compared to an id. In lax
+			// mode that descent reports each match more than once, which `not
+			// exists` does not care about — but anything building a list of ids
+			// out of it would have to dedupe.
+			//
+			// Only the current document of each note counts. History lives mostly
+			// as jsondiffpatch deltas, where a removed file's id sits at a path
+			// that depends on the diff rather than on the schema.
+			const files = await db
+				.select(fileColumns)
+				.from(file)
+				.where(
+					and(
+						eq(file.uploadedFromNotes, true),
+						sql`not exists (
+							select 1
+							from ${note}, jsonb_path_query(${note.content}, '$.**.props.fileId') as ref
+							where ref #>> '{}' = ${file.id}::text
+						)`,
+					),
+				)
+				.orderBy(desc(file.createdAt))
+				.$withCache(false);
+
+			return files.map(serialize);
+		},
+		{ detail: { summary: 'List Notes uploads no note references' } },
 	)
 	.post(
 		'/uploads',
@@ -387,6 +435,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 						path: upload.path,
 						contentType: upload.contentType,
 						size: stat.size,
+						uploadedFromNotes: upload.uploadedFromNotes,
 					})
 					.returning(fileColumns);
 

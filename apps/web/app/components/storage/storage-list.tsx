@@ -1,5 +1,6 @@
 import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { DragDropProvider, DragOverlay } from '@dnd-kit/react';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { StorageCards } from '@web/components/storage/storage-cards';
 import {
 	droppablePath,
@@ -12,6 +13,7 @@ import { Checkbox } from '@web/components/ui/checkbox';
 import {
 	Table,
 	TableBody,
+	TableCell,
 	TableHead,
 	TableHeader,
 	TableRow,
@@ -26,6 +28,9 @@ import type { StoredFile } from '@web/lib/storage-api';
 import { FileIcon, FolderIcon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
+
+/** Where windowing starts paying for itself. */
+const VIRTUALISE_ABOVE = 120;
 
 /** What is being dragged, read back from the id the drag was started with. */
 type DragSource =
@@ -82,6 +87,9 @@ export function StorageList({
 	const [dragging, setDragging] = useState<DragSource>();
 	const [announcement, setAnnouncement] = useState('');
 	const suppressClick = useRef(false);
+	// Where the rows begin in the document, so the window's scroll position can
+	// be read as a position in this list.
+	const [body, setBody] = useState<HTMLTableSectionElement | null>(null);
 	const selectedFiles = files.filter((file) => selectedIds.has(file.id));
 	const allSelected =
 		files.length > 0 && files.every((file) => selectedIds.has(file.id));
@@ -157,6 +165,36 @@ export function StorageList({
 		else if (result !== 'same') toast.error(message);
 	};
 
+	// Past this many rows the browser spends more time laying out what nobody is
+	// looking at than drawing what they are. Below it the measurement machinery
+	// costs more than it saves, so the plain list stays the plain list.
+	const virtualised = files.length > VIRTUALISE_ABOVE;
+	// Against the window, because that is what actually scrolls: every element
+	// between this table and the document grows to fit its content, so an inner
+	// scroll container would be one that never scrolls.
+	const rows = useWindowVirtualizer({
+		count: virtualised ? files.length : 0,
+		scrollMargin: body?.offsetTop ?? 0,
+		// Rows are a single line by construction — every cell truncates — except
+		// in results, where each one also carries its path.
+		estimateSize: () => (resultMode ? 76 : 57),
+		overscan: 12,
+	});
+	const windowed = rows.getVirtualItems();
+	// Both offsets are measured in the same space. A window virtualiser reports
+	// `start`/`end` as positions in the document — they include the margin — while
+	// `getTotalSize()` is the height of the rows alone, so the margin has to come
+	// off both ends or the table stops short of its last row.
+	const margin = rows.options.scrollMargin;
+	const paddingTop = (windowed[0]?.start ?? 0) - margin;
+	const paddingBottom =
+		windowed.length > 0
+			? rows.getTotalSize() - ((windowed.at(-1)?.end ?? 0) - margin)
+			: 0;
+	const visibleFiles = virtualised
+		? windowed.flatMap((row) => files[row.index] ?? [])
+		: files;
+
 	const empty = folders.length === 0 && files.length === 0;
 
 	return (
@@ -219,7 +257,7 @@ export function StorageList({
 							</TableHead>
 						</TableRow>
 					</TableHeader>
-					<TableBody>
+					<TableBody ref={setBody}>
 						{currentFolder && !resultMode ? (
 							<ParentDesktopRow
 								parentPath={parentPath}
@@ -245,7 +283,16 @@ export function StorageList({
 								/>
 							);
 						})}
-						{files.map((file) => {
+						{/* Real rows holding the height of what is scrolled past, so the
+						    scrollbar still describes the whole list. Marking them hidden or
+						    presentational is what breaks a table's structure for a screen
+						    reader; two empty rows is the smaller cost. */}
+						{virtualised && paddingTop > 0 ? (
+							<TableRow>
+								<TableCell colSpan={8} style={{ height: paddingTop }} />
+							</TableRow>
+						) : null}
+						{visibleFiles.map((file) => {
 							const group =
 								selectedIds.has(file.id) && selectedFiles.length > 1
 									? selectedFiles
@@ -267,6 +314,11 @@ export function StorageList({
 								/>
 							);
 						})}
+						{virtualised && paddingBottom > 0 ? (
+							<TableRow>
+								<TableCell colSpan={8} style={{ height: paddingBottom }} />
+							</TableRow>
+						) : null}
 					</TableBody>
 				</Table>
 			</div>

@@ -26,14 +26,26 @@ export type NoteMetadata = Extract<
 	{ id: string; title: string }
 >;
 
+/**
+ * A note's row, without its document.
+ *
+ * The content lives in its own table because everything that lists notes — the
+ * tree, the palette, the duplicate-title check — reads every row, and with the
+ * document inline that meant deserializing every note's whole body to answer a
+ * question about titles.
+ */
 export type LocalNote = NoteSummary & {
-	content?: NoteBlock[];
 	dirty: boolean;
 	draftUpdatedAt?: number;
 	serverUpdatedAt?: number;
 	/** Set when the server rejected this note's sync in a way retrying cannot fix. */
 	syncFailure?: string;
 };
+
+/** A note's row with its document attached, for whoever is editing it. */
+export type LoadedNote = LocalNote & { content: NoteBlock[] };
+
+export type NoteContent = { id: string; content: NoteBlock[] };
 
 export type NoteSaveOperation = {
 	key: string;
@@ -70,6 +82,7 @@ export type NoteOutboxOperation = NoteSaveOperation | NoteMetadataOperation;
 
 export class NotesDatabase extends Dexie {
 	notes!: Table<LocalNote, string>;
+	noteContent!: Table<NoteContent, string>;
 	outbox!: Table<NoteOutboxOperation, string>;
 
 	constructor(name = 'personal-notes:v1') {
@@ -79,16 +92,50 @@ export class NotesDatabase extends Dexie {
 			notes: 'id, title, path, updatedAt',
 			outbox: '&key, noteId, createdAt, [noteId+createdAt]',
 		});
+		this.version(2)
+			.stores({
+				notes: 'id, title, path, updatedAt',
+				noteContent: 'id',
+				outbox: '&key, noteId, createdAt, [noteId+createdAt]',
+			})
+			.upgrade(async (tx) => {
+				// Documents move out of the rows they were stored in. Nothing is
+				// dropped, so a draft that never synced survives the upgrade.
+				const rows = await tx.table('notes').toArray();
+				const documents = rows
+					.filter((row) => row.content)
+					.map((row) => ({ id: row.id, content: row.content }));
+				if (documents.length > 0)
+					await tx.table('noteContent').bulkPut(documents);
+				await tx
+					.table('notes')
+					.toCollection()
+					.modify((note) => {
+						note.content = undefined;
+					});
+			});
 	}
 }
 
 export const notesDb = new NotesDatabase();
 
 export async function clearLocalNotes() {
-	await notesDb.transaction('rw', notesDb.notes, notesDb.outbox, async () => {
-		await notesDb.notes.clear();
-		await notesDb.outbox.clear();
-	});
+	await notesDb.transaction(
+		'rw',
+		notesDb.notes,
+		notesDb.noteContent,
+		notesDb.outbox,
+		async () => {
+			await notesDb.notes.clear();
+			await notesDb.noteContent.clear();
+			await notesDb.outbox.clear();
+		},
+	);
+}
+
+/** The document of one note, which is the only one anybody ever edits. */
+export async function getNoteContent(db: NotesDatabase, id: string) {
+	return (await db.noteContent.get(id))?.content;
 }
 
 function emptyDocument(): NoteBlock[] {
@@ -112,7 +159,7 @@ export async function createLocalNote(
 	path: string | null,
 	now = Date.now(),
 ) {
-	return db.transaction('rw', db.notes, async () => {
+	return db.transaction('rw', db.notes, db.noteContent, async () => {
 		const title = nextAvailableNoteTitle(await db.notes.toArray(), path);
 		const note: LocalNote = {
 			id: crypto.randomUUID(),
@@ -121,13 +168,14 @@ export async function createLocalNote(
 			isPublic: false,
 			createdAt: now,
 			updatedAt: now,
-			content: emptyDocument(),
 			dirty: true,
 			draftUpdatedAt: now,
 			serverUpdatedAt: undefined,
 		};
+		const content = emptyDocument();
 		await db.notes.put(note);
-		return note;
+		await db.noteContent.put({ id: note.id, content });
+		return { ...note, content } satisfies LoadedNote;
 	});
 }
 
@@ -137,15 +185,17 @@ export async function updateNoteContentDraft(
 	content: NoteBlock[],
 	now = Date.now(),
 ) {
-	const updated = await db.notes
-		.where('id')
-		.equals(id)
-		.modify((note) => {
-			note.content = content;
-			note.dirty = true;
-			note.draftUpdatedAt = Math.max(now, note.draftUpdatedAt ?? 0);
-		});
-	if (updated === 0) throw new Error(`Cannot draft missing note ${id}`);
+	await db.transaction('rw', db.notes, db.noteContent, async () => {
+		const updated = await db.notes
+			.where('id')
+			.equals(id)
+			.modify((note) => {
+				note.dirty = true;
+				note.draftUpdatedAt = Math.max(now, note.draftUpdatedAt ?? 0);
+			});
+		if (updated === 0) throw new Error(`Cannot draft missing note ${id}`);
+		await db.noteContent.put({ id, content });
+	});
 }
 
 export async function enqueueNoteMetadata(
@@ -194,9 +244,13 @@ export async function enqueueNoteSave(
 	id: string,
 	now = Date.now(),
 ) {
-	return db.transaction('rw', db.notes, db.outbox, async () => {
-		const localNote = await db.notes.get(id);
-		if (!localNote?.content) throw new Error(`Cannot save unloaded note ${id}`);
+	return db.transaction('rw', db.notes, db.noteContent, db.outbox, async () => {
+		const [localNote, stored] = await Promise.all([
+			db.notes.get(id),
+			db.noteContent.get(id),
+		]);
+		if (!localNote || !stored)
+			throw new Error(`Cannot save unloaded note ${id}`);
 
 		// Must outrank the last confirmed server version too: with a device clock
 		// behind the server, `now` alone would queue a save the server buries in
@@ -213,7 +267,7 @@ export async function enqueueNoteSave(
 			title: localNote.title,
 			path: localNote.path,
 			createdAt,
-			content: structuredClone(localNote.content),
+			content: structuredClone(stored.content),
 		};
 
 		await db.notes
@@ -231,9 +285,10 @@ export async function enqueueNoteSave(
 }
 
 export async function cacheRemoteNote(db: NotesDatabase, remote: NoteDetail) {
-	await db.transaction('rw', db.notes, db.outbox, async () => {
-		const [local, pending] = await Promise.all([
+	await db.transaction('rw', db.notes, db.noteContent, db.outbox, async () => {
+		const [local, localContent, pending] = await Promise.all([
 			db.notes.get(remote.id),
+			db.noteContent.get(remote.id),
 			db.outbox.where('noteId').equals(remote.id).toArray(),
 		]);
 		const latestPending = pending
@@ -267,22 +322,28 @@ export async function cacheRemoteNote(db: NotesDatabase, remote: NoteDetail) {
 			local?.dirty &&
 			(local.draftUpdatedAt ?? local.updatedAt) >= remote.updatedAt
 		) {
-			await db.notes.put({
-				...local,
-				content: local.content ?? remote.content,
-				serverUpdatedAt: remote.updatedAt,
-			});
+			await db.notes.put({ ...local, serverUpdatedAt: remote.updatedAt });
+			if (!localContent)
+				await db.noteContent.put({
+					id: remote.id,
+					content: remote.content as NoteBlock[],
+				});
 			return;
 		}
 
+		const { content, ...summary } = remote;
 		await db.notes.put({
-			...remote,
+			...summary,
 			title: latestMetadata?.title ?? remote.title,
 			path: latestMetadata?.path ?? remote.path,
 			isPublic: latestMetadata?.isPublic ?? remote.isPublic,
 			dirty: false,
 			draftUpdatedAt: undefined,
 			serverUpdatedAt: remote.updatedAt,
+		});
+		await db.noteContent.put({
+			id: remote.id,
+			content: content as NoteBlock[],
 		});
 	});
 }
@@ -329,11 +390,12 @@ export async function renameLocalFolder(
 }
 
 export async function deleteLocalFolder(db: NotesDatabase, folder: string) {
-	return db.transaction('rw', db.notes, db.outbox, async () => {
+	return db.transaction('rw', db.notes, db.noteContent, db.outbox, async () => {
 		const deletedIds = (await db.notes.toArray())
 			.filter((note) => isInsideFolder(note.path, folder))
 			.map((note) => note.id);
 		await db.notes.bulkDelete(deletedIds);
+		await db.noteContent.bulkDelete(deletedIds);
 		for (const id of deletedIds)
 			await db.outbox.where('noteId').equals(id).delete();
 		return deletedIds;
@@ -341,8 +403,9 @@ export async function deleteLocalFolder(db: NotesDatabase, folder: string) {
 }
 
 export async function deleteLocalNote(db: NotesDatabase, id: string) {
-	await db.transaction('rw', db.notes, db.outbox, async () => {
+	await db.transaction('rw', db.notes, db.noteContent, db.outbox, async () => {
 		await db.notes.delete(id);
+		await db.noteContent.delete(id);
 		await db.outbox.where('noteId').equals(id).delete();
 	});
 }
@@ -351,7 +414,7 @@ export async function reconcileNoteSummaries(
 	db: NotesDatabase,
 	summaries: NoteSummary[],
 ) {
-	await db.transaction('rw', db.notes, db.outbox, async () => {
+	await db.transaction('rw', db.notes, db.noteContent, db.outbox, async () => {
 		const [locals, pending] = await Promise.all([
 			db.notes.toArray(),
 			db.outbox.toArray(),
@@ -376,24 +439,28 @@ export async function reconcileNoteSummaries(
 					await db.notes.put({ ...local, serverUpdatedAt: summary.updatedAt });
 				continue;
 			}
-			// A newer server version makes any cached content stale. Keeping it would
-			// let the next local save ship outdated content under a newer timestamp
-			// and silently revert whichever device wrote that version.
-			const staleContent = Boolean(
-				local && summary.updatedAt > local.updatedAt,
-			);
+			// A newer server version makes any cached document stale. Keeping it
+			// would let the next local save ship outdated content under a newer
+			// timestamp and silently revert whichever device wrote that version.
+			if (local && summary.updatedAt > local.updatedAt)
+				await db.noteContent.delete(summary.id);
 			await db.notes.put({
 				...local,
 				...summary,
-				content: staleContent ? undefined : local?.content,
 				dirty: false,
 				serverUpdatedAt: summary.updatedAt,
 			});
 		}
 
 		for (const local of locals) {
-			if (!serverIds.has(local.id) && !local.dirty && !pendingIds.has(local.id))
+			if (
+				!serverIds.has(local.id) &&
+				!local.dirty &&
+				!pendingIds.has(local.id)
+			) {
 				await db.notes.delete(local.id);
+				await db.noteContent.delete(local.id);
+			}
 		}
 	});
 }
