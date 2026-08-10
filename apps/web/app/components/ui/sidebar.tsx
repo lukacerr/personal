@@ -107,8 +107,7 @@ function SidebarProvider({
   // Adds a keyboard shortcut to toggle the sidebar.
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const hasTextSelection = window.getSelection()?.isCollapsed === false
-      if (isAppSidebarShortcut(event, hasTextSelection)) {
+      if (isAppSidebarShortcut(event)) {
         event.preventDefault()
         toggleSidebar()
       }
