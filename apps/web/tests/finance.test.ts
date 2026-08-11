@@ -134,13 +134,15 @@ describe('ordering', () => {
 	it('puts one-offs first, newest first, and subscriptions after', () => {
 		const rows = [
 			paymentOf({
-				id: 'sub-old',
+				id: 'sub-b',
+				tag: 'Bbb',
 				isSubscription: true,
 				paidAt: day(2025, 0, 1),
 			}),
 			paymentOf({ id: 'once-old', paidAt: day(2026, 2, 16) }),
 			paymentOf({
-				id: 'sub-new',
+				id: 'sub-a',
+				tag: 'Aaa',
 				isSubscription: true,
 				paidAt: day(2026, 1, 1),
 			}),
@@ -150,9 +152,53 @@ describe('ordering', () => {
 		expect(sortPayments(rows).map((row) => row.id)).toEqual([
 			'once-new',
 			'once-old',
-			'sub-new',
-			'sub-old',
+			// By tag, not by date: `sub-a` started later than `sub-b`.
+			'sub-a',
+			'sub-b',
 		]);
+	});
+
+	/**
+	 * A subscription's `paidAt` is when it started, so ordering the recurring
+	 * block by it sorts on something nobody is reading. Tag first, because that
+	 * is how the block is scanned — all the services together, then the rest.
+	 */
+	it('orders the recurring block by tag and then by title', () => {
+		const sub = (id: string, tag: string | null, title: string) =>
+			paymentOf({
+				id,
+				tag,
+				title,
+				isSubscription: true,
+				// Deliberately the reverse of the expected order, so a leftover
+				// date sort cannot pass by accident.
+				paidAt: day(2026, 0, 1) + id.charCodeAt(0),
+			});
+
+		const rows = [
+			sub('e', null, 'Sin tag'),
+			sub('d', 'Servicios', 'Movistar'),
+			sub('b', 'casa', 'Expense'),
+			sub('c', 'Servicios', 'Monot'),
+			sub('a', 'Casa', 'Alquiler'),
+		];
+
+		expect(sortPayments(rows).map((row) => row.id)).toEqual([
+			'a',
+			'b',
+			'c',
+			'd',
+			'e',
+		]);
+	});
+
+	/** Untagged is a residual, not a category, so it never leads the block. */
+	it('sinks untagged subscriptions below the tagged ones', () => {
+		const rows = [
+			paymentOf({ id: 'none', tag: null, isSubscription: true }),
+			paymentOf({ id: 'zzz', tag: 'Zzz', isSubscription: true }),
+		];
+		expect(sortPayments(rows).map((row) => row.id)).toEqual(['zzz', 'none']);
 	});
 
 	it('does not mutate the list it was handed', () => {

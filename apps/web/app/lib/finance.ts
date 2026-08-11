@@ -96,17 +96,30 @@ export function filterPayments(rows: Payment[], filter: FinanceFilter) {
  * Reading order for the list: what happened during the period first, newest
  * first, and the recurring charges after it.
  *
- * A subscription's `paidAt` is when it started, not when it was paid, so in any
- * period it merely overlaps that date is noise — the list hides it, and sinking
- * these rows keeps the noise out of the date column above them too.
+ * The two blocks sort by different things because they are read differently.
+ * A one-off is an event, so its date is the point. A subscription's `paidAt` is
+ * only when it started — in any period it merely overlaps, that date says
+ * nothing, and the list hides it — so the recurring block is grouped by tag and
+ * then alphabetically, which is how you scan it: all the services together,
+ * then the rest.
  *
- * Both groups order by `paidAt` rather than by amount, which would need a quote
- * to compare two currencies and would reshuffle whenever the dollar moved.
+ * Neither block sorts by amount: comparing two currencies would need a quote,
+ * and the order would reshuffle every time the dollar moved.
  */
 export function sortPayments(rows: Payment[]) {
+	// Case-insensitive, so "Casa" and "casa" land together here exactly as they
+	// merge in the breakdown. Untagged is a residual and sinks below the rest.
+	const byTag = (a: Payment, b: Payment) => {
+		if (!a.tag && !b.tag) return 0;
+		if (!a.tag) return 1;
+		if (!b.tag) return -1;
+		return a.tag.toLocaleLowerCase().localeCompare(b.tag.toLocaleLowerCase());
+	};
+
 	return [...rows].sort((a, b) => {
 		if (a.isSubscription !== b.isSubscription) return a.isSubscription ? 1 : -1;
-		return b.paidAt - a.paidAt;
+		if (!a.isSubscription) return b.paidAt - a.paidAt;
+		return byTag(a, b) || a.title.localeCompare(b.title);
 	});
 }
 
