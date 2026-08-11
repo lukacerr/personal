@@ -3,6 +3,7 @@ import {
 	assertLocalTarget,
 	dumpCreatesPublicSchema,
 	readDatabaseUrl,
+	restoreArgs,
 	toConnection,
 	toDumpUrl,
 } from '@api/scripts/db-pull';
@@ -93,5 +94,74 @@ describe('dumpCreatesPublicSchema', () => {
 		expect(
 			dumpCreatesPublicSchema('CREATE TABLE public.note (id uuid);\n'),
 		).toBe(false);
+	});
+});
+
+describe('restoreArgs', () => {
+	const argsFor = (dumpSql: string) =>
+		restoreArgs(
+			'/tmp/production.sql',
+			dumpSql,
+			'postgres://localhost/personal',
+		);
+
+	/**
+	 * `psql` acts on `--command` and `--file` in the order they appear, so this
+	 * ordering is the whole behaviour. A wipe moved ahead of the drop deletes the
+	 * rows it was about to replace, then production's arrive intact — no error and
+	 * no output, with every secret now in the local database.
+	 */
+	it('wipes the secret tables after the dump has been replayed', () => {
+		const args = argsFor('CREATE SCHEMA public;\n');
+		const file = args.indexOf('--file=/tmp/production.sql');
+		const wipe = args.indexOf('DELETE FROM public.credential');
+
+		expect(file).toBeGreaterThan(-1);
+		expect(wipe).toBeGreaterThan(file);
+		expect(args[wipe - 1]).toBe('--command');
+	});
+
+	/**
+	 * `pg_dump` ends the file with `set_config('search_path', '', false)`, and that
+	 * outlives it: an unqualified statement afterwards fails with `relation
+	 * "credential" does not exist` even though `public.credential` was created a
+	 * moment earlier. This cost a failed pull to find.
+	 */
+	it('qualifies the wipe with the schema the dump leaves out of search_path', () => {
+		const wipes = argsFor('CREATE SCHEMA public;\n').filter((argument) =>
+			argument.startsWith('DELETE FROM'),
+		);
+
+		expect(wipes).not.toHaveLength(0);
+		for (const wipe of wipes) expect(wipe).toStartWith('DELETE FROM public.');
+	});
+
+	it('drops the schema before the dump replays', () => {
+		const args = argsFor('CREATE SCHEMA public;\n');
+		expect(args.indexOf('DROP SCHEMA IF EXISTS public CASCADE')).toBeLessThan(
+			args.indexOf('--file=/tmp/production.sql'),
+		);
+	});
+
+	/** A failed wipe has to take the restore down with it, not leave those rows. */
+	it('runs the whole restore in one transaction that stops on error', () => {
+		const args = argsFor('CREATE SCHEMA public;\n');
+		expect(args).toContain('--single-transaction');
+		expect(args).toContain('--set=ON_ERROR_STOP=1');
+	});
+
+	it('creates the schema only when the dump does not', () => {
+		expect(argsFor('CREATE SCHEMA public;\n')).not.toContain(
+			'CREATE SCHEMA public',
+		);
+		expect(argsFor('CREATE TABLE public.note (id uuid);\n')).toContain(
+			'CREATE SCHEMA public',
+		);
+	});
+
+	it('ends with the connection string, as psql expects', () => {
+		expect(argsFor('CREATE SCHEMA public;\n').at(-1)).toBe(
+			'postgres://localhost/personal',
+		);
 	});
 });

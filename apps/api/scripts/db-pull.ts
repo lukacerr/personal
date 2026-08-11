@@ -11,6 +11,10 @@
  * as it was, and the drop plus restore run inside a single transaction, so a
  * failed restore rolls back instead of leaving an empty database behind.
  *
+ * What arrives is not quite production: the tables in `SECRET_TABLES` are emptied
+ * at the end of the same transaction, because their rows are sealed with a secret
+ * only production holds and would land here as envelopes nothing can open.
+ *
  * The two `DATABASE_URL`s are read straight from the env files rather than
  * through `@api/env`: this needs both at once, and `@api/env` would demand the
  * whole production secret set just to hand back one value.
@@ -100,6 +104,65 @@ export function dumpCreatesPublicSchema(sql: string): boolean {
 	return /^CREATE SCHEMA (IF NOT EXISTS )?public;/m.test(sql);
 }
 
+/**
+ * Tables whose rows are encrypted with a secret only production holds, and are
+ * therefore worthless locally: the envelopes come back undecryptable, and the
+ * screen would be a wall of rows nobody can open. They are emptied rather than
+ * left as noise. Any future system that seals rows with `LUKA_SECRET` belongs
+ * here too.
+ *
+ * Notes that referenced a credential are left alone on purpose. Their blocks
+ * carry the id and report a reference that is gone, which is exactly what the
+ * local copy should say.
+ */
+const SECRET_TABLES = ['credential'];
+
+/**
+ * Schema-qualified because the dump ends with `search_path` set to nothing.
+ *
+ * `pg_dump` emits `set_config('search_path', '', false)` and creates everything
+ * fully qualified, and that setting outlives the file: an unqualified statement
+ * afterwards fails with `relation "credential" does not exist` even though
+ * `public.credential` was just created. `public` is already hardcoded either side
+ * of this, in the drop and the create.
+ */
+const wipeStatement = (table: string) => `DELETE FROM public.${table}`;
+
+/**
+ * The arguments for the restore, in the order `psql` will act on them.
+ *
+ * `--command` and `--file` are processed in the order they appear, so this
+ * ordering *is* the behaviour, and moving a wipe earlier breaks it in one of two
+ * ways. Before the dump but after the schema was recreated, it errors on a table
+ * that does not exist yet and takes the whole restore down with it. Before the
+ * drop, it succeeds against the rows it was about to replace and then production's
+ * arrive intact — no error, no output, and every secret now sits in the local
+ * database. Both were checked against a real `psql`; the second is the reason this
+ * function exists to be tested rather than being inlined.
+ *
+ * All of it inside one transaction, so a failed wipe rolls the restore back rather
+ * than leaving those rows behind.
+ */
+export function restoreArgs(
+	dumpPath: string,
+	dumpSql: string,
+	conninfo: string,
+): string[] {
+	const command = (statement: string) => ['--command', statement];
+	const before = ['DROP SCHEMA IF EXISTS public CASCADE'];
+	if (!dumpCreatesPublicSchema(dumpSql)) before.push('CREATE SCHEMA public');
+
+	return [
+		'--quiet',
+		'--single-transaction',
+		'--set=ON_ERROR_STOP=1',
+		...before.flatMap(command),
+		`--file=${dumpPath}`,
+		...SECRET_TABLES.flatMap((table) => command(wipeStatement(table))),
+		conninfo,
+	];
+}
+
 async function pg(
 	binary: string,
 	args: string[],
@@ -157,19 +220,9 @@ async function main(): Promise<void> {
 		);
 
 		console.info(`Replacing ${hostOf(target)}${target.pathname}…`);
-		const rebuild = ['DROP SCHEMA IF EXISTS public CASCADE'];
-		if (!dumpCreatesPublicSchema(await Bun.file(dumpPath).text()))
-			rebuild.push('CREATE SCHEMA public');
 		await pg(
 			'psql',
-			[
-				'--quiet',
-				'--single-transaction',
-				'--set=ON_ERROR_STOP=1',
-				...rebuild.flatMap((statement) => ['--command', statement]),
-				`--file=${dumpPath}`,
-				into.conninfo,
-			],
+			restoreArgs(dumpPath, await Bun.file(dumpPath).text(), into.conninfo),
 			into.password,
 			// The dump drives `set_config` and `setval` through SELECT, whose result
 			// tables are noise. Errors and notices go to stderr and still show.
@@ -179,7 +232,9 @@ async function main(): Promise<void> {
 		await rm(workspace, { recursive: true, force: true });
 	}
 
-	console.info('Local database now mirrors production.');
+	console.info(
+		`Local database now mirrors production, without ${SECRET_TABLES.join(', ')}.`,
+	);
 }
 
 if (import.meta.main)

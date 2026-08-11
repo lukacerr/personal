@@ -1,4 +1,9 @@
-import { appNavigation, getBreadcrumbItems } from '@web/lib/app-navigation';
+import {
+	APP_DEFAULT_PATH,
+	appNavigation,
+	getBreadcrumbItems,
+	getNavigationItem,
+} from '@web/lib/app-navigation';
 import { noteBreadcrumbTrail } from '@web/lib/notes-system';
 import {
 	FileTextIcon,
@@ -11,7 +16,6 @@ import { describe, expect, it } from 'vitest';
 describe('app navigation', () => {
 	it('exposes the private product areas at stable static paths', () => {
 		expect(appNavigation.map(({ label, path }) => ({ label, path }))).toEqual([
-			{ label: 'Overview', path: '/' },
 			{ label: 'Agent', path: '/agent' },
 			{ label: 'Calendar', path: '/calendar' },
 			{ label: 'Notes', path: '/notes' },
@@ -19,7 +23,23 @@ describe('app navigation', () => {
 			{ label: 'Nutrition', path: '/nutrition' },
 			{ label: 'Storage', path: '/storage' },
 			{ label: 'Credentials', path: '/credentials' },
-			{ label: 'Studyo', path: '/studyo' },
+		]);
+	});
+
+	/**
+	 * The root redirects here, so the two have to agree. Renaming that route
+	 * without updating the constant would send every fresh start — a new device, a
+	 * cleared browser — to a path that no longer resolves.
+	 */
+	it('defaults the root to a path navigation actually offers', () => {
+		expect(appNavigation.map(({ path }) => path)).toContain(APP_DEFAULT_PATH);
+	});
+
+	/** Nothing sits at `/` any more, so it gets the plain workspace crumb. */
+	it('leaves the root with no product area of its own', () => {
+		expect(getNavigationItem('/')).toBeUndefined();
+		expect(getBreadcrumbItems('/')).toEqual([
+			{ key: 'home', label: 'Personal', icon: HouseIcon, current: true },
 		]);
 	});
 

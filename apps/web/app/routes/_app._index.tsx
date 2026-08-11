@@ -1,87 +1,14 @@
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from '@web/components/ui/card';
-import { appNavigation } from '@web/lib/app-navigation';
-import { NavLink } from 'react-router';
+import { APP_DEFAULT_PATH } from '@web/lib/app-navigation';
+import { Navigate } from 'react-router';
 
-const systems = appNavigation.filter(({ path }) => path !== '/');
-const availableSystems = new Set(['/notes', '/storage']);
-
-export function meta() {
-	return [
-		{ title: 'Personal systems' },
-		{
-			name: 'description',
-			content: "Luka's personal operating system.",
-		},
-	];
-}
-
-export default function Home() {
-	return (
-		<div className="flex flex-1 bg-muted/35">
-			<div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-10 sm:px-8 sm:py-12 lg:px-12 lg:py-16">
-				<section className="flex flex-col gap-3">
-					<p className="font-heading text-xs font-semibold tracking-[0.2em] text-muted-foreground uppercase">
-						Overview / 01
-					</p>
-					<h1 className="max-w-2xl font-heading text-4xl font-semibold tracking-[-0.04em] text-balance sm:text-5xl">
-						Everything personal, connected!
-					</h1>
-					<p className="max-w-xl text-base leading-7 text-muted-foreground">
-						The foundation is online. Each system will become available here as
-						it is built.
-					</p>
-				</section>
-
-				<section aria-labelledby="systems-heading">
-					<h2 id="systems-heading" className="sr-only">
-						Personal systems
-					</h2>
-					<div className="grid gap-4 sm:grid-cols-2">
-						{systems.map(({ icon: Icon, label, description, path }, index) => {
-							const card = (
-								<Card
-									key={path}
-									className="min-h-48 justify-between shadow-none transition-colors group-hover:bg-card/80"
-								>
-									<CardHeader>
-										<div className="mb-8 flex items-center justify-between text-muted-foreground">
-											<Icon aria-hidden="true" />
-											<span className="font-heading text-[0.65rem] tracking-[0.18em]">
-												0{index + 1}
-											</span>
-										</div>
-										<CardTitle>{label}</CardTitle>
-										<CardDescription>{description}</CardDescription>
-									</CardHeader>
-									<CardContent>
-										<p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
-											{availableSystems.has(path) ? 'Available' : 'Planned'}
-										</p>
-									</CardContent>
-								</Card>
-							);
-
-							return availableSystems.has(path) ? (
-								<NavLink
-									key={path}
-									to={path}
-									className="group rounded-4xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-								>
-									{card}
-								</NavLink>
-							) : (
-								<div key={path}>{card}</div>
-							);
-						})}
-					</div>
-				</section>
-			</div>
-		</div>
-	);
+/**
+ * The root is a destination, not a screen.
+ *
+ * Only reached when the layout had no remembered location to restore — that
+ * redirect runs first and this never renders — so this is the fresh-start case
+ * and it goes to the default system. `replace` keeps `/` out of history: left
+ * there, going back would land on it again and bounce straight forward.
+ */
+export default function Index() {
+	return <Navigate replace to={APP_DEFAULT_PATH} />;
 }

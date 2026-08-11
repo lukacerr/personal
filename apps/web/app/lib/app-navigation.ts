@@ -3,22 +3,14 @@ import {
 	CalendarDaysIcon,
 	ChartNoAxesCombinedIcon,
 	FolderOpenIcon,
-	GraduationCapIcon,
 	HouseIcon,
 	KeyRoundIcon,
-	LayoutDashboardIcon,
 	type LucideIcon,
 	NotebookPenIcon,
 	SaladIcon,
 } from 'lucide-react';
 
 export const appNavigation = [
-	{
-		label: 'Overview',
-		path: '/',
-		description: 'Your personal systems at a glance.',
-		icon: LayoutDashboardIcon,
-	},
 	{
 		label: 'Agent',
 		path: '/agent',
@@ -61,13 +53,16 @@ export const appNavigation = [
 		description: 'Store and recover credentials securely.',
 		icon: KeyRoundIcon,
 	},
-	{
-		label: 'Studyo',
-		path: '/studyo',
-		description: 'Build AI-powered study material for exams.',
-		icon: GraduationCapIcon,
-	},
 ] as const;
+
+/**
+ * Where the root lands when there is no remembered screen to restore.
+ *
+ * `/` is not a screen of its own: it redirects here. Declared next to the paths
+ * it has to agree with, so renaming that route breaks a test instead of quietly
+ * sending every fresh start to a route that no longer exists.
+ */
+export const APP_DEFAULT_PATH = '/agent';
 
 export function getNavigationItem(pathname: string) {
 	return appNavigation.find(({ path }) => path === pathname);
@@ -92,7 +87,9 @@ export function getBreadcrumbItems(
 	trail: AppBreadcrumbItem[] = [],
 ): AppBreadcrumbItem[] {
 	const item = getNavigationItem(pathname);
-	if (!item || item.path === '/')
+	// `/` has no navigation entry of its own — it redirects — so it lands here
+	// along with any route that is not a product area.
+	if (!item)
 		return [{ key: 'home', label: 'Personal', icon: HouseIcon, current: true }];
 
 	const items: AppBreadcrumbItem[] = [

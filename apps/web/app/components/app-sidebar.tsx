@@ -65,7 +65,12 @@ export function AppSidebar() {
 									<SidebarMenuItem key={path}>
 										<SidebarMenuButton
 											isActive={pathname === path}
-											render={<NavLink to={path} end={path === '/'} />}
+											// `end` unconditionally, so NavLink's own matching agrees
+											// with the exact comparison above. It used to be reserved
+											// for the entry at `/`, which no longer exists: every
+											// system keeps its state in the query string, so none of
+											// these paths is ever a prefix of the open route.
+											render={<NavLink to={path} end />}
 											onClick={() => {
 												if (isMobile) setOpenMobile(false);
 											}}
