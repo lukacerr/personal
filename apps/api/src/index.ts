@@ -9,6 +9,7 @@ import { authRouter } from './auth';
 import { credentialsRouter } from './credentials';
 import { filesRouter } from './files';
 import { notesRouter } from './notes';
+import { paymentsRouter } from './payments';
 import { publicFilesRouter } from './public-files';
 import { publicNotesRouter } from './public-notes';
 
@@ -80,6 +81,7 @@ export const app = new Elysia()
 	.use(credentialsRouter)
 	.use(filesRouter)
 	.use(notesRouter)
+	.use(paymentsRouter)
 	.use(publicFilesRouter)
 	.use(publicNotesRouter)
 	.get(

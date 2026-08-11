@@ -9,6 +9,7 @@ Lee este archivo antes de modificar:
 | System | Archivos |
 | --- | --- |
 | Credentials | `src/credentials.ts`, `src/credentials-crypto.ts`, `src/schema/credential.ts` |
+| Finance | `src/payments.ts`, `src/dolar.ts`, `src/schema/payment.ts` |
 | Notes | `src/notes.ts`, `src/note-versions.ts`, `src/public-notes.ts`, `src/schema/note.ts`, `src/schema/note-mutation.ts` |
 | Storage | `src/files.ts`, `src/files-multipart.ts`, `src/files-storage.ts`, `src/public-files.ts`, `src/schema/file.ts` |
 
@@ -24,6 +25,20 @@ Lee este archivo antes de modificar:
 - Los arrays de bytes llevan `Uint8Array<ArrayBuffer>` explícito. La web alcanza `credentials-crypto.ts` por el tipo `App` que importa de `@api`, y bajo su lib DOM un `BufferSource` no acepta `ArrayBufferLike`: sin el parámetro la API typechequea sola y la web falla sobre un archivo que nunca ejecuta.
 - No hay router público y no debe haberlo. Una credencial no se comparte por link.
 - El índice único es sobre `lower(title)`: el título es lo único legible sin el secreto, así que es lo único que permite distinguir dos filas. El handler global traduce la violación a 409.
+
+## Finance
+
+- `payment` tiene **dos relojes** y no hay que confundirlos. `paidAt` es cuándo ocurrió el gasto: es editable, arranca en ahora y es lo único sobre lo que filtra un período. `createdAt`/`updatedAt` son auditoría de la fila y no participan de ninguna consulta de producto. Cargar el ticket de ayer no puede moverlo al resumen de hoy.
+- **Un pago nunca puede fallar porque dolarapi esté caída.** El estampado de cotización es best-effort: `readUsdRate` casi siempre responde de cache, en un miss hace una sola llamada acotada a 2,5 s, y si falla la fila se guarda con las dos cotizaciones en `null` y la pantalla lo dice. Esta es la regla más importante de la integración; cualquier cambio que pueda convertir un fallo del feed en un `POST` rechazado está mal.
+- Se guardan **las dos puntas del spread** (`rateBuy` = `compra`, `rateSell` = `venta`) aunque cada fila solo use una: en pesos convierte dividiendo por `compra`, en dólares multiplicando por `venta`. La fila registra **la observación**, no la decisión derivada. Eso deja la política de dirección en `apps/web/app/lib/finance.ts`, donde es pura y testeable, permite cambiarla sin migración ni reescribir historia (por ejemplo sumando percepción/impuesto PAIS a los consumos en dólares), y hace que corregir un typo de moneda sea inofensivo. Con una sola punta congelada, ese `PATCH` dejaría la punta equivocada y el número quedaría mal sin que nada avise.
+- Las dos se escriben o quedan en `null` **juntas**: o hubo cotización o no la hubo. El `PATCH` **nunca** las reescribe, ni siquiera al cambiar de moneda; estampar la de hoy sobre una fila de hace tres meses inventa un número.
+- Las suscripciones son la excepción al congelado: el cliente las convierte con la cotización viva, porque se vuelven a pagar cada mes al precio de hoy. Por eso una suscripción no es un punto sino una **ventana** — cuenta para cualquier período entre `paidAt` y `endedAt`. Cancelar escribe `endedAt` y **no** borra la fila; borrarla la sacaría de todos los períodos que ya la pagaron.
+- Las dos invariantes (`endedAt >= paidAt`, y `endedAt` solo con `isSubscription`) se validan en el router y **no** como CHECK: un 23514 saldría por el handler global como 500 y el mensaje de dominio hay que producirlo acá igual. `endedAt >= paidAt` además es carga estructural: el cliente decide la pertenencia a un período ramificando por `isSubscription` en vez de unir las dos formas con OR, y ambas solo son equivalentes mientras una ventana no pueda correr hacia atrás.
+- `parseDolarQuote` exige **las dos** puntas y rechaza un spread invertido (`compra > venta`) y una `casa` distinta de `oficial`: media cotización no sirve, y un endpoint repuntado a blue o MEP contaminaría todos los sellos siguientes en silencio.
+- La cotización vive en Redis bajo `finance:usd-rate:v1`, prefijada porque la query cache de Drizzle es global sobre el mismo Redis. **Una key, un TTL:** la frescura es un `fetchedAt` dentro del valor, no una segunda key. Los 30 min deciden si salir a la red; las 24 h son la memoria que mantiene la pantalla viva durante una caída. Un fetch fallido devuelve lo cacheado con `stale: true` y **nunca** lo pisa.
+- `GET /payments/rate` va declarado **antes** de `/:id`, que parsea su parámetro como uuid y respondería 422 — la misma lección que `/files/unreferenced`.
+- El índice `GET /payments` **no toma query params a propósito**. El ETag sale del cuerpo, así que filtrar server-side sería un tag por query string y caminar prev/next por períodos revalidaría nada. Además el conjunto visible no es un subconjunto del período: las suscripciones entran desde afuera. El filtrado vive en el cliente. Si el payload llega a ~1 MB, el camino de salida es un único `?since=<ms>` en el índice (un valor canónico, un tag), no un filtro por vista.
+- El body no acepta `rateBuy`/`rateSell`: son observación del servidor y esta app está en internet público.
 
 ## Notes
 

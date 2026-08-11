@@ -242,11 +242,19 @@ body {
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /**
+   * Neutral, stepped, `--chart-1` the most prominent against the surface and
+   * each step receding from there. Ordinal rather than categorical because the
+   * things it colours are ranked by amount: length already carries the value,
+   * so hue would be decoration competing with the rest of a neutral interface.
+   * The steps clear monotone lightness, a visible gap between neighbours and
+   * 2:1 against the surface at the near end.
+   */
+  --chart-1: oklch(0.300 0 0);
+  --chart-2: oklch(0.410 0 0);
+  --chart-3: oklch(0.520 0 0);
+  --chart-4: oklch(0.630 0 0);
+  --chart-5: oklch(0.740 0 0);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -277,11 +285,13 @@ body {
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* The same ramp stepped for the dark surface, so `--chart-1` stays the most
+	 prominent: here that means the lightest step, not the darkest. */
+  --chart-1: oklch(0.920 0 0);
+  --chart-2: oklch(0.800 0 0);
+  --chart-3: oklch(0.680 0 0);
+  --chart-4: oklch(0.560 0 0);
+  --chart-5: oklch(0.440 0 0);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);

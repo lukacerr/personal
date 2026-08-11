@@ -23,6 +23,12 @@ export const env = createEnv({
 				'luka.cerrutti@gds.ey.com',
 			]),
 		DATABASE_URL: z.url(),
+		/**
+		 * The official USD quote. Configurable so the tests can point it at a
+		 * closed port and prove that recording an expense survives the feed being
+		 * unreachable, instead of that assertion depending on the network.
+		 */
+		DOLARAPI_URL: z.url().default('https://dolarapi.com/v1/dolares/oficial'),
 		NEON_FETCH_ENDPOINT: z.url().optional(),
 		UPSTASH_REDIS_REST_URL: z.url(),
 		UPSTASH_REDIS_REST_TOKEN: z.string().min(1),

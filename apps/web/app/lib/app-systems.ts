@@ -1,5 +1,6 @@
-import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
+import { type AppBreadcrumbItem, appNavigation } from '@web/lib/app-navigation';
 import { credentialsSystem } from '@web/lib/credentials-system';
+import { financeSystem } from '@web/lib/finance-system';
 import { notesSystem } from '@web/lib/notes-system';
 import { storageSystem } from '@web/lib/storage-system';
 import type { LucideIcon } from 'lucide-react';
@@ -58,6 +59,7 @@ export type AppSystem = {
 
 export const appSystems: AppSystem[] = [
 	credentialsSystem,
+	financeSystem,
 	notesSystem,
 	storageSystem,
 ];
@@ -102,12 +104,32 @@ export type SystemCommandGroup = {
 	commands: SystemCommand[];
 };
 
+/**
+ * Where a system sits in the sidebar, which is the order the palette lists
+ * solutions in too — the two readings of "what is in this app" should agree.
+ *
+ * Keyed off `/<key>`, so a system's key has to name its route. Sorting here
+ * rather than by hand in `appSystems` means adding a system stays a one-line
+ * append with no second list to keep in sync. A system with no navigation entry
+ * sorts last instead of disappearing.
+ */
+const navigationRank = (system: AppSystem) => {
+	const index = appNavigation.findIndex(
+		({ path }) => path === `/${system.key}`,
+	);
+	return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+};
+
+/** The registry as the sidebar reads it, whatever order it was declared in. */
+export const systemsInSidebarOrder = () =>
+	[...appSystems].sort((a, b) => navigationRank(a) - navigationRank(b));
+
 export async function searchSystemCommands(
 	query: string,
 	limit: number,
 ): Promise<SystemCommandGroup[]> {
 	const groups = await Promise.all(
-		appSystems.map(async (system) => ({
+		systemsInSidebarOrder().map(async (system) => ({
 			system,
 			commands: await system.searchCommands(query, limit),
 		})),

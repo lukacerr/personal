@@ -2,4 +2,5 @@ export * from '@api/schema/credential';
 export * from '@api/schema/file';
 export * from '@api/schema/note';
 export * from '@api/schema/note-mutation';
+export * from '@api/schema/payment';
 export * from '@api/schema/thread';

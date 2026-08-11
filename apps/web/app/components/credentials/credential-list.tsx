@@ -107,7 +107,7 @@ export function CredentialList({
 								</p>
 							</div>
 
-							<div className="flex shrink-0 items-center gap-0.5">
+							<div className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-0.5">
 								<CredentialValueActions
 									title={credential.title}
 									value={value}

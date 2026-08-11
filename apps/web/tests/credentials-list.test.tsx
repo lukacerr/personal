@@ -198,6 +198,20 @@ describe('Credential list', () => {
 		expect(props.onDelete).toHaveBeenCalledTimes(1);
 	});
 
+	/**
+	 * The action cluster must fit inside a narrow card. It has five fixed-size
+	 * controls, so shrinking the title alone cannot prevent horizontal overflow.
+	 */
+	it('wraps a credential action cluster within a narrow card', () => {
+		renderList();
+
+		const actions = screen.getByRole('button', {
+			name: 'Show Amex',
+		}).parentElement;
+		expect(actions?.className).toContain('flex-wrap');
+		expect(actions?.className).toContain('max-w-full');
+	});
+
 	it('marks the credential a link pointed at as current', () => {
 		renderList({ selectedId: 'credential-1' });
 		expect(screen.getByRole('listitem').getAttribute('aria-current')).toBe(
