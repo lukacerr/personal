@@ -17,6 +17,7 @@ import {
 	type DateRange,
 	filterPayments,
 	financeTotals,
+	isAddPaymentShortcut,
 	parseFinanceView,
 	remainingFor,
 	tagBreakdown,
@@ -104,6 +105,32 @@ export default function Finance() {
 			{ replace: true },
 		);
 	}, [searchParams, setSearchParams]);
+
+	/**
+	 * The bare letter that opens the form. Any dialog already being open is a
+	 * skip rather than something the predicate could know: focus inside one often
+	 * rests on a button rather than a field, so the editable check alone would let
+	 * the key discard an edit halfway through and reopen the form over it.
+	 */
+	const dialogOpen =
+		form !== undefined ||
+		deleting !== undefined ||
+		cancelling !== undefined ||
+		editingBudget;
+
+	useEffect(() => {
+		if (dialogOpen) return;
+
+		function onKeyDown(event: KeyboardEvent) {
+			if (event.defaultPrevented || !isAddPaymentShortcut(event)) return;
+			event.preventDefault();
+			setFormError(undefined);
+			setForm({ kind: 'create' });
+		}
+
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
+	}, [dialogOpen]);
 
 	// Debounced so typing does not write a history entry per keystroke, and
 	// `replace` so back still leaves the screen rather than unwinding the search.

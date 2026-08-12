@@ -204,7 +204,7 @@ export function StoragePreview({
 					    rendered on a white sheet instead of the app's surface. */}
 					<div
 						ref={documentRef}
-						className="bg-white p-6 text-black [&:empty]:hidden"
+						className="flex flex-col items-center bg-white p-6 text-black [&:empty]:hidden"
 					/>
 
 					{state.status === 'ready' && kind === 'unknown' && (

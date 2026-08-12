@@ -43,8 +43,21 @@ function Stat({
 				<span className="text-muted-foreground text-sm">{label}</span>
 				{action}
 			</div>
+			{/*
+			 * One step per column count, following the card rather than the window,
+			 * because every split halves the room a total has: a phone's two-up gets
+			 * ~126px, the same two columns on a desktop ~186px, and four wide ones
+			 * ~247px. Each size is the largest that measured no clipping against the
+			 * card's `overflow-hidden` at its narrowest card.
+			 */}
+			{/*
+			 * Truncated rather than left to the card's `overflow-hidden`, which drops
+			 * trailing digits with nothing to show for it: a total quietly reading
+			 * 1.526.34 is worse than one that says it did not fit.
+			 */}
 			<span
-				className={`font-mono text-3xl tabular-nums ${
+				title={value}
+				className={`truncate font-mono text-3xl tabular-nums @xs:text-base @md:text-2xl @6xl:text-3xl ${
 					tone === 'negative' ? 'text-destructive' : ''
 				}`}
 			>
@@ -52,15 +65,20 @@ function Stat({
 			</span>
 			{/*
 			 * Reserved even when empty, and clipped rather than wrapped, so the four
-			 * cards keep a common baseline whatever ends up in here.
+			 * cards keep a common baseline whatever ends up in here. Anything a card
+			 * wants to act on shares this line rather than opening one of its own:
+			 * the cards sit in a grid row, so a single extra line under one of them
+			 * is height charged to all four.
 			 */}
-			<span
-				title={detail}
-				className="min-h-5 truncate font-mono text-muted-foreground text-xs tabular-nums"
-			>
-				{detail}
-			</span>
-			{footer}
+			<div className="flex min-h-6 flex-wrap items-center gap-x-2 overflow-hidden">
+				<span
+					title={detail}
+					className="truncate font-mono text-muted-foreground text-xs tabular-nums"
+				>
+					{detail}
+				</span>
+				{footer}
+			</div>
 		</Card>
 	);
 }
@@ -91,7 +109,9 @@ function QuoteCard({
 				{icon}
 				{label}
 			</span>
-			<span className="font-mono text-xl tabular-nums">{value ?? '—'}</span>
+			<span className="font-mono text-xl tabular-nums @xs:text-base @md:text-lg @6xl:text-xl">
+				{value ?? '—'}
+			</span>
 		</div>
 	);
 
@@ -125,7 +145,13 @@ function QuoteCard({
 				</Tooltip>
 			</div>
 
-			<div className="flex flex-col gap-0.5">
+			{/*
+			 * Side by side rather than stacked: the two rates are the shortest thing
+			 * on the row and stacking them spent height to leave most of the card
+			 * empty. It wraps instead of picking a breakpoint, so a card too narrow
+			 * for both falls back to the stack on its own.
+			 */}
+			<div className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
 				{side(
 					<ArrowUpRightIcon className="size-3.5" aria-hidden="true" />,
 					'buy',
@@ -138,7 +164,8 @@ function QuoteCard({
 				)}
 			</div>
 
-			<span className="min-h-5 truncate font-mono text-muted-foreground text-xs tabular-nums">
+			{/* Same reserved line as the other three, so the row shares a baseline. */}
+			<span className="flex min-h-6 items-center truncate font-mono text-muted-foreground text-xs tabular-nums">
 				{quote ? (
 					quote.stale ? (
 						'last one known'
@@ -194,82 +221,116 @@ export function FinanceSummary({
 				: undefined;
 
 	return (
-		<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+		/*
+		 * Queried against this wrapper rather than the viewport: the sidebar is
+		 * collapsible and resizable between 224 and 384px, so the same window can
+		 * hand this row anything from ~660 to ~1060px. Viewport breakpoints guessed
+		 * that wrong in both directions — four columns at a 1080px window clipped a
+		 * peso total whenever the sidebar was open, and two columns left ~490px
+		 * cards holding ~200px of content whenever it was closed.
+		 */
+		<div className="@container">
 			{/*
-			 * The split belongs to the number it breaks down. Currency symbols are
-			 * dropped because the card's own label already said pesos, and with them
-			 * the line wraps and breaks the card baseline.
+			 * Two up from a phone, because one card per row spent the width on nothing
+			 * and pushed the breakdown a full screen down. Four from 60rem rather than
+			 * the `@4xl` next to it: four columns need ~200px of content each to hold
+			 * a total, and at 56rem they get 183. It has to stay under `@5xl` too, or
+			 * a 1080px window with the sidebar closed — 1014px here — would fall back
+			 * to two columns, which is the case that started all of this.
+			 *
+			 * The single column survives for anything narrower than 20rem, where the
+			 * halves are too tight for a total at any size worth reading.
 			 */}
-			<Stat
-				label="Total in pesos"
-				value={formatArs(totals.ars)}
-				detail={
-					totals.recurringArs > 0 && totals.oneOffArs > 0
-						? `${plain(totals.recurringArs)} fixed · ${plain(totals.oneOffArs)} one-off`
-						: counted
-				}
-			/>
-			<Stat
-				label="Total in dollars"
-				value={formatUsd(totals.usd)}
-				detail={missing ?? counted}
-			/>
+			<div className="grid gap-3 @xs:grid-cols-2 @min-[60rem]:grid-cols-4">
+				{/*
+				 * The split belongs to the number it breaks down. Currency symbols are
+				 * dropped because the card's own label already said pesos, and with them
+				 * the line wraps and breaks the card baseline.
+				 */}
+				<Stat
+					label="Total in pesos"
+					value={formatArs(totals.ars)}
+					detail={
+						totals.recurringArs > 0 && totals.oneOffArs > 0
+							? `${plain(totals.recurringArs)} fixed · ${plain(totals.oneOffArs)} one-off`
+							: counted
+					}
+				/>
+				<Stat
+					label="Total in dollars"
+					value={formatUsd(totals.usd)}
+					detail={missing ?? counted}
+				/>
 
-			{/*
-			 * The budget lives inside the card it produces rather than in one of its
-			 * own: it is set once and then only read as the thing "left over" is
-			 * measured against.
-			 */}
-			<Stat
-				label="Left over"
-				value={
-					remaining?.ars === null || remaining === undefined
-						? '—'
-						: formatArs(remaining.ars)
-				}
-				// Overspending is the number worth seeing, so it is never clamped.
-				tone={
-					remaining?.ars !== null && (remaining?.ars ?? 0) < 0
-						? 'negative'
-						: undefined
-				}
-				detail={
-					remaining?.usd === null || remaining === undefined
-						? undefined
-						: formatUsd(remaining.usd)
-				}
-				footer={
-					<button
-						type="button"
-						onClick={onEditBudget}
-						className="-mx-1 mt-1 flex min-h-11 items-center gap-1.5 rounded-md px-1 text-left text-muted-foreground text-xs transition-colors hover:bg-accent/50 hover:text-foreground md:min-h-8"
-					>
-						<WalletIcon className="size-3.5 shrink-0" aria-hidden="true" />
-						{budget ? (
-							<>
-								<span>Budget</span>
-								<span className="font-mono tabular-nums">
-									{budget.currency === 'ars'
-										? formatArs(budget.amount)
-										: formatUsd(budget.amount)}
-								</span>
-							</>
-						) : (
-							<span>Set a budget</span>
-						)}
-						<PencilIcon
-							className="size-3 shrink-0 opacity-60"
-							aria-hidden="true"
-						/>
-					</button>
-				}
-			/>
+				{/*
+				 * The budget lives inside the card it produces rather than in one of its
+				 * own: it is set once and then only read as the thing "left over" is
+				 * measured against.
+				 */}
+				<Stat
+					label="Left over"
+					value={
+						remaining?.ars === null || remaining === undefined
+							? '—'
+							: formatArs(remaining.ars)
+					}
+					// Overspending is the number worth seeing, so it is never clamped.
+					tone={
+						remaining?.ars !== null && (remaining?.ars ?? 0) < 0
+							? 'negative'
+							: undefined
+					}
+					detail={
+						remaining?.usd === null || remaining === undefined
+							? undefined
+							: formatUsd(remaining.usd)
+					}
+					footer={
+						/*
+						 * Generous to touch while a card is on a row of its own, and only
+						 * as tall as the line it shares once several sit on a desktop row —
+						 * still the 24px a pointer target needs, without charging the other
+						 * three cards for it. The word goes as soon as the cards are side
+						 * by side at all: from there the room is for the figure or for the
+						 * label, and the figure is the one being read.
+						 *
+						 * It never shrinks, so the line wraps instead when both will not
+						 * fit. A phone's two-up is exactly that case, and a budget cut off
+						 * mid-figure would be a number reading something it is not.
+						 */
+						<button
+							type="button"
+							onClick={onEditBudget}
+							aria-label={budget ? 'Edit the budget' : 'Set a budget'}
+							className="-mx-1 flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-1 text-left text-muted-foreground text-xs transition-colors hover:bg-accent/50 hover:text-foreground @md:min-h-6"
+						>
+							<WalletIcon className="size-3.5 shrink-0" aria-hidden="true" />
+							{budget ? (
+								<>
+									<span className="@xs:hidden">Budget</span>
+									<span className="font-mono tabular-nums">
+										{budget.currency === 'ars'
+											? formatArs(budget.amount)
+											: formatUsd(budget.amount)}
+									</span>
+								</>
+							) : (
+								<span>Set a budget</span>
+							)}
+							<PencilIcon
+								className="size-3 shrink-0 opacity-60"
+								aria-hidden="true"
+							/>
+						</button>
+					}
+				/>
 
-			<QuoteCard
-				quote={quote}
-				failed={quoteFailed}
-				onRefresh={onRefreshQuote}
-			/>
+				<QuoteCard
+					quote={quote}
+					failed={quoteFailed}
+					onRefresh={onRefreshQuote}
+				/>
+			</div>
 		</div>
 	);
 }

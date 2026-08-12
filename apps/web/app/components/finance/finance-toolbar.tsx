@@ -6,6 +6,7 @@ import {
 	InputGroupButton,
 	InputGroupInput,
 } from '@web/components/ui/input-group';
+import { Kbd } from '@web/components/ui/kbd';
 import {
 	Popover,
 	PopoverContent,
@@ -211,14 +212,21 @@ export function FinanceToolbar({
 						</Button>
 					) : null}
 
-					{/* The label appears only once there is room for it. */}
+					{/*
+					 * The label appears only once there is room for it, and the key with
+					 * it: a hint nobody can read is width spent on nothing, and the
+					 * shortcut is of no use on the phone that hides it either way. It
+					 * stays announced through `aria-keyshortcuts` at every width.
+					 */}
 					<Button
 						onClick={onCreate}
 						aria-label="Add payment"
+						aria-keyshortcuts="A"
 						className="size-11 shrink-0 sm:size-auto sm:min-h-11 md:min-h-9"
 					>
 						<PlusIcon data-icon="inline-start" />
 						<span className="hidden sm:inline">Add payment</span>
+						<Kbd className="hidden lg:inline-flex">A</Kbd>
 					</Button>
 				</div>
 			</div>

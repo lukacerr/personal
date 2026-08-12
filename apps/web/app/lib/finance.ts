@@ -1,5 +1,6 @@
 import type { Payment } from '@web/lib/finance-api';
 import type { FinanceBudget } from '@web/lib/finance-settings';
+import { isEditableTarget, type ShortcutEvent } from '@web/lib/keyboard';
 
 /**
  * Everything Finance knows how to compute, with no React, no network and no
@@ -8,6 +9,25 @@ import type { FinanceBudget } from '@web/lib/finance-settings';
  */
 
 export type UsdQuote = { compra: number; venta: number };
+
+/**
+ * The bare letter opens the payment form.
+ *
+ * Deliberately unmodified: Ctrl/Cmd+A is select all, a shortcut that does
+ * something people use, and taking it over would cost more than the keystroke
+ * it saves. Bare letters cost nothing outside a text field, which is exactly
+ * what the editable check excludes.
+ */
+export function isAddPaymentShortcut(event: ShortcutEvent) {
+	return (
+		!event.ctrlKey &&
+		!event.metaKey &&
+		!event.altKey &&
+		!event.repeat &&
+		!isEditableTarget(event.target) &&
+		event.key.toLowerCase() === 'a'
+	);
+}
 
 /* -------------------------------------------------------------------------- */
 /* Periods                                                                     */
