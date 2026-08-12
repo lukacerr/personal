@@ -2,6 +2,7 @@ import {
 	DEFAULT_FINANCE_SETTINGS,
 	FINANCE_SETTINGS_KEY,
 	loadFinanceSettings,
+	reconcileFinanceSettings,
 	saveFinanceSettings,
 } from '@web/lib/finance-settings';
 import { describe, expect, it } from 'vitest';
@@ -106,5 +107,61 @@ describe('finance settings', () => {
 	/** Versioned in the key too, so the previous shape is never half-read. */
 	it('is versioned', () => {
 		expect(FINANCE_SETTINGS_KEY).toBe('personal-finance-settings:v2');
+	});
+});
+
+/**
+ * The shared copy is the one that decides, so a phone that has never opened
+ * Finance adopts the budget instead of starting over. The local copy is not a
+ * peer to merge with: it is what seeds the shared one the first time, and the
+ * mirror that keeps the screen working with no network.
+ */
+describe('reconciling with the shared copy', () => {
+	const local = { budget: { amount: 1_000, currency: 'ars' as const } };
+	const shared = {
+		budget: { amount: 3_000_000, currency: 'ars' as const },
+		range: { from: 10_000, toExclusive: 20_000 },
+	};
+
+	it('adopts the shared copy when there is one', () => {
+		expect(reconcileFinanceSettings(shared, local)).toEqual({
+			settings: shared,
+			push: false,
+		});
+	});
+
+	it('seeds the shared copy from local when there is none', () => {
+		expect(reconcileFinanceSettings(null, local)).toEqual({
+			settings: local,
+			push: true,
+		});
+	});
+
+	it('falls back to nothing remembered when neither has anything', () => {
+		expect(reconcileFinanceSettings(null, DEFAULT_FINANCE_SETTINGS)).toEqual({
+			settings: DEFAULT_FINANCE_SETTINGS,
+			push: false,
+		});
+	});
+
+	/**
+	 * An emptied shared copy is a value, not an absence: it is how clearing a
+	 * budget on one device reaches the others. Pushing local back over it would
+	 * undo the clear on the next open.
+	 */
+	it('lets an emptied shared copy clear the local one', () => {
+		expect(reconcileFinanceSettings({}, local)).toEqual({
+			settings: {},
+			push: false,
+		});
+	});
+
+	/** A range with both sides open is "all of time", which is a real choice. */
+	it('counts an open range as something worth sharing', () => {
+		const open = { range: { from: null, toExclusive: null } };
+		expect(reconcileFinanceSettings(null, open)).toEqual({
+			settings: open,
+			push: true,
+		});
 	});
 });

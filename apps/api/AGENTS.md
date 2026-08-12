@@ -39,6 +39,10 @@ Lee este archivo antes de modificar:
 - `GET /payments/rate` va declarado **antes** de `/:id`, que parsea su parámetro como uuid y respondería 422 — la misma lección que `/files/unreferenced`.
 - El índice `GET /payments` **no toma query params a propósito**. El ETag sale del cuerpo, así que filtrar server-side sería un tag por query string y caminar prev/next por períodos revalidaría nada. Además el conjunto visible no es un subconjunto del período: las suscripciones entran desde afuera. El filtrado vive en el cliente. Si el payload llega a ~1 MB, el camino de salida es un único `?since=<ms>` en el índice (un valor canónico, un tag), no un filtro por vista.
 - El body no acepta `rateBuy`/`rateSell`: son observación del servidor y esta app está en internet público.
+- `finance-settings.ts` guarda el budget y el último rango en Redis bajo `finance:settings:v1`, **sin TTL**: no son un valor derivado y nada los puede recomputar. Que Redis pueda evictar es un costo aceptado explícitamente — perderlos cuesta retipear un budget, y cada dispositivo guarda un espejo local que vuelve a sembrar la caché en la siguiente apertura.
+- `GET /payments/settings` distingue **tres** respuestas y las tres importan: `null` es "la caché no tiene nada" y deja que el dispositivo siembre con lo suyo; `{}` es "alguien la vació" y es cómo viaja el borrado de un budget; y un objeto con datos es la copia a adoptar. Una forma que el schema no puede leer se reporta como `null` y no como error: un dispositivo con su espejo intacto debe resembrar, no adoptar algo que esta versión no entiende.
+- Las dos rutas van declaradas **antes** de `/:id`, igual que `/rate`, que parsea su parámetro como uuid y respondería 422.
+- Un fallo de escritura en Redis sale como `503 FINANCE_SETTINGS_UNAVAILABLE` y no como 500: el cliente ya guardó en su espejo y lo único que necesita saber es que la copia compartida no se actualizó.
 
 ## Notes
 

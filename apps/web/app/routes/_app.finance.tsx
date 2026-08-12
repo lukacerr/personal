@@ -23,12 +23,18 @@ import {
 	tagBreakdown,
 	updateFinanceSearchParams,
 } from '@web/lib/finance';
-import type { Payment, PaymentDraft } from '@web/lib/finance-api';
+import {
+	type Payment,
+	type PaymentDraft,
+	readSharedSettings,
+	writeSharedSettings,
+} from '@web/lib/finance-api';
 import {
 	DEFAULT_FINANCE_SETTINGS,
 	type FinanceBudget,
 	type FinanceSettings,
 	loadFinanceSettings,
+	reconcileFinanceSettings,
 	saveFinanceSettings,
 } from '@web/lib/finance-settings';
 import { useFinanceStore } from '@web/lib/finance-store';
@@ -86,6 +92,35 @@ export default function Finance() {
 		void load();
 		void loadQuote();
 	}, [load, loadQuote]);
+
+	/**
+	 * Adopt the shared budget and range, or seed them from this device.
+	 *
+	 * Runs once per visit and never fights the user: a change made while it is in
+	 * flight wins, because `settled` stops the answer from landing on top of it.
+	 * Failing to reach the cache is silent here — the mirror already has an answer
+	 * and there is nothing the user could do about it — but failing to *save* is
+	 * not, which is why only `patchSettings` reports.
+	 */
+	useEffect(() => {
+		let settled = false;
+
+		void readSharedSettings().then((shared) => {
+			if (settled) return;
+			const { settings: next, push } = reconcileFinanceSettings(
+				shared,
+				loadFinanceSettings(window.localStorage),
+			);
+
+			setSettings(next);
+			saveFinanceSettings(window.localStorage, next);
+			if (push) void writeSharedSettings(next);
+		});
+
+		return () => {
+			settled = true;
+		};
+	}, []);
 
 	useEffect(() => {
 		setQueryInput(view.query);
@@ -157,10 +192,24 @@ export default function Finance() {
 	const tags = useMemo(() => collectTags(payments), [payments]);
 	const remaining = remainingFor(settings.budget, totals, quote);
 
+	/**
+	 * The mirror is written first and synchronously: the screen has to reflect the
+	 * change whether or not the cache is reachable. The shared copy is reported on
+	 * because a budget that silently stayed on one device is exactly the problem
+	 * sharing it was meant to solve.
+	 */
 	function patchSettings(changes: Partial<FinanceSettings>) {
 		const next = { ...settings, ...changes };
 		setSettings(next);
 		saveFinanceSettings(window.localStorage, next);
+
+		void writeSharedSettings(next).then(
+			(stored) => {
+				if (!stored)
+					toast.error('Saved on this device only — the shared copy is down.');
+			},
+			() => toast.error('Saved on this device only — no connection.'),
+		);
 	}
 
 	// Written to the url so the view stays shareable, and remembered so opening

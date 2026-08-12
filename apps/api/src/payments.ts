@@ -1,6 +1,10 @@
 import { authPlugin } from '@api/auth';
 import { readUsdRate } from '@api/dolar';
 import { db } from '@api/env';
+import {
+	financeSettingsSchema,
+	financeSettingsStore,
+} from '@api/finance-settings';
 import { entityTag, isUnchanged } from '@api/http-cache';
 import { payment } from '@api/schema';
 import { desc, eq } from 'drizzle-orm';
@@ -134,6 +138,31 @@ export const paymentsRouter = new Elysia({
 			return rate;
 		},
 		{ detail: { summary: 'Read the official USD quote' } },
+	)
+	/**
+	 * The budget and the last range, shared across devices so neither has to be
+	 * retyped per phone. `null` means the cache has nothing — distinct from an
+	 * empty settings, which is how clearing a budget reaches the other devices.
+	 */
+	.get(
+		'/settings',
+		async () => ({ settings: await financeSettingsStore.read() }),
+		{ detail: { summary: 'Read the shared finance settings' } },
+	)
+	.put(
+		'/settings',
+		async ({ body }) => {
+			// A cache that is down is reported as a failure to store, not as a 500:
+			// the device keeps its own mirror either way.
+			const stored = await financeSettingsStore.write(body);
+			if (!stored)
+				return status(503, { error: 'FINANCE_SETTINGS_UNAVAILABLE' });
+			return { settings: body };
+		},
+		{
+			body: financeSettingsSchema,
+			detail: { summary: 'Replace the shared finance settings' },
+		},
 	)
 	.post(
 		'/',

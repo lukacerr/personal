@@ -38,26 +38,33 @@ function Stat({
 	footer?: React.ReactNode;
 }) {
 	return (
-		<Card className="gap-1 p-4">
+		// Its own container, so the figure below can be sized against this card
+		// rather than against the row all four share.
+		<Card className="@container gap-1 p-4">
 			<div className="flex items-start justify-between gap-2">
 				<span className="text-muted-foreground text-sm">{label}</span>
 				{action}
 			</div>
 			{/*
-			 * One step per column count, following the card rather than the window,
-			 * because every split halves the room a total has: a phone's two-up gets
-			 * ~126px, the same two columns on a desktop ~186px, and four wide ones
-			 * ~247px. Each size is the largest that measured no clipping against the
-			 * card's `overflow-hidden` at its narrowest card.
-			 */}
-			{/*
-			 * Truncated rather than left to the card's `overflow-hidden`, which drops
-			 * trailing digits with nothing to show for it: a total quietly reading
-			 * 1.526.34 is worse than one that says it did not fit.
+			 * Sized against the card and not against a breakpoint. Every split halves
+			 * the room a figure has, and the card's width is not a function of the
+			 * window: the sidebar is resizable and collapsible, and a system font
+			 * scale grows the text without growing the card at all. Three fixed tiers
+			 * had been wrong on three devices before this — a 1080px portrait monitor,
+			 * a 360px phone, and a flip cover screen.
+			 *
+			 * `cqi` is 1% of this card's inline size, so the coefficient is just how
+			 * many characters have to fit: 10 holds a 13-character total at every
+			 * card width the grid produces, measured. The `min` keeps a wide card from
+			 * growing the figure past what the design asked for.
+			 *
+			 * `truncate` stays as the floor under all of it: the card clips with
+			 * `overflow-hidden`, and a total quietly reading 1.526.34 is a different
+			 * number with nothing to show it was cut.
 			 */}
 			<span
 				title={value}
-				className={`truncate font-mono text-3xl tabular-nums @xs:text-base @md:text-2xl @6xl:text-3xl ${
+				className={`truncate font-mono text-[min(1.875rem,10cqi)] tabular-nums ${
 					tone === 'negative' ? 'text-destructive' : ''
 				}`}
 			>
@@ -109,7 +116,7 @@ function QuoteCard({
 				{icon}
 				{label}
 			</span>
-			<span className="font-mono text-xl tabular-nums @xs:text-base @md:text-lg @6xl:text-xl">
+			<span className="font-mono text-xl tabular-nums @xs/summary:text-base @md/summary:text-lg @6xl/summary:text-xl">
 				{value ?? '—'}
 			</span>
 		</div>
@@ -229,7 +236,7 @@ export function FinanceSummary({
 		 * peso total whenever the sidebar was open, and two columns left ~490px
 		 * cards holding ~200px of content whenever it was closed.
 		 */
-		<div className="@container">
+		<div className="@container/summary">
 			{/*
 			 * Two up from a phone, because one card per row spent the width on nothing
 			 * and pushed the breakdown a full screen down. Four from 60rem rather than
@@ -241,7 +248,7 @@ export function FinanceSummary({
 			 * The single column survives for anything narrower than 20rem, where the
 			 * halves are too tight for a total at any size worth reading.
 			 */}
-			<div className="grid gap-3 @xs:grid-cols-2 @min-[60rem]:grid-cols-4">
+			<div className="grid gap-3 @xs/summary:grid-cols-2 @min-[60rem]/summary:grid-cols-4">
 				{/*
 				 * The split belongs to the number it breaks down. Currency symbols are
 				 * dropped because the card's own label already said pesos, and with them
@@ -302,12 +309,12 @@ export function FinanceSummary({
 							type="button"
 							onClick={onEditBudget}
 							aria-label={budget ? 'Edit the budget' : 'Set a budget'}
-							className="-mx-1 flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-1 text-left text-muted-foreground text-xs transition-colors hover:bg-accent/50 hover:text-foreground @md:min-h-6"
+							className="-mx-1 flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-1 text-left text-muted-foreground text-xs transition-colors hover:bg-accent/50 hover:text-foreground @md/summary:min-h-6"
 						>
 							<WalletIcon className="size-3.5 shrink-0" aria-hidden="true" />
 							{budget ? (
 								<>
-									<span className="@xs:hidden">Budget</span>
+									<span className="@xs/summary:hidden">Budget</span>
 									<span className="font-mono tabular-nums">
 										{budget.currency === 'ars'
 											? formatArs(budget.amount)

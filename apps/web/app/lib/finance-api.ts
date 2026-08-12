@@ -1,4 +1,5 @@
 import { authenticatedApi } from '@web/lib/authenticated-api';
+import type { FinanceSettings } from '@web/lib/finance-settings';
 
 type TreatyData<T> = T extends (...args: infer _Args) => infer Result
 	? Awaited<Result> extends { data: infer Data }
@@ -64,6 +65,25 @@ export async function readUsdQuote() {
 	if (response.status !== 200 || !response.data || !('venta' in response.data))
 		return undefined;
 	return response.data;
+}
+
+/**
+ * The shared budget and range.
+ *
+ * A read that cannot be answered comes back `null`, the same as a cache with
+ * nothing in it: both mean "no shared copy to adopt", and the screen falls
+ * through to what this device remembered. A write says whether it landed, so the
+ * caller can tell the difference between saved everywhere and saved here.
+ */
+export async function readSharedSettings(): Promise<FinanceSettings | null> {
+	const response = await authenticatedApi.payments.settings.get();
+	if (response.status !== 200 || !response.data) return null;
+	return response.data.settings;
+}
+
+export async function writeSharedSettings(settings: FinanceSettings) {
+	const response = await authenticatedApi.payments.settings.put(settings);
+	return response.status === 200;
 }
 
 export async function createPayment(draft: PaymentDraft) {

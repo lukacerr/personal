@@ -66,6 +66,40 @@ export function loadFinanceSettings(
 	}
 }
 
+/** Whether there is anything here worth seeding the shared copy with. */
+function isRemembered(settings: FinanceSettings) {
+	return settings.budget !== undefined || settings.range !== undefined;
+}
+
+export type SettingsReconciliation = {
+	settings: FinanceSettings;
+	/** Whether the local copy has to be pushed up, because the cache had none. */
+	push: boolean;
+};
+
+/**
+ * Which copy the screen opens on.
+ *
+ * The shared copy decides whenever there is one, so a phone that has never
+ * opened Finance adopts the budget instead of starting over. The local copy is
+ * not a peer to merge with — it seeds the shared one the first time, and stays
+ * as the mirror that keeps the screen working with no network.
+ *
+ * An **empty** shared copy is a value and not an absence: it is how clearing a
+ * budget on one device reaches the others, so it wins like any other. Only a
+ * missing one lets local through, which is also why nothing here needs a clock:
+ * there is never a merge to arbitrate.
+ */
+export function reconcileFinanceSettings(
+	shared: FinanceSettings | null,
+	local: FinanceSettings,
+): SettingsReconciliation {
+	if (shared !== null) return { settings: shared, push: false };
+	return isRemembered(local)
+		? { settings: local, push: true }
+		: { settings: DEFAULT_FINANCE_SETTINGS, push: false };
+}
+
 export function saveFinanceSettings(
 	storage: Pick<SettingsStorage, 'setItem'>,
 	settings: FinanceSettings,

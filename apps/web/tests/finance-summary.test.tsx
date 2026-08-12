@@ -51,9 +51,30 @@ describe('Finance summary', () => {
 			.getByText('USD rate')
 			.closest('[data-slot="card"]')?.parentElement;
 
-		expect(grid?.className).toContain('@min-[60rem]:grid-cols-4');
-		expect(grid?.parentElement?.className).toContain('@container');
+		expect(grid?.className).toContain('@min-[60rem]/summary:grid-cols-4');
+		expect(grid?.parentElement?.className).toContain('@container/summary');
 		expect(grid?.className).not.toMatch(/(?:^|\s)(?:sm|md|lg|xl):grid-cols/);
+	});
+
+	/**
+	 * The figure answers to the card holding it, not to a breakpoint. Three fixed
+	 * tiers had already been wrong on three devices — the last one a flip cover
+	 * screen — because a card's width is not a function of the window, and a
+	 * system font scale moves the text without moving the card at all.
+	 */
+	it('sizes the totals against their own card', () => {
+		renderSummary();
+
+		const value = screen
+			.getByText('Total in pesos')
+			.closest('[data-slot="card"]')
+			?.querySelector('span[title]');
+
+		expect(value?.className).toMatch(/text-\[min\([^)]*cqi\)\]/);
+		// Sized against the card, so the card is what has to be the container.
+		expect(value?.closest('[data-slot="card"]')?.className).toContain(
+			'@container',
+		);
 	});
 
 	/**
@@ -68,7 +89,7 @@ describe('Finance summary', () => {
 			.getByText('USD rate')
 			.closest('[data-slot="card"]')?.parentElement;
 
-		expect(grid?.className).toContain('@xs:grid-cols-2');
+		expect(grid?.className).toContain('@xs/summary:grid-cols-2');
 	});
 
 	/**
