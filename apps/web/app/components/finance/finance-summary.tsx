@@ -21,6 +21,71 @@ import {
 	TriangleAlertIcon,
 	WalletIcon,
 } from 'lucide-react';
+import { useLayoutEffect, useRef } from 'react';
+
+/**
+ * One correction step for a figure against the width it actually rendered at.
+ * The cqi sizing already answers to the card, but a system font scale (the
+ * WebView's text zoom) multiplies whatever font the stylesheet computes
+ * without growing the card, and no coefficient can see that multiplier — only
+ * a measurement of the overflow can. Below the floor the ellipsis takes over:
+ * a figure too small to read is worse than one that says it was cut.
+ */
+export function fittedScale(
+	scale: number,
+	scrollWidth: number,
+	clientWidth: number,
+) {
+	if (clientWidth <= 0 || scrollWidth <= clientWidth) return scale;
+	return Math.max(0.4, scale * (clientWidth / scrollWidth));
+}
+
+function useFittedFigure(value: string) {
+	const ref = useRef<HTMLSpanElement>(null);
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies(value): the effect measures the text that just rendered, so a new figure needs a fresh measurement even though it only reads the DOM
+	useLayoutEffect(() => {
+		const span = ref.current;
+		if (!span) return;
+
+		// Fractional, unlike `scrollWidth`: the fit converges onto the exact
+		// boundary, where an integer measurement rounds a sub-pixel overflow
+		// away and the ellipsis still swallows a digit.
+		const textWidth = () => {
+			const range = span.ownerDocument.createRange();
+			range.selectNodeContents(span);
+			return range.getBoundingClientRect().width;
+		};
+
+		const refit = () => {
+			span.style.fontSize = '';
+			const base = Number.parseFloat(window.getComputedStyle(span).fontSize);
+			if (!Number.isFinite(base) || base <= 0) return;
+			let scale = 1;
+			// More than one pass, because the same text zoom that outgrew the
+			// stylesheet scales what gets set here too, so a correction can land
+			// short by that factor. The pixel of slack keeps the fit off the
+			// exact boundary the ellipsis triggers on.
+			for (let pass = 0; pass < 3; pass += 1) {
+				const next = fittedScale(scale, textWidth(), span.clientWidth - 1);
+				if (next === scale) break;
+				scale = next;
+				span.style.fontSize = `${base * scale}px`;
+			}
+		};
+
+		refit();
+		// A font swap changes the text's width without changing the span's box,
+		// so the resize observer alone would sleep through it.
+		document.fonts?.ready.then(refit).catch(() => {});
+		if (typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(refit);
+		observer.observe(span);
+		return () => observer.disconnect();
+	}, [value]);
+
+	return ref;
+}
 
 function Stat({
 	label,
@@ -37,6 +102,7 @@ function Stat({
 	action?: React.ReactNode;
 	footer?: React.ReactNode;
 }) {
+	const figure = useFittedFigure(value);
 	return (
 		// Its own container, so the figure below can be sized against this card
 		// rather than against the row all four share.
@@ -61,8 +127,13 @@ function Stat({
 			 * `truncate` stays as the floor under all of it: the card clips with
 			 * `overflow-hidden`, and a total quietly reading 1.526.34 is a different
 			 * number with nothing to show it was cut.
+			 *
+			 * The ref measures the rendered overflow and shrinks the figure to fit,
+			 * because a system text zoom multiplies this font — cqi, rem and all —
+			 * without growing the card, which is invisible to the stylesheet.
 			 */}
 			<span
+				ref={figure}
 				title={value}
 				className={`truncate font-mono text-[min(1.875rem,10cqi)] tabular-nums ${
 					tone === 'negative' ? 'text-destructive' : ''

@@ -311,14 +311,24 @@ function CalendarItemRowBase({
 			) : null}
 			<div className="flex min-w-0 flex-1 flex-col gap-1">
 				<div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+					{/*
+					 * Minimum widths, not fixed: a system font scale grows the text
+					 * without growing a `w-12` box, and the hour was drawn over the
+					 * title on a flip cover screen. Every cell holds the same five
+					 * monospace characters — an untimed row gets figure-width blanks —
+					 * so the columns widen together and titles stay aligned at any
+					 * text scale.
+					 */}
 					{showDate && item.date ? (
-						<span className="w-12 shrink-0 font-mono text-muted-foreground text-sm tabular-nums">
+						<span className="min-w-12 shrink-0 font-mono text-muted-foreground text-sm tabular-nums">
 							{formatShortDate(item.date)}
 						</span>
 					) : null}
 					{showTime ? (
-						<span className="w-12 shrink-0 font-mono text-sm tabular-nums">
-							{event.timeMinutes !== null ? formatTime(event.timeMinutes) : ''}
+						<span className="min-w-12 shrink-0 font-mono text-sm tabular-nums">
+							{event.timeMinutes !== null
+								? formatTime(event.timeMinutes)
+								: '\u00a0'.repeat(5)}
 						</span>
 					) : null}
 					<span

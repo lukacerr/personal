@@ -168,6 +168,27 @@ describe('CalendarWeek', () => {
 		);
 	});
 
+	/**
+	 * The time cell is a minimum, not a fixed width: a system font scale (the
+	 * WebView's text zoom) grows the text without growing a `w-12` box, and the
+	 * hour ended up drawn over the title on a flip cover screen. An untimed row
+	 * fills the cell with five monospace blanks so titles stay aligned with the
+	 * timed rows at every text scale.
+	 */
+	it('lets the time cell grow with its text instead of under the title', () => {
+		renderWeek([
+			makeEvent({ title: 'Rosita', date: '2026-08-18', timeMinutes: 480 }),
+			makeEvent({ title: 'Vet', date: '2026-08-18' }),
+		]);
+
+		const time = screen.getByText('08:00');
+		expect(time.className).toContain('min-w-12');
+		expect(time.className).not.toMatch(/(?:^|\s)w-12(?:\s|$)/);
+
+		const spacer = screen.getByText('Vet').previousElementSibling;
+		expect(spacer?.textContent).toBe('\u00a0'.repeat(5));
+	});
+
 	it('renders detail lines as sub-checks that toggle by line', async () => {
 		const event = makeEvent({
 			title: 'Pagar todo',

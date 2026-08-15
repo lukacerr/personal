@@ -184,7 +184,12 @@ Lee este archivo antes de modificar `apps/web/app/components/calendar/**`,
 - **"Tomorrow" corre un one-off un día** — el gesto de reescribir la línea en
   el día siguiente. Nunca aparece en una serie: sus movimientos de un día son
   por ocurrencia ("Move this one").
-- Fecha y hora van en columnas de ancho fijo (`w-12`) para que los títulos
-  queden alineados en vertical como las líneas tabuladas de la nota; una fila
-  sin hora conserva la columna vacía. El backlog la elimina (`showTime={false}`)
-  porque ahí no existe el concepto.
+- Fecha y hora van en columnas de ancho **mínimo** (`min-w-12`, nunca `w-12`
+  fijo) para que los títulos queden alineados en vertical como las líneas
+  tabuladas de la nota. Fijo ya mordió: el escalado de fuente del sistema (el
+  text zoom del WebView) agranda el texto sin agrandar una caja de 48 px y la
+  hora terminaba dibujada encima del título en la pantalla de tapa de un flip.
+  Una fila sin hora **rellena la columna con cinco NBSP** en vez de dejarla
+  vacía: en mono miden lo mismo que `08:45`, así que ambas columnas crecen
+  juntas y la alineación sobrevive a cualquier escala. El backlog la elimina
+  (`showTime={false}`) porque ahí no existe el concepto.

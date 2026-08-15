@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { cleanup, render, screen } from '@testing-library/react';
-import { FinanceSummary } from '@web/components/finance/finance-summary';
+import {
+	FinanceSummary,
+	fittedScale,
+} from '@web/components/finance/finance-summary';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 afterEach(cleanup);
@@ -109,6 +112,36 @@ describe('Finance summary', () => {
 
 		expect(lines).toHaveLength(4);
 		expect(new Set(lines).size).toBe(1);
+	});
+
+	/**
+	 * The cqi sizing answers to the card, but a system font scale (the WebView's
+	 * text zoom) multiplies whatever font the stylesheet computes without growing
+	 * the card — no coefficient can see it. The only thing that can is a
+	 * measurement of the rendered overflow, so the figure shrinks by that.
+	 */
+	describe('fittedScale', () => {
+		it('keeps the scale of a figure that already fits', () => {
+			expect(fittedScale(1, 100, 120)).toBe(1);
+		});
+
+		it('shrinks a figure in proportion to its overflow', () => {
+			expect(fittedScale(1, 200, 100)).toBe(0.5);
+		});
+
+		it('compounds across passes, since what it sets gets zoomed too', () => {
+			expect(fittedScale(0.5, 120, 100)).toBeCloseTo(5 / 12, 5);
+		});
+
+		/** Below the floor the ellipsis takes over: a cut figure at least says so. */
+		it('stops shrinking at the floor', () => {
+			expect(fittedScale(1, 1_000, 100)).toBe(0.4);
+		});
+
+		/** A test DOM has no layout; zero widths must read as nothing to do. */
+		it('ignores degenerate measurements', () => {
+			expect(fittedScale(1, 0, 0)).toBe(1);
+		});
 	});
 
 	/** Still editable, and still next to the number it is the denominator of. */
