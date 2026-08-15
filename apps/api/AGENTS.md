@@ -8,10 +8,55 @@ Lee este archivo antes de modificar:
 
 | System | Archivos |
 | --- | --- |
+| Calendar | `src/events.ts`, `src/schema/event.ts`, `src/schema/event-completion.ts` |
 | Credentials | `src/credentials.ts`, `src/credentials-crypto.ts`, `src/schema/credential.ts` |
 | Finance | `src/payments.ts`, `src/dolar.ts`, `src/schema/payment.ts` |
 | Notes | `src/notes.ts`, `src/note-versions.ts`, `src/public-notes.ts`, `src/schema/note.ts`, `src/schema/note-mutation.ts` |
 | Storage | `src/files.ts`, `src/files-multipart.ts`, `src/files-storage.ts`, `src/public-files.ts`, `src/schema/file.ts` |
+
+## Calendar
+
+- Las fechas de calendario (`event.date`, `event_completion.date`, `until`) son
+  **strings locales `YYYY-MM-DD`**, nunca instantes: un evento del 18 es del 18
+  en cualquier zona horaria. `timeMinutes` son minutos desde la medianoche
+  local por la misma razón. El validador `localDate` exige que las partes
+  round-tripeen por una fecha real, porque `2026-02-30` pasaría la regex y
+  `Date` lo rodaría a marzo en silencio.
+- `recurrence` es **jsonb opaco y el servidor nunca expande una serie**: las
+  ocurrencias se derivan en el cliente sobre la ventana visible, y lo único
+  persistido por ocurrencia es su fila en `event_completion`. No agregues
+  queries que interpreten la recurrencia server-side.
+- `updatedAt` es **el reloj de edición del cliente**, no auditoría, y está
+  acotado en el límite HTTP. El PATCH resuelve last-write-wins contra él: un
+  patch con reloj viejo **no es un error** — responde 200 con la fila
+  almacenada para que el cliente la adopte. No lo conviertas en 409: la cola
+  offline lo reintentaría para siempre.
+- El POST toma el `id` del cliente y es **idempotente** vía
+  `onConflictDoNothing` + select: la cola reintenta creates cuya respuesta se
+  perdió, y el segundo intento debe converger en la misma fila, no duplicar ni
+  fallar.
+- `completedAt` es el done de un evento **no** recurrente; una serie se
+  resuelve por ocurrencia en `event_completion`, y el router rechaza mezclarlos
+  (`EVENT_COMPLETED_AT_ON_RECURRING`). Las completions solo existen para
+  eventos recurrentes (`EVENT_NOT_RECURRING`), y su único status es `done`:
+  el skip existió y se eliminó como concepto — no lo resucites en el enum.
+- Las invariantes (`timeMinutes`/`recurrence` requieren `date`, `until >=
+  date`) se validan en el router con mensajes de dominio, no como CHECK, y en
+  el PATCH corren **sobre la fila mergeada**, para que limpiar la mitad de un
+  par siga chequeándose contra la mitad que queda.
+- El índice `GET /events` responde `{ events, completions }` en **un payload
+  con un solo ETag**: las completions pertenecen a la misma foto que anotan, y
+  un endpoint aparte revalidaría cada mitad por separado. Sin query params,
+  por las mismas razones que `/payments`.
+- `GET/PUT /events/settings` guarda los grupos de días y los tags ocultos en
+  Redis bajo `calendar:settings:v1`, **sin TTL y sin tabla**: es estado de
+  vista, el mismo patrón key-value de `finance-settings`. Distingue `null` (la
+  caché no tiene nada) de `{}` (alguien limpió), un fallo de escritura sale
+  como `503 CALENDAR_SETTINGS_UNAVAILABLE`, y va declarado **antes** de
+  `/:id`. `localDate` vive en `calendar-settings.ts` y `events.ts` lo importa
+  de ahí — al revés sería un ciclo.
+- `event.tag` es columna (dato del evento, como `payment.tag`), nullable y
+  con `min(1)` tras trim: un tag en blanco es un `null` que no dice su nombre.
 
 ## Credentials
 

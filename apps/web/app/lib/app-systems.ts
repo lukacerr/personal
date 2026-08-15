@@ -1,4 +1,5 @@
 import { type AppBreadcrumbItem, appNavigation } from '@web/lib/app-navigation';
+import { calendarSystem } from '@web/lib/calendar-system';
 import { credentialsSystem } from '@web/lib/credentials-system';
 import { financeSystem } from '@web/lib/finance-system';
 import { notesSystem } from '@web/lib/notes-system';
@@ -58,6 +59,7 @@ export type AppSystem = {
 };
 
 export const appSystems: AppSystem[] = [
+	calendarSystem,
 	credentialsSystem,
 	financeSystem,
 	notesSystem,

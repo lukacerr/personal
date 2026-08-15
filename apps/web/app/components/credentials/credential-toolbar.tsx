@@ -5,6 +5,7 @@ import {
 	InputGroupButton,
 	InputGroupInput,
 } from '@web/components/ui/input-group';
+import { Kbd } from '@web/components/ui/kbd';
 import { Spinner } from '@web/components/ui/spinner';
 import {
 	EyeIcon,
@@ -44,7 +45,7 @@ export function CredentialToolbar({
 }) {
 	return (
 		<div className="flex flex-wrap items-center gap-2">
-			<InputGroup className="min-w-40 flex-1 md:max-w-xl">
+			<InputGroup className="min-w-32 flex-1 md:max-w-xl">
 				<InputGroupAddon>
 					<SearchIcon aria-hidden="true" />
 				</InputGroupAddon>
@@ -70,13 +71,20 @@ export function CredentialToolbar({
 			{/* Only offered once there is something to reveal, and never while the
 			    vault is locked: there would be nothing behind the mask. */}
 			{!locked && count > 0 ? (
-				<Button variant="outline" onClick={onToggleAllShown}>
+				<Button
+					variant="outline"
+					onClick={onToggleAllShown}
+					aria-keyshortcuts="R"
+				>
 					{anyShown ? (
 						<EyeOffIcon data-icon="inline-start" />
 					) : (
 						<EyeIcon data-icon="inline-start" />
 					)}
 					{anyShown ? 'Hide all' : 'Reveal all'}
+					{/* The key rides along where there is room for it, and stays
+					    announced through `aria-keyshortcuts` at every width. */}
+					<Kbd className="hidden lg:inline-flex">R</Kbd>
 				</Button>
 			) : null}
 
@@ -100,8 +108,18 @@ export function CredentialToolbar({
 				{refreshing ? <Spinner /> : <RefreshCwIcon />}
 			</Button>
 
-			<Button onClick={onCreate}>
-				<PlusIcon data-icon="inline-start" /> New credential
+			{/* The label appears only once there is room for it, and the key with it:
+			    on a phone the plus alone keeps the toolbar on one line. It stays named
+			    through `aria-label` and announced through `aria-keyshortcuts`. */}
+			<Button
+				onClick={onCreate}
+				aria-label="New credential"
+				aria-keyshortcuts="A"
+				className="size-9 shrink-0 sm:size-auto sm:min-h-9"
+			>
+				<PlusIcon data-icon="inline-start" />
+				<span className="hidden sm:inline">New credential</span>
+				<Kbd className="hidden lg:inline-flex">A</Kbd>
 			</Button>
 		</div>
 	);

@@ -97,7 +97,7 @@ export function FinanceToolbar({
 	return (
 		// Bled to the section's edges so the content scrolling underneath is
 		// covered all the way across, not just inside the padding.
-		<div className="-mx-4 -mt-4 sm:-mx-6 sm:-mt-6 sticky top-0 z-20 flex flex-col gap-2 border-b bg-background px-4 pt-4 pb-3 sm:px-6 sm:pt-6 md:flex-row md:flex-wrap md:items-center">
+		<div className="-mx-4 -mt-4 sm:-mx-6 sm:-mt-6 sticky top-16 z-20 flex flex-col gap-2 border-b bg-background px-4 pt-4 pb-3 sm:px-6 sm:pt-6 md:flex-row md:flex-wrap md:items-center">
 			{/* Row one on a phone; on `md` the two halves become siblings. */}
 			<div className="flex items-center gap-2 md:contents">
 				<Popover>

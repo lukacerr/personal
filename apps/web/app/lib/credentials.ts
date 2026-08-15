@@ -1,5 +1,26 @@
 import type { Credential } from '@web/lib/credentials-api';
 import { decryptCredentialValue } from '@web/lib/credentials-crypto';
+import { isBareLetterShortcut, type ShortcutEvent } from '@web/lib/keyboard';
+
+/** The bare letter opens the create form; Ctrl/Cmd+A stays select all. */
+export function isAddCredentialShortcut(event: ShortcutEvent) {
+	return isBareLetterShortcut(event, 'a');
+}
+
+/** The bare letter mirrors the toolbar's Reveal all / Hide all; Ctrl+R reloads. */
+export function isToggleRevealShortcut(event: ShortcutEvent) {
+	return isBareLetterShortcut(event, 'r');
+}
+
+/**
+ * The bare letter copies the credential the URL points at — the one the
+ * palette or a shared link selected. With nothing selected there is nothing
+ * unambiguous to copy, so the screen only claims the key when `?credential=`
+ * names a row. Ctrl/Cmd+C stays copy.
+ */
+export function isCopyCredentialShortcut(event: ShortcutEvent) {
+	return isBareLetterShortcut(event, 'c');
+}
 
 /**
  * A fixed-width mask, not one that follows the value.

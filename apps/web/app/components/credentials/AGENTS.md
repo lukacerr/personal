@@ -37,6 +37,7 @@ Lee este archivo antes de modificar `apps/web/app/components/credentials/**`,
 - El scroll acotado (`max-h-[55vh] overflow-y-auto`) va **solo dentro del diálogo**. En la lista está prohibido: en este shell scrollea el documento, y un scroller anidado agrega un tab stop que se come el scroll de la página. Un overlay es su propia superficie y ahí la regla no aplica.
 - El diálogo es más ancho que el default (`sm:max-w-2xl`): una clave privada al ancho estándar envuelve cada línea dos veces y deja de parecer lo que es.
 - `filterCredentials` busca solo por título. El valor es ciphertext hasta que alguien desbloquea, y buscar dentro de valores descifrados significaría descifrar todo en cada tecla.
+- Tres letras peladas: `A` abre el form de creación, `R` espeja el Reveal all / Hide all de la toolbar y `C` copia la credencial seleccionada (`?credential=`, la que dejó la palette o un link) — con nada seleccionado la pantalla no reclama la `C`, porque no habría un destino inequívoco. Bloqueado, `R` y `C` abren el diálogo del secreto, igual que sus botones; `A` abre el form igual que el botón, que ya sabe pedir el secreto. Los predicados viven en `credentials.ts`, los botones anuncian su tecla (`aria-keyshortcuts` + `Kbd`, el de copiar solo en la tarjeta seleccionada) y el listener se saltea con cualquier diálogo abierto, incluido el de unlock; el porqué de todo eso está en la regla de atajos del `AGENTS.md` raíz.
 
 ## Arquitectura
 

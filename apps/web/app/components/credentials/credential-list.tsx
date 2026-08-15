@@ -112,6 +112,7 @@ export function CredentialList({
 									title={credential.title}
 									value={value}
 									shown={shown.has(credential.id)}
+									copyShortcut={selected}
 									onToggleShown={() => onToggleShown(credential.id)}
 									onCopy={() => onCopy(credential)}
 								/>

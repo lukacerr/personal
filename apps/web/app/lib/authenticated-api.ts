@@ -11,4 +11,11 @@ export const authenticatedApi = treaty<App>(env.VITE_API_URL, {
 		refreshAccessToken: () => useAuthStore.getState().refreshSession(),
 		onUnauthorized: () => useAuthStore.getState().clearSession(),
 	}) as typeof fetch,
+	/**
+	 * Eden's reviver runs over every string in every response and would turn
+	 * anything date-shaped into a `Date` the contract never declared: Calendar's
+	 * local `YYYY-MM-DD` days, or even a note titled `2026-01-01`. Timestamps
+	 * here are epoch numbers by convention, so nothing legitimate loses out.
+	 */
+	parseDate: false,
 });

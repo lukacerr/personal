@@ -10,12 +10,15 @@ import { Button } from '@web/components/ui/button';
 import { Spinner } from '@web/components/ui/spinner';
 import {
 	filterCredentials,
+	isAddCredentialShortcut,
+	isCopyCredentialShortcut,
+	isToggleRevealShortcut,
 	parseCredentialsView,
 	updateCredentialsSearchParams,
 } from '@web/lib/credentials';
 import type { Credential } from '@web/lib/credentials-api';
 import { useCredentials } from '@web/lib/credentials-vault';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 export function meta() {
@@ -37,7 +40,7 @@ export default function Credentials() {
 	const [refreshing, setRefreshing] = useState(false);
 
 	const vault = useCredentials();
-	const { credentials, values, secret } = vault;
+	const { credentials, values, secret, copy } = vault;
 	const locked = secret === undefined;
 
 	const visible = useMemo(
@@ -75,10 +78,10 @@ export default function Credentials() {
 	 * secret at the moment it is first needed beats a gate on the whole screen:
 	 * the list, the titles and renaming all work without it.
 	 */
-	function requireSecret() {
+	const requireSecret = useCallback(() => {
 		if (locked) setUnlocking(true);
 		return !locked;
-	}
+	}, [locked]);
 
 	function toggleShown(id: string) {
 		if (!requireSecret()) return;
@@ -89,11 +92,52 @@ export default function Credentials() {
 		});
 	}
 
-	function toggleAllShown() {
+	const toggleAllShown = useCallback(() => {
 		setShown((current) =>
 			current.size > 0 ? new Set() : new Set(visible.map(({ id }) => id)),
 		);
-	}
+	}, [visible]);
+
+	/** The row the palette or a shared link pointed at, if it still exists. */
+	const selected = view.selected
+		? credentials.find((credential) => credential.id === view.selected)
+		: undefined;
+
+	/**
+	 * The bare letters: R mirrors the toolbar's Reveal all / Hide all, C copies
+	 * the selected credential. Any dialog already being open is a skip rather
+	 * than something the predicates could know: focus inside one often rests on
+	 * a button rather than a field, so the editable check alone would let the
+	 * key act over a dialog halfway through. While locked, both keys ask for the
+	 * secret instead — the same thing their buttons do.
+	 */
+	const dialogOpen = form !== undefined || deleting !== undefined || unlocking;
+
+	useEffect(() => {
+		if (dialogOpen) return;
+
+		function onKeyDown(event: KeyboardEvent) {
+			if (event.defaultPrevented) return;
+			if (isAddCredentialShortcut(event)) {
+				event.preventDefault();
+				setFormError(undefined);
+				setForm({ kind: 'create' });
+				return;
+			}
+			if (isToggleRevealShortcut(event)) {
+				event.preventDefault();
+				if (requireSecret()) toggleAllShown();
+				return;
+			}
+			if (selected && isCopyCredentialShortcut(event)) {
+				event.preventDefault();
+				if (requireSecret()) void copy(selected);
+			}
+		}
+
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
+	}, [dialogOpen, requireSecret, toggleAllShown, selected, copy]);
 
 	async function submitForm(values_: { title: string; plaintext?: string }) {
 		if (!form) return;

@@ -8,6 +8,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from '@web/components/ui/dialog';
+import { Kbd } from '@web/components/ui/kbd';
 import {
 	CREDENTIAL_MASK,
 	type CredentialValueState,
@@ -55,6 +56,7 @@ export function CredentialValueActions({
 	shown,
 	onToggleShown,
 	onCopy,
+	copyShortcut = false,
 }: {
 	/** Names the controls and titles the dialog. */
 	title: string;
@@ -62,6 +64,11 @@ export function CredentialValueActions({
 	shown: boolean;
 	onToggleShown: () => void;
 	onCopy: () => void;
+	/**
+	 * Advertises the bare C on the copy button. Only the selected card claims it
+	 * — the key needs an unambiguous target — so only that card shows the hint.
+	 */
+	copyShortcut?: boolean;
 }) {
 	const [viewing, setViewing] = useState(false);
 
@@ -80,11 +87,13 @@ export function CredentialValueActions({
 			</Button>
 			<Button
 				variant="ghost"
-				size="icon-sm"
+				size={copyShortcut ? 'sm' : 'icon-sm'}
 				onClick={onCopy}
 				aria-label={`Copy ${title}`}
+				aria-keyshortcuts={copyShortcut ? 'C' : undefined}
 			>
-				<CopyIcon />
+				<CopyIcon data-icon={copyShortcut ? 'inline-start' : undefined} />
+				{copyShortcut ? <Kbd>C</Kbd> : null}
 			</Button>
 			<Button
 				variant="ghost"

@@ -21,3 +21,21 @@ export type ShortcutEvent = Pick<
 	KeyboardEvent,
 	'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'repeat' | 'shiftKey' | 'target'
 >;
+
+/**
+ * A screen shortcut on a bare letter, deliberately unmodified: the modified
+ * forms belong to the browser (Ctrl+A selects all, Ctrl+C copies, Ctrl+R
+ * reloads), and a bare letter costs nothing outside a text field, which is
+ * exactly what the editable check excludes. Each screen names its own letters
+ * with a predicate that delegates here, so the shared conditions live once.
+ */
+export function isBareLetterShortcut(event: ShortcutEvent, letter: string) {
+	return (
+		!event.ctrlKey &&
+		!event.metaKey &&
+		!event.altKey &&
+		!event.repeat &&
+		!isEditableTarget(event.target) &&
+		event.key.toLowerCase() === letter
+	);
+}

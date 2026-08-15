@@ -63,7 +63,10 @@ export default function AuthenticatedLayout() {
 				</a>
 				<AppSidebar />
 				<SidebarInset id="main-content" tabIndex={-1} className="min-w-0">
-					<header className="flex h-16 shrink-0 items-center gap-2 overflow-hidden border-b px-4 sm:gap-3 sm:px-6">
+					{/* Pinned to the viewport: the breadcrumb and the environment badge are
+					    orientation, and orientation that scrolls away is none. Screen
+					    toolbars that pin themselves sit below it with `top-16`. */}
+					<header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 overflow-hidden border-b bg-background px-4 sm:gap-3 sm:px-6">
 						<SidebarTrigger className="size-11 md:size-8" />
 						<div className="min-w-0 flex-1">
 							<AppBreadcrumb

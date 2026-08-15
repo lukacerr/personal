@@ -7,6 +7,7 @@ import { logger } from 'elysia-logger';
 import { z } from 'zod';
 import { authRouter } from './auth';
 import { credentialsRouter } from './credentials';
+import { eventsRouter } from './events';
 import { filesRouter } from './files';
 import { notesRouter } from './notes';
 import { paymentsRouter } from './payments';
@@ -79,6 +80,7 @@ export const app = new Elysia()
 	)
 	.use(authRouter)
 	.use(credentialsRouter)
+	.use(eventsRouter)
 	.use(filesRouter)
 	.use(notesRouter)
 	.use(paymentsRouter)
