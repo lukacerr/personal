@@ -50,8 +50,9 @@ export type ItemHandlers = {
 	/** A fresh copy, opened for editing — the fast way to make similar things. */
 	onClone: (item: AgendaItem) => void;
 	onDelete: (event: CalendarEvent) => void;
-	/** Commits the inline text back onto the event. */
-	onCommitEdit: (event: CalendarEvent, parsed: QuickAddParse) => void;
+	/** Commits the inline text back onto the event; `null` means it was
+	 * submitted empty, which reads as "delete this". */
+	onCommitEdit: (event: CalendarEvent, parsed: QuickAddParse | null) => void;
 	onCancelEdit: () => void;
 };
 
@@ -69,7 +70,7 @@ function InlineEditor({
 }: {
 	event: CalendarEvent;
 	today: string;
-	onCommit: (parsed: QuickAddParse) => void;
+	onCommit: (parsed: QuickAddParse | null) => void;
 	onCancel: () => void;
 }) {
 	const [value, setValue] = useState(() => formatQuickAdd(event, today));
@@ -82,10 +83,13 @@ function InlineEditor({
 		area.setSelectionRange(area.value.length, area.value.length);
 	}, []);
 
-	function commit() {
+	function commit(viaEnter: boolean) {
 		const parsed = parseQuickAdd(value, today);
 		if (!parsed) {
-			onCancel();
+			// Enter on an emptied row asks to delete it; a mere blur does not —
+			// losing focus must never pop a destructive dialog.
+			if (viaEnter) onCommit(null);
+			else onCancel();
 			return;
 		}
 		onCommit(parsed);
@@ -98,11 +102,11 @@ function InlineEditor({
 			value={value}
 			rows={Math.max(1, value.split('\n').length)}
 			onChange={(input) => setValue(input.target.value)}
-			onBlur={commit}
+			onBlur={() => commit(false)}
 			onKeyDown={(input) => {
 				if (input.key === 'Enter' && !input.shiftKey) {
 					input.preventDefault();
-					commit();
+					commit(true);
 				}
 				if (input.key === 'Escape') {
 					input.preventDefault();

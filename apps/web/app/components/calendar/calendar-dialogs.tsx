@@ -53,7 +53,13 @@ export function EventDeleteDialog({
 				) : null}
 				<DialogFooter>
 					<DialogClose render={<Button variant="outline">Keep it</Button>} />
-					<Button variant="destructive" disabled={busy} onClick={onConfirm}>
+					{/* Focused on open: the edit-to-empty flow is Enter, Enter. */}
+					<Button
+						autoFocus
+						variant="destructive"
+						disabled={busy}
+						onClick={onConfirm}
+					>
 						{busy ? <Spinner /> : null} Delete
 					</Button>
 				</DialogFooter>
@@ -71,6 +77,7 @@ const BINDINGS: Array<[string, string]> = [
 	['c', 'Clone the selection and edit the copy'],
 	['d', 'Show / hide what is done'],
 	['f', 'Open the tag filter'],
+	['Ctrl+F', 'Find across everything, filters aside'],
 	['Ctrl+↑↓', 'Move the selected one-off a day'],
 	['Del', 'Delete the selection (asks first)'],
 	['Ctrl+Z', 'Undo the last change'],

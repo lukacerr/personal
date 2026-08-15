@@ -29,6 +29,7 @@ import {
 	KeyboardIcon,
 	PanelRightIcon,
 	RefreshCwIcon,
+	SearchIcon,
 	TagIcon,
 	Trash2Icon,
 	XIcon,
@@ -277,6 +278,11 @@ export function CalendarToolbar({
 	onTabOut,
 	onHelp,
 	addRef,
+	searchOpen,
+	searchQuery,
+	searchRef,
+	onSearchChange,
+	onSearchClose,
 }: {
 	window: { start: string; end: string };
 	offset: number;
@@ -301,13 +307,18 @@ export function CalendarToolbar({
 	/** Tab in the add line lands on the first row, not on the filter icons. */
 	onTabOut: () => void;
 	onHelp: () => void;
+	searchOpen: boolean;
+	searchQuery: string;
+	searchRef: Ref<HTMLInputElement>;
+	onSearchChange: (query: string) => void;
+	onSearchClose: () => void;
 	/** The bare `a` lands the caret here from anywhere on the screen. */
 	addRef: Ref<HTMLTextAreaElement>;
 }) {
 	return (
 		// Bled to the section's edges so the content scrolling underneath is
 		// covered all the way across, not just inside the padding.
-		<div className="-mx-4 -mt-4 sm:-mx-6 sm:-mt-6 sticky top-16 z-20 flex flex-col gap-2 border-b bg-background px-4 pt-4 pb-3 sm:px-6 sm:pt-6 md:flex-row md:items-center">
+		<div className="-mx-4 -mt-4 sm:-mx-6 sm:-mt-6 sticky top-16 z-20 flex flex-col gap-2 border-b bg-background px-4 pt-4 pb-3 sm:px-6 sm:pt-6 md:flex-row md:flex-wrap md:items-center">
 			<div className="flex items-center gap-1">
 				<Button
 					variant="ghost"
@@ -391,6 +402,39 @@ export function CalendarToolbar({
 					onHelp={onHelp}
 				/>
 			</div>
+			{searchOpen ? (
+				<div className="flex w-full items-center gap-2 md:order-last md:basis-full">
+					<SearchIcon
+						aria-hidden
+						className="size-4 shrink-0 text-muted-foreground"
+					/>
+					{/* Finds across everything on purpose: done, hidden tags and the
+					    folded panel are all overruled while a query is alive. */}
+					<input
+						ref={searchRef}
+						type="text"
+						aria-label="Find events"
+						placeholder="Find…"
+						value={searchQuery}
+						onChange={(event) => onSearchChange(event.target.value)}
+						onKeyDown={(event) => {
+							if (event.key === 'Escape') {
+								event.preventDefault();
+								onSearchClose();
+							}
+						}}
+						className="h-8 w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+					/>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label="Close search"
+						onClick={onSearchClose}
+					>
+						<XIcon />
+					</Button>
+				</div>
+			) : null}
 		</div>
 	);
 }

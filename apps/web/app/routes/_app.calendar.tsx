@@ -21,12 +21,14 @@ import {
 	isAddEventShortcut,
 	isCloneShortcut,
 	isEditSelectionShortcut,
+	isFindShortcut,
 	isHelpShortcut,
 	isTagFilterShortcut,
 	isTagHidden,
 	isToggleCalendarPanelShortcut,
 	isToggleDoneFilterShortcut,
 	isUndoShortcut,
+	matchesEventSearch,
 	type QuickAddParse,
 	scheduleItems,
 	todayLocalDate,
@@ -118,8 +120,11 @@ export default function Calendar() {
 	const [panelOpen, setPanelOpen] = useState(true);
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
 	const [editingKey, setEditingKey] = useState<string | null>(null);
+	const [searchOpen, setSearchOpen] = useState(false);
+	const [searchQuery, setSearchQuery] = useState('');
 
 	const addRef = useRef<HTMLTextAreaElement>(null);
+	const searchRef = useRef<HTMLInputElement>(null);
 	const tagButtonRef = useRef<HTMLButtonElement>(null);
 	/** Which side of the screen ←/→ should return to. */
 	const lastLeftKey = useRef<string | null>(null);
@@ -219,16 +224,21 @@ export default function Calendar() {
 	const hiddenTags = settings.hiddenTags ?? [];
 	const hideUntagged = settings.hideUntagged ?? false;
 	const groups = settings.groups ?? [];
+	const searching = searchOpen && searchQuery.trim() !== '';
+	// A live search overrules every filter: it answers "where is this thing",
+	// and a hidden tag, a done mark or a folded panel are not answers.
+	const effectiveShowDone = showDone || searching;
+	const effectivePanelOpen = panelOpen || searching;
 
 	// The tag filter cuts once, here, so no list can disagree about it.
-	const visibleEvents = useMemo(
-		() =>
-			events.filter(
-				(event) =>
-					!isTagHidden(event, hiddenTags) && !(hideUntagged && !event.tag),
-			),
-		[events, hiddenTags, hideUntagged],
-	);
+	const visibleEvents = useMemo(() => {
+		if (searching)
+			return events.filter((event) => matchesEventSearch(event, searchQuery));
+		return events.filter(
+			(event) =>
+				!isTagHidden(event, hiddenTags) && !(hideUntagged && !event.tag),
+		);
+	}, [events, hiddenTags, hideUntagged, searching, searchQuery]);
 	const tags = useMemo(() => collectEventTags(events), [events]);
 
 	/**
@@ -236,7 +246,8 @@ export default function Calendar() {
 	 * schedule, then backlog — exactly as the components lay them out.
 	 */
 	const ordered = useMemo(() => {
-		const keep = (item: AgendaItem) => showDone || item.status !== 'done';
+		const keep = (item: AgendaItem) =>
+			effectiveShowDone || item.status !== 'done';
 		const dayItems = weekBuckets(week.start, week.end, groups)
 			.flatMap((bucket) =>
 				bucket.dates.flatMap((date) =>
@@ -253,7 +264,7 @@ export default function Calendar() {
 			/** Where the side panel begins: arrows jump across this boundary. */
 			dayCount: dayItems.length,
 		};
-	}, [visibleEvents, completions, groups, week, offset, showDone]);
+	}, [visibleEvents, completions, groups, week, offset, effectiveShowDone]);
 	const orderedItems = ordered.items;
 
 	const selectedItem = useMemo(
@@ -415,8 +426,13 @@ export default function Calendar() {
 		}, saveFailed);
 	}
 
-	function commitEdit(event: CalendarEvent, parsed: QuickAddParse) {
+	function commitEdit(event: CalendarEvent, parsed: QuickAddParse | null) {
 		setEditingKey(null);
+		// Submitted empty: the text is gone, so the row asks to go too.
+		if (parsed === null) {
+			setDeleting(event);
+			return;
+		}
 		const previous = {
 			title: event.title,
 			details: event.details,
@@ -433,8 +449,15 @@ export default function Calendar() {
 			date: parsed.date,
 			timeMinutes: parsed.timeMinutes,
 			recurrence: parsed.recurrence,
-			// A series has no row-level done mark; only occurrences resolve.
-			...(parsed.recurrence !== null ? { completedAt: null } : {}),
+			// A series has no row-level done mark; only occurrences resolve. For
+			// a one-off the leading [x] is the mark, and keeps its original
+			// instant when it was already there.
+			completedAt:
+				parsed.recurrence !== null || parsed.date === null
+					? null
+					: parsed.done
+						? (event.completedAt ?? Date.now())
+						: null,
 		}).then(() => {
 			remember(() => updateLocalEvent(calendarDb, event.id, previous));
 			pushSoon();
@@ -493,6 +516,14 @@ export default function Calendar() {
 		function onKeyDown(keyboard: KeyboardEvent) {
 			if (keyboard.defaultPrevented) return;
 
+			if (isFindShortcut(keyboard)) {
+				// Claimed even inside text fields: the Tauri shell has no native
+				// find, and this search is the useful answer everywhere here.
+				keyboard.preventDefault();
+				setSearchOpen(true);
+				window.setTimeout(() => searchRef.current?.focus(), 0);
+				return;
+			}
 			if (isToggleCalendarPanelShortcut(keyboard)) {
 				keyboard.preventDefault();
 				setPanelOpen((open) => !open);
@@ -639,6 +670,14 @@ export default function Calendar() {
 				groups={groups}
 				addRef={addRef}
 				tagButtonRef={tagButtonRef}
+				searchOpen={searchOpen}
+				searchQuery={searchQuery}
+				searchRef={searchRef}
+				onSearchChange={setSearchQuery}
+				onSearchClose={() => {
+					setSearchOpen(false);
+					setSearchQuery('');
+				}}
 				onShowDoneChange={setShowDone}
 				onPanelToggle={() => setPanelOpen((open) => !open)}
 				onToggleTag={toggleTag}
@@ -679,13 +718,13 @@ export default function Calendar() {
 				<div
 					className={cn(
 						'flex flex-col gap-4 lg:grid lg:grid-rows-[auto_1fr] lg:items-start lg:transition-[grid-template-columns,gap] lg:duration-200 motion-reduce:lg:transition-none',
-						panelOpen ? 'lg:gap-6' : 'lg:gap-0',
+						effectivePanelOpen ? 'lg:gap-6' : 'lg:gap-0',
 					)}
 					// Inline rather than an arbitrary-value class: the two column
 					// templates interpolate through the CSS transition either way, and
 					// below `lg` the container is flex, where this property is inert.
 					style={{
-						gridTemplateColumns: panelOpen
+						gridTemplateColumns: effectivePanelOpen
 							? 'minmax(0,1fr) 23rem'
 							: 'minmax(0,1fr) 0rem',
 					}}
@@ -697,7 +736,7 @@ export default function Calendar() {
 							events={visibleEvents}
 							completions={completions}
 							groups={groups}
-							showDone={showDone}
+							showDone={effectiveShowDone}
 							selectedKey={selectedKey}
 							editingKey={editingKey}
 							onDropOnDay={(eventId, date) => {
@@ -711,7 +750,8 @@ export default function Calendar() {
 					<div
 						className={cn(
 							'order-3 min-w-0 transition-opacity duration-200 lg:order-none lg:col-start-2 lg:row-start-1 motion-reduce:transition-none',
-							!panelOpen && 'lg:invisible lg:overflow-hidden lg:opacity-0',
+							!effectivePanelOpen &&
+								'lg:invisible lg:overflow-hidden lg:opacity-0',
 						)}
 					>
 						<CalendarBacklog
@@ -730,7 +770,8 @@ export default function Calendar() {
 						<div
 							className={cn(
 								'order-2 min-w-0 transition-opacity duration-200 lg:order-none lg:col-start-2 lg:row-start-2 motion-reduce:transition-none',
-								!panelOpen && 'lg:invisible lg:overflow-hidden lg:opacity-0',
+								!effectivePanelOpen &&
+									'lg:invisible lg:overflow-hidden lg:opacity-0',
 							)}
 						>
 							<CalendarSchedule

@@ -18,6 +18,7 @@ describe('CalendarQuickAdd', () => {
 
 		expect(onAdd).toHaveBeenCalledWith({
 			title: 'Regalo',
+			done: false,
 			date: '2026-08-16',
 			timeMinutes: 720,
 			tag: null,

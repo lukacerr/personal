@@ -53,6 +53,21 @@ export function isTagFilterShortcut(event: ShortcutEvent) {
 	return isBareLetterShortcut(event, 'f');
 }
 
+/**
+ * Ctrl/Cmd+F is claimed whole — including inside text fields: the Tauri shell
+ * has no native find to fall back on, and this screen's own search is the
+ * useful answer everywhere on it.
+ */
+export function isFindShortcut(event: ShortcutEvent) {
+	return (
+		(event.ctrlKey || event.metaKey) &&
+		!event.altKey &&
+		!event.shiftKey &&
+		!event.repeat &&
+		event.key.toLowerCase() === 'f'
+	);
+}
+
 /** `?` opens the keys-and-grammar sheet (bare letters admit Shift). */
 export function isHelpShortcut(event: ShortcutEvent) {
 	return isBareLetterShortcut(event, '?');
@@ -283,6 +298,8 @@ function parseRepeatToken(
 
 export type QuickAddParse = {
 	title: string;
+	/** A leading `[x]`; its absence is what "not done" looks like. */
+	done: boolean;
 	/** `null` is the backlog, asked for with `!b`. */
 	date: string | null;
 	timeMinutes: number | null;
@@ -313,7 +330,12 @@ export function parseQuickAdd(
 	let head = firstLine.trim();
 	if (!head && !details) return null;
 
-	// The tag first: brackets may hold spaces, so it cannot be tokenised.
+	// The done mark before the tag: `[x]` is bracketed too, and only a
+	// LEADING one means done — anywhere else it is words.
+	const done = /^\[x\]\s+/i.test(head);
+	if (done) head = head.replace(/^\[x\]\s+/i, '');
+
+	// The tag next: brackets may hold spaces, so it cannot be tokenised.
 	const tagMatch = /\[([^\]]{1,64})\]/.exec(head);
 	const tag = tagMatch?.[1]?.trim() || null;
 	if (tagMatch) head = head.replace(tagMatch[0], ' ');
@@ -373,13 +395,14 @@ export function parseQuickAdd(
 	if (backlog)
 		return {
 			title,
+			done: false,
 			date: null,
 			timeMinutes: null,
 			tag,
 			recurrence: null,
 			details,
 		};
-	return { title, date, timeMinutes, tag, recurrence, details };
+	return { title, done, date, timeMinutes, tag, recurrence, details };
 }
 
 /** How far ahead `MM/dd` can point before the year has to be spelled out. */
@@ -411,15 +434,18 @@ function formatRepeat(recurrence: EventRecurrence, today: string) {
  */
 export function formatQuickAdd(event: CalendarEvent, today: string) {
 	const parts: string[] = [];
-	if (event.date === null) parts.push('!b');
-	else {
+	// Reading order: done mark, when, what, how it repeats, tag, and the
+	// backlog flag last — absence of the leading `[x]` is "not done".
+	if (event.date !== null && event.completedAt !== null) parts.push('[x]');
+	if (event.date !== null) {
 		parts.push(shortDateToken(event.date, today));
 		if (event.timeMinutes !== null) parts.push(formatTime(event.timeMinutes));
 	}
 	parts.push(event.title);
-	if (event.tag) parts.push(`[${event.tag}]`);
 	if (event.date !== null && event.recurrence)
 		parts.push(formatRepeat(event.recurrence, today));
+	if (event.tag) parts.push(`[${event.tag}]`);
+	if (event.date === null) parts.push('!b');
 
 	const head = parts.join(' ');
 	return event.details ? `${head}\n${event.details}` : head;
@@ -625,6 +651,20 @@ export function collectEventTags(events: CalendarEvent[]) {
 	}
 	return [...seen.values()].sort((a, b) =>
 		a.toLocaleLowerCase().localeCompare(b.toLocaleLowerCase()),
+	);
+}
+
+/**
+ * The find box's own question: does this event speak of the query at all —
+ * title, tag or details. Case-insensitive substring, which is what a person
+ * means when they type. A blank query matches nothing: it means the search
+ * is not on, not "everything".
+ */
+export function matchesEventSearch(event: CalendarEvent, query: string) {
+	const needle = query.trim().toLocaleLowerCase();
+	if (!needle) return false;
+	return [event.title, event.tag, event.details].some((field) =>
+		field?.toLocaleLowerCase().includes(needle),
 	);
 }
 

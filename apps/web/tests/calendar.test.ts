@@ -10,6 +10,7 @@ import {
 	isoWeekday,
 	isTagHidden,
 	isToggleCalendarPanelShortcut,
+	matchesEventSearch,
 	occurrencesInRange,
 	parseDetailLines,
 	parseQuickAdd,
@@ -84,6 +85,7 @@ describe('parseQuickAdd', () => {
 			parseQuickAdd('08/18 18:45 Innovación [uade] *火 <12/15', today),
 		).toEqual({
 			title: 'Innovación',
+			done: false,
 			date: '2026-08-18',
 			timeMinutes: 1125,
 			tag: 'uade',
@@ -95,6 +97,7 @@ describe('parseQuickAdd', () => {
 	it('defaults an absent date to today and an absent time to none', () => {
 		expect(parseQuickAdd('Lavaseca', today)).toEqual({
 			title: 'Lavaseca',
+			done: false,
 			date: today,
 			timeMinutes: null,
 			tag: null,
@@ -110,6 +113,7 @@ describe('parseQuickAdd', () => {
 	it('sends !b to the backlog, dropping what cannot live there', () => {
 		expect(parseQuickAdd('!b N4 JP [idioma]', today)).toEqual({
 			title: 'N4 JP',
+			done: false,
 			date: null,
 			timeMinutes: null,
 			tag: 'idioma',
@@ -190,7 +194,7 @@ describe('formatQuickAdd', () => {
 
 		const text = formatQuickAdd(event, today);
 		expect(text).toBe(
-			'08/18 18:45 Innovación [uade] *火 <12/15\nEY Timesheets',
+			'08/18 18:45 Innovación *火 <12/15 [uade]\nEY Timesheets',
 		);
 		expect(parseQuickAdd(text, today)).toMatchObject({
 			title: 'Innovación',
@@ -202,9 +206,26 @@ describe('formatQuickAdd', () => {
 		});
 	});
 
-	it('writes a backlog item with !b and no clock', () => {
+	it('writes a backlog item with !b at the very end, no clock', () => {
 		const event = makeEvent({ title: 'N4 JP', tag: 'idioma' });
-		expect(formatQuickAdd(event, today)).toBe('!b N4 JP [idioma]');
+		expect(formatQuickAdd(event, today)).toBe('N4 JP [idioma] !b');
+	});
+
+	it('wears a leading [x] when done, and reads it back as done', () => {
+		const done = makeEvent({
+			title: 'Lavaseca',
+			date: '2026-08-17',
+			completedAt: 99,
+		});
+		expect(formatQuickAdd(done, today)).toBe('[x] 08/17 Lavaseca');
+		expect(parseQuickAdd('[x] 08/17 Lavaseca', today)).toMatchObject({
+			done: true,
+			title: 'Lavaseca',
+		});
+		// Deleting the mark is how a row goes back to pending.
+		expect(parseQuickAdd('08/17 Lavaseca', today)).toMatchObject({
+			done: false,
+		});
 	});
 
 	it('spells the year out when MM/dd could not find its way back', () => {
@@ -280,6 +301,22 @@ describe('tags', () => {
 		expect(isTagHidden(makeEvent({ tag: 'salud' }), hidden)).toBe(false);
 		// Untagged never hides: there is no chip to bring it back with.
 		expect(isTagHidden(makeEvent(), hidden)).toBe(false);
+	});
+});
+
+describe('matchesEventSearch', () => {
+	it('matches title, tag and details, case-insensitively', () => {
+		const event = makeEvent({
+			title: 'Innovación',
+			tag: 'uade',
+			details: 'EY Timesheets',
+		});
+		expect(matchesEventSearch(event, 'innova')).toBe(true);
+		expect(matchesEventSearch(event, 'UADE')).toBe(true);
+		expect(matchesEventSearch(event, 'timesheets')).toBe(true);
+		expect(matchesEventSearch(event, 'pileta')).toBe(false);
+		// A blank query matches nothing on purpose: it means "not searching".
+		expect(matchesEventSearch(event, '  ')).toBe(false);
 	});
 });
 

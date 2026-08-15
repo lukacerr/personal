@@ -136,6 +136,13 @@ Lee este archivo antes de modificar `apps/web/app/components/calendar/**`,
   abiertos. El push al server va **debounced (400 ms)** detrás de las
   mutaciones: la cola coalesce igual, pero empujar por paso hacía que cada eco
   re-renderizara en medio del gesto.
+- **Ctrl/Cmd+F abre la búsqueda propia de la pantalla** y se reclama entero,
+  incluso dentro de campos de texto: el shell Tauri no tiene find nativo. Una
+  búsqueda viva **anula todos los filtros** — hechos ocultos, tags apagados y
+  el panel plegado se muestran igual mientras hay query
+  (`matchesEventSearch` sobre título/tag/details; query en blanco no matchea
+  nada porque significa "no estoy buscando"). Esc o la X cierran y restauran
+  los filtros como estaban.
 - El filtro de tags incluye **Untagged** como flag propio en los settings
   (`hideUntagged`): lo sin tag no tiene chip que lo traiga de vuelta, así que
   su toggle no puede vivir en `hiddenTags`.
