@@ -144,6 +144,23 @@ describe('Finance summary', () => {
 		});
 	});
 
+	/**
+	 * The age is computed once per render and then sits still, so the absolute
+	 * time rides along in the title as the honest fallback for a card that has
+	 * been on screen a while.
+	 */
+	it('carries the absolute quote time behind the relative age', () => {
+		const fetchedAt = Date.now() - 5 * 60_000;
+		renderSummary({
+			quote: { compra: 1465, venta: 1515, fetchedAt, stale: false },
+		});
+
+		const age = screen.getByText('5m ago');
+		expect(age.getAttribute('title')).toBe(
+			new Date(fetchedAt).toLocaleString(),
+		);
+	});
+
 	/** Still editable, and still next to the number it is the denominator of. */
 	it('keeps the budget on the line that carries the leftover detail', () => {
 		renderSummary({

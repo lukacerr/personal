@@ -5,10 +5,11 @@ import {
 	localDate,
 } from '@api/calendar-settings';
 import { db } from '@api/env';
-import { entityTag, isUnchanged } from '@api/http-cache';
+import { createIndexCache } from '@api/http-cache';
 import { event, eventCompletion } from '@api/schema';
 import type { EventRecurrence } from '@api/schema/event';
-import { and, eq } from 'drizzle-orm';
+import { timestampMs } from '@api/validation';
+import { and, eq, lt } from 'drizzle-orm';
 import Elysia, { status } from 'elysia';
 import { z } from 'zod';
 
@@ -16,10 +17,6 @@ const eventId = z.uuid();
 const eventTitle = z.string().trim().min(1).max(255);
 const eventDetails = z.string().trim().min(1).max(4096).nullable();
 const eventTag = z.string().trim().min(1).max(64).nullable();
-
-/** Largest instant `Date` can represent, so a timestamp never becomes `Invalid Date`. */
-const TIMESTAMP_MAX_MS = 8_640_000_000_000_000;
-const timestampMs = z.number().int().nonnegative().max(TIMESTAMP_MAX_MS);
 
 const timeMinutes = z
 	.number()
@@ -110,6 +107,57 @@ function invalidEvent(row: {
 	return undefined;
 }
 
+type EventPatch = {
+	updatedAt: number;
+	title?: string;
+	details?: string | null;
+	tag?: string | null;
+	date?: string | null;
+	timeMinutes?: number | null;
+	recurrence?: EventRecurrence | null;
+	completedAt?: number | null;
+};
+
+/**
+ * The PATCH's guarded update. The WHERE re-checks last-write-wins against the
+ * stored clock, because the handler's in-memory comparison ran against a row a
+ * concurrent patch may have replaced since: without the guard, whichever
+ * UPDATE lands last wins, even with the older clock. Exported because that
+ * interleaving cannot be forced deterministically through HTTP; the test
+ * simulates the concurrent write and then issues this exact statement.
+ * Returns nothing when the row is missing or already carries a newer edit.
+ */
+export async function patchEventRow(id: string, body: EventPatch) {
+	const [updated] = await db
+		.update(event)
+		.set({
+			title: body.title,
+			details: body.details,
+			tag: body.tag,
+			date: body.date,
+			timeMinutes: body.timeMinutes,
+			recurrence: body.recurrence,
+			completedAt:
+				body.completedAt === undefined
+					? undefined
+					: body.completedAt === null
+						? null
+						: new Date(body.completedAt),
+			updatedAt: new Date(body.updatedAt),
+		})
+		.where(and(eq(event.id, id), lt(event.updatedAt, new Date(body.updatedAt))))
+		.returning(eventColumns);
+	return updated;
+}
+
+/**
+ * The remembered tag of `GET /events`, so a poll that changed nothing costs
+ * one Redis GET instead of reading events and completions out of Neon. Every
+ * handler below that writes either table drops it before responding; the
+ * settings routes live in Redis only and are not part of this payload.
+ */
+const indexCache = createIndexCache('calendar');
+
 export const eventsRouter = new Elysia({
 	prefix: '/events',
 	tags: ['Calendar'],
@@ -117,32 +165,29 @@ export const eventsRouter = new Elysia({
 	.use(authPlugin)
 	.get(
 		'/',
-		async ({ request, set }) => {
-			// One payload, one tag: completions belong to the same picture the
-			// index paints, and a separate endpoint would revalidate them apart
-			// from the events they annotate.
-			const [events, completions] = await Promise.all([
-				db
-					.select(eventColumns)
-					.from(event)
-					.orderBy(event.createdAt, event.id)
-					.$withCache(false),
-				db
-					.select({
-						eventId: eventCompletion.eventId,
-						date: eventCompletion.date,
-						status: eventCompletion.status,
-					})
-					.from(eventCompletion)
-					.orderBy(eventCompletion.eventId, eventCompletion.date)
-					.$withCache(false),
-			]);
+		async ({ request, set }) =>
+			indexCache.conditional(request, set, async () => {
+				// One payload, one tag: completions belong to the same picture the
+				// index paints, and a separate endpoint would revalidate them apart
+				// from the events they annotate. Batched so both reads travel in one
+				// round trip and answer from the same moment.
+				const [events, completions] = await db.batch([
+					db
+						.select(eventColumns)
+						.from(event)
+						.orderBy(event.createdAt, event.id),
+					db
+						.select({
+							eventId: eventCompletion.eventId,
+							date: eventCompletion.date,
+							status: eventCompletion.status,
+						})
+						.from(eventCompletion)
+						.orderBy(eventCompletion.eventId, eventCompletion.date),
+				]);
 
-			const payload = { events: events.map(serialize), completions };
-			const tag = entityTag(payload);
-			set.headers.etag = tag;
-			return isUnchanged(request, tag) ? status(304) : payload;
-		},
+				return { events: events.map(serialize), completions };
+			}),
 		{ detail: { summary: 'List events and completions' } },
 	)
 	/**
@@ -205,6 +250,7 @@ export const eventsRouter = new Elysia({
 				})
 				.onConflictDoNothing({ target: event.id })
 				.returning(eventColumns);
+			await indexCache.invalidate();
 
 			if (created) return status(201, serialize(created));
 
@@ -212,8 +258,7 @@ export const eventsRouter = new Elysia({
 				.select(eventColumns)
 				.from(event)
 				.where(eq(event.id, body.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!existing) throw new Error('Insert returned no row');
 			return serialize(existing);
@@ -240,8 +285,7 @@ export const eventsRouter = new Elysia({
 				.select(eventColumns)
 				.from(event)
 				.where(eq(event.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!current) return status(404, { error: 'EVENT_NOT_FOUND' });
 
@@ -268,28 +312,21 @@ export const eventsRouter = new Elysia({
 			const invalid = invalidEvent(merged);
 			if (invalid) return status(422, { error: invalid });
 
-			const [updated] = await db
-				.update(event)
-				.set({
-					title: body.title,
-					details: body.details,
-					tag: body.tag,
-					date: body.date,
-					timeMinutes: body.timeMinutes,
-					recurrence: body.recurrence,
-					completedAt:
-						body.completedAt === undefined
-							? undefined
-							: body.completedAt === null
-								? null
-								: new Date(body.completedAt),
-					updatedAt: new Date(body.updatedAt),
-				})
-				.where(eq(event.id, params.id))
-				.returning(eventColumns);
+			const updated = await patchEventRow(params.id, body);
+			await indexCache.invalidate();
+			if (updated) return serialize(updated);
 
-			if (!updated) return status(404, { error: 'EVENT_NOT_FOUND' });
-			return serialize(updated);
+			// The guarded update matched nothing: the row is gone, or a newer edit
+			// landed between the read above and the write. Same answer as a stale
+			// patch — the stored row, for the sender to adopt.
+			const [stored] = await db
+				.select(eventColumns)
+				.from(event)
+				.where(eq(event.id, params.id))
+				.limit(1);
+
+			if (!stored) return status(404, { error: 'EVENT_NOT_FOUND' });
+			return serialize(stored);
 		},
 		{
 			params: z.object({ id: eventId }),
@@ -310,6 +347,7 @@ export const eventsRouter = new Elysia({
 		'/:id',
 		async ({ params }) => {
 			await db.delete(event).where(eq(event.id, params.id));
+			await indexCache.invalidate();
 			return status(204);
 		},
 		{
@@ -324,8 +362,7 @@ export const eventsRouter = new Elysia({
 				.select({ recurrence: event.recurrence })
 				.from(event)
 				.where(eq(event.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!owner) return status(404, { error: 'EVENT_NOT_FOUND' });
 			// A one-off's done mark lives on the row itself; letting it also have
@@ -349,6 +386,7 @@ export const eventsRouter = new Elysia({
 					date: eventCompletion.date,
 					status: eventCompletion.status,
 				});
+			await indexCache.invalidate();
 
 			if (!stored) throw new Error('Upsert returned no row');
 			return stored;
@@ -371,6 +409,7 @@ export const eventsRouter = new Elysia({
 						eq(eventCompletion.date, params.date),
 					),
 				);
+			await indexCache.invalidate();
 			return status(204);
 		},
 		{

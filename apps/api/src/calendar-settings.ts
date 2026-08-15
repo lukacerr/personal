@@ -12,7 +12,7 @@ import { z } from 'zod';
  * testable without a Redis.
  */
 
-/** Prefixed so it can never collide with Drizzle's global query cache. */
+/** Prefixed by system and versioned, like every key in this shared Redis. */
 export const CALENDAR_SETTINGS_KEY = 'calendar:settings:v1';
 
 /**

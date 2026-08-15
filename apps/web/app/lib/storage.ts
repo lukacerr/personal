@@ -559,6 +559,28 @@ export function reconcileStorageSelection(
 	return new Set([...selected].filter((id) => existing.has(id)));
 }
 
+/**
+ * What a bulk selection is scoped to. A change in any of these replaces the
+ * files on screen, so it must also clear the selection — a filter left out of
+ * this key lets the bulk bar act on files that are no longer visible.
+ */
+export function storageSelectionKey(
+	view: Pick<
+		StorageView,
+		'path' | 'types' | 'visibility' | 'uploaded' | 'source'
+	>,
+	query: string,
+) {
+	return [
+		view.path ?? '',
+		query,
+		view.types.join(','),
+		view.visibility,
+		view.uploaded,
+		view.source,
+	].join('\0');
+}
+
 export function joinPath(folder: string | null, segment: string) {
 	return folder ? `${folder}/${segment}` : segment;
 }

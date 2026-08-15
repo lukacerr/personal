@@ -1,22 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { CALENDAR_SETTINGS_KEY } from '@api/calendar-settings';
 import { cache, db } from '@api/env';
-import { app } from '@api/index';
+import { patchEventRow } from '@api/events';
 import { event } from '@api/schema';
+import { MAX_CLOCK_SKEW_MS } from '@api/validation';
 import { randomUUIDv7 } from 'bun';
-import { inArray } from 'drizzle-orm';
-
-async function request(path: string, init?: RequestInit) {
-	return app.handle(new Request(`http://localhost${path}`, init));
-}
-
-async function json(path: string, method: string, body: unknown) {
-	return request(path, {
-		method,
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(body),
-	});
-}
+import { eq, inArray } from 'drizzle-orm';
+import { json, request } from './helpers';
 
 type EventRecurrence =
 	| { kind: 'everyDays'; interval: number; until?: string }
@@ -184,7 +174,8 @@ describe('events', () => {
 	});
 
 	it('marks a one-off done and pending again through PATCH', async () => {
-		const completedAt = Date.UTC(2026, 7, 20, 15);
+		// In the past: a completion clock is bounded by the allowed skew.
+		const completedAt = Date.UTC(2026, 7, 10, 15);
 		const { body } = await create({ date: '2026-08-20' });
 
 		const done = await json(`/events/${body.id}`, 'PATCH', {
@@ -232,6 +223,52 @@ describe('events', () => {
 			title: 'Forever the winner',
 		});
 		expect(response.status).toBe(422);
+	});
+
+	/**
+	 * A clock only slightly wrong still syncs; one from the far future would win
+	 * last-write-wins against every honest edit forever, leaving the row
+	 * uneditable. The bound is evaluated per request, not when the module loads.
+	 */
+	it('refuses an edit clock further ahead than clock skew can explain', async () => {
+		const { body } = await create({});
+		const tooFar = Date.now() + MAX_CLOCK_SKEW_MS + 60_000;
+
+		const patched = await json(`/events/${body.id}`, 'PATCH', {
+			updatedAt: tooFar,
+			title: 'From the future',
+		});
+		const created = await create({ createdAt: tooFar });
+
+		expect(patched.status).toBe(422);
+		expect(created.response.status).toBe(422);
+	});
+
+	/**
+	 * The interleaving the handler's in-memory check cannot see: both patches
+	 * read the same row and the stale one reaches the UPDATE last. The WHERE
+	 * re-checks the clock against the stored row, so the stale write matches
+	 * nothing instead of overwriting the newer edit. Exercised through the
+	 * exported statement because no HTTP ordering forces this deterministically.
+	 */
+	it('refuses the stale half of a patch race instead of letting the old clock win', async () => {
+		const { body } = await create({ title: 'Base' });
+
+		// What the handler read still said `body.updatedAt`; this lands in between:
+		await db
+			.update(event)
+			.set({ title: 'Newer edit', updatedAt: new Date(body.updatedAt + 2_000) })
+			.where(eq(event.id, body.id));
+
+		const updated = await patchEventRow(body.id, {
+			updatedAt: body.updatedAt + 1_000,
+			title: 'Older edit',
+		});
+
+		expect(updated).toBeUndefined();
+		const [stored] = await db.select().from(event).where(eq(event.id, body.id));
+		expect(stored?.title).toBe('Newer edit');
+		expect(stored?.updatedAt.getTime()).toBe(body.updatedAt + 2_000);
 	});
 
 	it('checks merged invariants when patching, not just the fields sent', async () => {
@@ -438,7 +475,9 @@ describe('event completions', () => {
 });
 
 describe('events index', () => {
-	it('serves events with their completions and revalidates by entity tag', async () => {
+	// Conditional reads and tag invalidation live in the `events index cache`
+	// suite below; this test owns the payload shape: both halves in one answer.
+	it('serves events together with their completions', async () => {
 		const { body } = await create({
 			date: '2026-08-18',
 			recurrence: { kind: 'weekly', weekdays: [2] },
@@ -448,9 +487,7 @@ describe('events index', () => {
 		});
 
 		const first = await request('/events');
-		const tag = first.headers.get('etag');
 		expect(first.status).toBe(200);
-		expect(tag).toBeTruthy();
 
 		const index = (await first.json()) as EventIndexBody;
 		expect(index.events.some((row) => row.id === body.id)).toBe(true);
@@ -459,21 +496,6 @@ describe('events index', () => {
 				(row) => row.eventId === body.id && row.status === 'done',
 			),
 		).toBe(true);
-
-		const repeated = await request('/events', {
-			headers: { 'if-none-match': tag ?? '' },
-		});
-		expect(repeated.status).toBe(304);
-		expect(await repeated.text()).toBe('');
-
-		await json(`/events/${body.id}`, 'PATCH', {
-			updatedAt: body.updatedAt + 1,
-			title: 'Renamed',
-		});
-		const afterChange = await request('/events', {
-			headers: { 'if-none-match': tag ?? '' },
-		});
-		expect(afterChange.status).toBe(200);
 	});
 
 	it('drops completions with their event', async () => {
@@ -492,4 +514,105 @@ describe('events index', () => {
 		expect(events.some((row) => row.id === body.id)).toBe(false);
 		expect(completions.some((row) => row.eventId === body.id)).toBe(false);
 	});
+});
+
+/**
+ * The index answers a matching `If-None-Match` from a tag remembered in Redis,
+ * so every write path — including completions, which live in the same payload —
+ * must drop that tag before responding.
+ */
+describe('events index cache', () => {
+	async function indexTag() {
+		const response = await request('/events');
+		expect(response.status).toBe(200);
+		return response.headers.get('etag') ?? '';
+	}
+
+	/** A recurring event with one resolved occurrence, so both halves can change. */
+	async function seed() {
+		const { body } = await create({
+			date: '2026-08-18',
+			recurrence: { kind: 'everyDays', interval: 1 },
+		});
+		await json(`/events/${body.id}/completions/2026-08-18`, 'PUT', {
+			status: 'done',
+		});
+		return body;
+	}
+
+	const writes: Array<{
+		name: string;
+		write: (seeded: EventBody) => Promise<(index: EventIndexBody) => boolean>;
+	}> = [
+		{
+			name: 'creating an event',
+			write: async () => {
+				const { body } = await create({});
+				return ({ events }) => events.some((row) => row.id === body.id);
+			},
+		},
+		{
+			name: 'updating an event',
+			write: async (seeded) => {
+				await json(`/events/${seeded.id}`, 'PATCH', {
+					updatedAt: seeded.updatedAt + 1,
+					title: 'Renamed after the tag',
+				});
+				return ({ events }) =>
+					events.some(
+						(row) =>
+							row.id === seeded.id && row.title === 'Renamed after the tag',
+					);
+			},
+		},
+		{
+			name: 'deleting an event',
+			write: async (seeded) => {
+				await request(`/events/${seeded.id}`, { method: 'DELETE' });
+				return ({ events }) => events.every((row) => row.id !== seeded.id);
+			},
+		},
+		{
+			name: 'resolving an occurrence',
+			write: async (seeded) => {
+				await json(`/events/${seeded.id}/completions/2026-08-19`, 'PUT', {
+					status: 'done',
+				});
+				return ({ completions }) =>
+					completions.some(
+						(row) => row.eventId === seeded.id && row.date === '2026-08-19',
+					);
+			},
+		},
+		{
+			name: 'reopening an occurrence',
+			write: async (seeded) => {
+				await request(`/events/${seeded.id}/completions/2026-08-18`, {
+					method: 'DELETE',
+				});
+				return ({ completions }) =>
+					completions.every(
+						(row) => row.eventId !== seeded.id || row.date !== '2026-08-18',
+					);
+			},
+		},
+	];
+
+	for (const entry of writes)
+		it(`serves a fresh index after ${entry.name}`, async () => {
+			const seeded = await seed();
+			const tag = await indexTag();
+			const unchanged = await request('/events', {
+				headers: { 'if-none-match': tag },
+			});
+			expect(unchanged.status).toBe(304);
+
+			const reflected = await entry.write(seeded);
+
+			const after = await request('/events', {
+				headers: { 'if-none-match': tag },
+			});
+			expect(after.status).toBe(200);
+			expect(reflected((await after.json()) as EventIndexBody)).toBe(true);
+		});
 });

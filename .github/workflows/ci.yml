@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.8
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      # Solo la infraestructura: los tests de API son in-process con treaty(app),
+      # así que los servicios web/api de Compose no se levantan. `db-proxy`
+      # arrastra `db` y `volumes-init`, `cache` arrastra `cache-db`, y `s3-init`
+      # crea el bucket de MinIO. El script de test de la API repite este `up`
+      # (es un no-op sobre servicios ya corriendo).
+      - name: Start test infrastructure
+        run: |
+          docker compose --env-file apps/api/.env.test up -d --wait db-proxy cache s3
+          docker compose --env-file apps/api/.env.test run --rm --no-deps s3-init
+
+      # Compose nunca ejecuta migraciones y el Postgres de CI arranca vacío.
+      # `drizzle-kit migrate` no funciona contra el stack local (driver
+      # websocket), así que se aplica el SQL generado directamente, en el
+      # orden lexicográfico de los tags timestamp.
+      - name: Apply migrations
+        run: cat apps/api/migrations/*.sql | docker compose --env-file apps/api/.env.test exec -T db psql -U personal -d personal -v ON_ERROR_STOP=1
+
+      - name: Test
+        run: bun run test

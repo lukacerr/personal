@@ -1,6 +1,7 @@
+import { NotesBootstrap } from '@web/components/notes-bootstrap';
 import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
 import { type AppSystem, matchesCommandQuery } from '@web/lib/app-systems';
-import { notesDb } from '@web/lib/notes-db';
+import { clearLocalNotes, notesDb } from '@web/lib/notes-db';
 import { FileTextIcon, FolderIcon } from 'lucide-react';
 
 const NOTES_PATH = '/notes';
@@ -25,6 +26,12 @@ export const notesSystem: AppSystem = {
 	key: 'notes',
 	heading: 'Notes',
 	icon: FileTextIcon,
+
+	/** Refreshes the index on mount, reconnect and return to the foreground. */
+	Bootstrap: NotesBootstrap,
+
+	/** Notes are private; sign-out leaves none of them on the device. */
+	clearLocalData: clearLocalNotes,
 
 	/**
 	 * Scans the rows rather than an index because a person searching for a note

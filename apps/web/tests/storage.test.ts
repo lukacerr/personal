@@ -15,6 +15,7 @@ import {
 	reconcileStorageSelection,
 	sortStorageFiles,
 	storageBreadcrumb,
+	storageSelectionKey,
 	storageSummary,
 	uniqueFileName,
 	updateStorageSearchParams,
@@ -568,6 +569,33 @@ describe('Storage paths', () => {
 });
 
 describe('Storage selection', () => {
+	/**
+	 * Every filter that changes what is on screen must change the key, or the
+	 * bulk bar keeps offering to act on files that are no longer visible.
+	 * `source` was the one that slipped through: switching to `notes-unused`
+	 * replaces the whole set with the server's answer.
+	 */
+	it('changes the selection scope when any filter changes, source included', () => {
+		const view: Parameters<typeof storageSelectionKey>[0] = {
+			path: null,
+			types: [],
+			visibility: 'all',
+			uploaded: 'any',
+			source: 'all',
+		};
+		const base = storageSelectionKey(view, '');
+
+		expect(
+			storageSelectionKey({ ...view, source: 'notes-unused' }, ''),
+		).not.toBe(base);
+		expect(storageSelectionKey({ ...view, path: 'work' }, '')).not.toBe(base);
+		expect(storageSelectionKey(view, 'query')).not.toBe(base);
+		expect(storageSelectionKey({ ...view, visibility: 'public' }, '')).not.toBe(
+			base,
+		);
+		expect(storageSelectionKey(view, '')).toBe(base);
+	});
+
 	it('keeps only ids that still exist after refresh', () => {
 		expect(
 			reconcileStorageSelection(new Set(['kept', 'gone']), [

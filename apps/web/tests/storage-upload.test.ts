@@ -281,6 +281,53 @@ describe('Upload queue', () => {
 		expect(fake.cancelled).toEqual(['id-lost.bin']);
 	});
 
+	it('fails every candidate when the reservation request itself fails', async () => {
+		const fake = fakeTransport();
+		fake.transport.reserve = async () => {
+			throw Object.assign(new Error('down'), { status: 503 });
+		};
+		const uploads = queue(fake);
+
+		// Left `pending`, these would sit in the panel forever with no message.
+		await uploads.enqueue([
+			candidate('one.bin', 1024),
+			candidate('two.bin', 1024),
+		]);
+
+		expect(uploads.items().map((item) => [item.status, item.error])).toEqual([
+			['failed', 'The server could not be reached. Try again in a moment.'],
+			['failed', 'The server could not be reached. Try again in a moment.'],
+		]);
+		expect(fake.attempts.size).toBe(0);
+	});
+
+	it('stops the remaining parts once one part is out of attempts', async () => {
+		const gates = new Map<string, Deferred<{ etag: string }>>();
+		const fake = fakeTransport({
+			partSize: 1 * MIB,
+			// The doomed part fails straight away; every other part waits on a gate.
+			gate: (url) => {
+				if (url.endsWith('/1')) return undefined;
+				if (!gates.has(url)) gates.set(url, deferred());
+				return gates.get(url);
+			},
+			failParts: (url) => url.endsWith('/1'),
+		});
+		const uploads = queue(fake, { maxAttempts: 1, partConcurrency: 2 });
+
+		const running = uploads.enqueue([candidate('torn.bin', 6 * MIB)]);
+		await running;
+		expect(uploads.items()[0]?.status).toBe('failed');
+		expect(fake.cancelled).toEqual(['id-torn.bin']);
+
+		// The part in flight settles; the worker that held it must stop rather
+		// than keep feeding parts to an upload that is already being cancelled.
+		for (const gate of gates.values()) gate.resolve({ etag: '"x"' });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(fake.attempts.has('put://id-torn.bin/3')).toBe(false);
+	});
+
 	it('keeps a rejected reservation out of the transfer entirely', async () => {
 		const fake = fakeTransport();
 		fake.transport.reserve = async (requests) => {

@@ -45,6 +45,28 @@ export function pastedImageName(source: string, contentType: string) {
 }
 
 /**
+ * What to tell the user once an attachment batch settles.
+ *
+ * `uploadNoteFiles` quietly drops the files that failed unless all of them
+ * did, so a message that counts the selection overstates what happened. The
+ * success line counts what was actually attached — keeping the filename when
+ * one file made it whole — and whatever was dropped is a failure of its own.
+ */
+export function attachmentOutcome(names: string[], attached: number) {
+	const failed = names.length - attached;
+	return {
+		success:
+			attached === 1 && names.length === 1
+				? `“${names[0]}” attached.`
+				: `${attached} ${attached === 1 ? 'file' : 'files'} attached.`,
+		failure:
+			failed > 0
+				? `${failed} ${failed === 1 ? 'file' : 'files'} could not be attached.`
+				: undefined,
+	};
+}
+
+/**
  * What the block can be showing. `missing` and `broken` are different failures
  * worth telling apart: the first means the file was deleted, the second means
  * the row and the bucket disagree, which is what Reconcile exists for.

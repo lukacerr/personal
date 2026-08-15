@@ -61,6 +61,33 @@ describe('command palette shortcut', () => {
 		).toBe(false);
 	});
 
+	/**
+	 * Ctrl+P is the browser's print shortcut everywhere in the app. The palette
+	 * once claimed it (with preventDefault), silently killing printing.
+	 */
+	it('leaves the browser print shortcut alone', () => {
+		expect(
+			isCommandPaletteShortcut({
+				key: 'p',
+				ctrlKey: true,
+				metaKey: false,
+				altKey: false,
+				shiftKey: false,
+				repeat: false,
+			}),
+		).toBe(false);
+		expect(
+			isCommandPaletteShortcut({
+				key: 'p',
+				ctrlKey: true,
+				metaKey: false,
+				altKey: false,
+				shiftKey: true,
+				repeat: false,
+			}),
+		).toBe(false);
+	});
+
 	it('restores focus when dismissed but not after navigation', () => {
 		expect(shouldRestorePaletteFocus('dismiss')).toBe(true);
 		expect(shouldRestorePaletteFocus('navigate')).toBe(false);

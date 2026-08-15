@@ -146,6 +146,60 @@ describe('Payment form', () => {
 		expect(draft.endedAt).toBeNull();
 	});
 
+	/**
+	 * The cancel dialog already refuses an inverted window; the same rule has
+	 * to hold from this entry point too, or editing the start date can produce
+	 * the exact window the other door guards against.
+	 */
+	it('refuses moving the start past the end of a cancelled subscription', async () => {
+		const props = renderForm({
+			target: {
+				kind: 'edit',
+				payment: payment({
+					isSubscription: true,
+					paidAt: day(2026, 0, 5),
+					endedAt: day(2026, 1, 5),
+				}),
+			},
+		});
+		const user = userEvent.setup();
+
+		await user.clear(screen.getByLabelText(/paid on/i));
+		await user.type(screen.getByLabelText(/paid on/i), '2026-03-01');
+		await user.click(screen.getByRole('button', { name: /save/i }));
+
+		expect(screen.getByRole('alert').textContent).toContain('after it ended');
+		expect(props.onSubmit).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * Unticking "Recurring" drops the end date with it: a window only means
+	 * something on a subscription, and a one-off carrying a leftover `endedAt`
+	 * would be a shape the screen never shows or edits again.
+	 */
+	it('drops the end date when recurring is unticked', async () => {
+		const props = renderForm({
+			target: {
+				kind: 'edit',
+				payment: payment({
+					isSubscription: true,
+					paidAt: day(2026, 0, 5),
+					endedAt: day(2026, 1, 5),
+				}),
+			},
+		});
+		const user = userEvent.setup();
+
+		await user.click(
+			screen.getByRole('checkbox', { name: /recurring monthly/i }),
+		);
+		await user.click(screen.getByRole('button', { name: /save/i }));
+
+		expect(props.onSubmit).toHaveBeenCalledWith(
+			expect.objectContaining({ isSubscription: false, endedAt: null }),
+		);
+	});
+
 	/** Editing must not quietly revive a subscription somebody cancelled. */
 	it('leaves a closed subscription window closed', async () => {
 		const props = renderForm({

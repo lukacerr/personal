@@ -1,17 +1,23 @@
-import type * as schema from '@api/schema';
+import * as schema from '@api/schema';
 import { neon, neonConfig } from '@neondatabase/serverless';
 import { createEnv } from '@t3-oss/env-core';
 import { Redis } from '@upstash/redis';
 import { S3Client } from 'bun';
-import { upstashCache } from 'drizzle-orm/cache/upstash';
-import { drizzle, type NeonHttpDatabase } from 'drizzle-orm/neon-http';
+import { drizzle } from 'drizzle-orm/neon-http';
 import { z } from 'zod';
 
 export const env = createEnv({
 	server: {
+		/**
+		 * Defaults to `production` so an environment that forgets to declare
+		 * itself gets auth enforcement, security headers and quiet logs — never
+		 * the development bypass. Every dev surface sets it explicitly: Compose
+		 * defines `development`, `.env`/`.env.example` carry it for host runs,
+		 * and `.env.test` declares `test`.
+		 */
 		NODE_ENV: z
 			.enum(['development', 'production', 'test'])
-			.default('development'),
+			.default('production'),
 		PORT: z.coerce.number().int().min(1).max(65_535).default(8080),
 		DEPLOYMENT_URL: z.url().default('http://localhost:8080'),
 		LUKA_SECRET: z.string().min(1),
@@ -45,10 +51,6 @@ export const env = createEnv({
 		S3_REGION: z.string().min(1).default('auto'),
 		S3_ACCESS_KEY_ID: z.string().min(1),
 		S3_SECRET_ACCESS_KEY: z.string().min(1),
-		NOVITA_API_KEY: z.string().min(1),
-		ANTHROPIC_API_KEY: z.string().min(1),
-		OPENAI_API_KEY: z.string().min(1),
-		TAVILY_API_KEY: z.string().min(1),
 		GOOGLE_CLIENT_ID: z.string().min(1),
 		GOOGLE_CLIENT_SECRET: z.string().min(1),
 	},
@@ -62,20 +64,18 @@ if (env.NEON_FETCH_ENDPOINT) {
 	neonConfig.poolQueryViaFetch = true;
 }
 
-const CACHE_CREDENTIALS = {
+export const cache = new Redis({
 	url: env.UPSTASH_REDIS_REST_URL,
 	token: env.UPSTASH_REDIS_REST_TOKEN,
-};
-
-export const cache = new Redis(CACHE_CREDENTIALS);
+});
 
 export const db = drizzle({
 	client: neon(env.DATABASE_URL),
-	cache: upstashCache({
-		...CACHE_CREDENTIALS,
-		global: true,
-		config: { ex: 300 },
-	}),
+	/**
+	 * The real schema object, not just its type: an assertion over a type-only
+	 * import compiles the same but leaves `db.query.*` undefined at runtime.
+	 */
+	schema,
 	casing: 'snake_case',
 	/**
 	 * Only development. Under `test` this logged every statement with its
@@ -83,7 +83,7 @@ export const db = drizzle({
 	 * tokens of noise for anything reading the suite's output.
 	 */
 	logger: env.NODE_ENV === 'development',
-}) as NeonHttpDatabase<typeof schema>;
+});
 
 export const storage = new S3Client({
 	accessKeyId: env.S3_ACCESS_KEY_ID,

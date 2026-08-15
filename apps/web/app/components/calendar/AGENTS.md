@@ -165,22 +165,23 @@ Lee este archivo antes de modificar `apps/web/app/components/calendar/**`,
   inferido hacia adelante (`01/05` en agosto es enero próximo). Una fecha u
   hora imposible es palabras, y una pelada sin texto después queda como título
   (`parseQuickAdd`, pura y testeada). Enter crea y conserva el foco para
-  encadenar líneas. Solo produce one-offs sin tag: recurrencia, details, tag y
-  backlog son del diálogo, que sigue disponible en el `+` de cada bucket y del
-  Backlog. Hubo un quick-add por día y se sacó: multiplicaba real estate
-  vertical para repetir la misma gramática. Placeholder `Add…` mudo a
-  propósito: un ejemplo literal se lee como contenido y marea.
-- **La hora del diálogo es texto plano 24h validado con `parseTimeInput`**,
-  nunca `type="time"`: el picker nativo depende del locale del OS, habla AM/PM
-  y resultó inusable en el shell de escritorio. Una hora ilegible se rechaza
-  con error inline, no se descarta en silencio.
+  encadenar líneas. **Todo entra por esa gramática**: recurrencia (`*repeat`),
+  tag (`[tag]`), backlog (`!b`) y details (líneas siguientes) — no hay diálogo
+  de evento; la misma gramática es la edición inline. Hubo un quick-add por
+  día y se sacó: multiplicaba real estate vertical para repetir la misma
+  gramática. Placeholder `Add…` mudo a propósito: un ejemplo literal se lee
+  como contenido y marea.
+- **La hora es texto plano 24h validado con `parseTimeInput`**, nunca
+  `type="time"`: el picker nativo depende del locale del OS, habla AM/PM y
+  resultó inusable en el shell de escritorio. En la gramática una hora
+  ilegible es palabras y queda en el título, nunca se descarta en silencio.
 - **Los details son una checklist por línea y el estado vive en el texto**
   (`[x] …`), estilo markdown task list: sin migración, sin segunda tabla, y el
   mismo patch que edita details sincroniza un toggle. `parseDetailLines`
   trata toda línea no vacía como check (los details migrados de la nota son
   chequeables sin reescritura) y `toggleDetailLine` reserializa las líneas no
-  vacías. En el diálogo sigue siendo un textarea: el prefijo es visible y
-  editable a mano, a propósito.
+  vacías. En la edición inline siguen siendo texto plano: el prefijo es
+  visible y editable a mano, a propósito.
 - **"Tomorrow" corre un one-off un día** — el gesto de reescribir la línea en
   el día siguiente. Nunca aparece en una serie: sus movimientos de un día son
   por ocurrencia ("Move this one").

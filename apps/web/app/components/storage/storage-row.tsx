@@ -7,7 +7,7 @@ import { Spinner } from '@web/components/ui/spinner';
 import { TableCell, TableRow } from '@web/components/ui/table';
 import { fileTypeIcon, fileTypeLabel, formatBytes } from '@web/lib/storage';
 import type { StoredFile } from '@web/lib/storage-api';
-import { cn } from '@web/lib/utils';
+import { cn, timestampLabel } from '@web/lib/utils';
 import {
 	CheckIcon,
 	ChevronLeftIcon,
@@ -27,6 +27,12 @@ import { type MouseEvent, useEffect, useId, useState } from 'react';
  * The rows of the desktop table, and the pieces both layouts share: what a
  * click on a row means, how a type reads, and the inline rename field.
  */
+
+/**
+ * Where windowing starts paying for itself, for both layouts: below this many
+ * rows the measurement machinery costs more than it saves.
+ */
+export const VIRTUALISE_ABOVE = 120;
 
 export type StorageActions = {
 	onOpenFolder: (name: string) => void;
@@ -51,18 +57,6 @@ export function droppablePath(id: string) {
 	return id.startsWith('folder:')
 		? id.slice('folder:'.length) || null
 		: undefined;
-}
-
-export const dateFormat = new Intl.DateTimeFormat(undefined, {
-	dateStyle: 'medium',
-});
-const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
-
-export function uploadedLabel(timestamp: number) {
-	const date = new Date(timestamp);
-	return date.toDateString() === new Date().toDateString()
-		? `Today, ${timeFormat.format(date)}`
-		: dateFormat.format(date);
 }
 
 /**
@@ -435,7 +429,7 @@ export function FileDesktopRow({
 			<TableCell>{formatBytes(file.size)}</TableCell>
 			<TableCell>
 				<time dateTime={new Date(file.createdAt).toISOString()}>
-					{uploadedLabel(file.createdAt)}
+					{timestampLabel(file.createdAt)}
 				</time>
 			</TableCell>
 			<TableCell>

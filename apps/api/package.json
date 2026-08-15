@@ -8,7 +8,7 @@
 		"dev": "bun --watch src/index.ts",
 		"mig": "bunx drizzle-kit generate",
 		"mig:push": "bunx drizzle-kit migrate",
-		"test": "docker compose -f ../../docker-compose.yml --env-file .env.test up -d --wait db-proxy cache s3 && docker compose -f ../../docker-compose.yml --env-file .env.test run --rm --no-deps s3-init && env -u ANTHROPIC_API_KEY bun test --env-file .env.test",
+		"test": "docker compose -f ../../docker-compose.yml --env-file .env.test up -d --wait db-proxy cache s3 && docker compose -f ../../docker-compose.yml --env-file .env.test run --rm --no-deps s3-init && bun test --env-file .env.test",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
@@ -30,8 +30,10 @@
 	},
 	"devDependencies": {
 		"@elysia/eden": "catalog:",
+		"@types/pg": "^8.21.0",
 		"bun-types": "catalog:",
 		"drizzle-kit": "^0.31.10",
+		"pg": "^8.23.0",
 		"typescript": "catalog:"
 	}
 }

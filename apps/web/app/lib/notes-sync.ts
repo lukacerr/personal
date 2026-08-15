@@ -1,3 +1,4 @@
+import { isTransientApiFailure } from '@web/lib/api';
 import { authenticatedApi } from '@web/lib/authenticated-api';
 import {
 	cacheRemoteNote,
@@ -29,7 +30,7 @@ class NotesApiError extends Error {
 	constructor(readonly status: number) {
 		super(terminalMessages[status] ?? `Notes API returned ${status}`);
 		this.terminal =
-			status >= 400 && status < 500 && status !== 408 && status !== 429;
+			status >= 400 && status < 500 && !isTransientApiFailure(status);
 	}
 }
 

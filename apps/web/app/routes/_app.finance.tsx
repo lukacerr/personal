@@ -11,6 +11,7 @@ import { FinanceSummary } from '@web/components/finance/finance-summary';
 import { FinanceToolbar } from '@web/components/finance/finance-toolbar';
 import { Button } from '@web/components/ui/button';
 import { Spinner } from '@web/components/ui/spinner';
+import { useConsumeCreateParam } from '@web/lib/create-param';
 import {
 	collectTags,
 	currentMonthRange,
@@ -38,7 +39,11 @@ import {
 	saveFinanceSettings,
 } from '@web/lib/finance-settings';
 import { useFinanceStore } from '@web/lib/finance-store';
-import { useEffect, useMemo, useState } from 'react';
+import {
+	type SharedSettingsAdapter,
+	useSharedSettings,
+} from '@web/lib/shared-settings';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 
@@ -46,23 +51,34 @@ export function meta() {
 	return [{ title: 'Finance · Personal' }];
 }
 
+/** Module-level so the hook's one-shot reconciliation stays one-shot. */
+const settingsAdapter: SharedSettingsAdapter<FinanceSettings> = {
+	defaults: DEFAULT_FINANCE_SETTINGS,
+	loadLocal: () => loadFinanceSettings(window.localStorage),
+	saveLocal: (settings) => saveFinanceSettings(window.localStorage, settings),
+	readShared: readSharedSettings,
+	writeShared: writeSharedSettings,
+	reconcile: reconcileFinanceSettings,
+};
+
 export default function Finance() {
 	const [searchParams, setSearchParams] = useSearchParams();
 
-	const [settings, setSettings] = useState<FinanceSettings>(() =>
-		typeof window === 'undefined'
-			? DEFAULT_FINANCE_SETTINGS
-			: loadFinanceSettings(window.localStorage),
-	);
+	// Adopt the shared budget and range, or seed them from this device; every
+	// later change writes the local mirror first and reports a failed share.
+	const { settings, patchSettings } = useSharedSettings(settingsAdapter);
 
-	// Read once per render rather than per filter: a fresh `Date.now()` in
+	// Read once per mount rather than per filter: a fresh `Date.now()` in
 	// three places could straddle midnight.
 	const now = useMemo(() => Date.now(), []);
 	// The url wins when it carries a range; otherwise the one last picked here,
 	// and only a browser that has never picked one falls to the current month.
-	const view = parseFinanceView(
-		searchParams,
-		settings.range ?? currentMonthRange(now),
+	// Memoized, or every keystroke of the search box would re-filter the whole
+	// index through a fresh view object.
+	const view = useMemo(
+		() =>
+			parseFinanceView(searchParams, settings.range ?? currentMonthRange(now)),
+		[searchParams, settings.range, now],
 	);
 
 	const [queryInput, setQueryInput] = useState(view.query);
@@ -93,53 +109,17 @@ export default function Finance() {
 		void loadQuote();
 	}, [load, loadQuote]);
 
-	/**
-	 * Adopt the shared budget and range, or seed them from this device.
-	 *
-	 * Runs once per visit and never fights the user: a change made while it is in
-	 * flight wins, because `settled` stops the answer from landing on top of it.
-	 * Failing to reach the cache is silent here — the mirror already has an answer
-	 * and there is nothing the user could do about it — but failing to *save* is
-	 * not, which is why only `patchSettings` reports.
-	 */
-	useEffect(() => {
-		let settled = false;
-
-		void readSharedSettings().then((shared) => {
-			if (settled) return;
-			const { settings: next, push } = reconcileFinanceSettings(
-				shared,
-				loadFinanceSettings(window.localStorage),
-			);
-
-			setSettings(next);
-			saveFinanceSettings(window.localStorage, next);
-			if (push) void writeSharedSettings(next);
-		});
-
-		return () => {
-			settled = true;
-		};
-	}, []);
-
 	useEffect(() => {
 		setQueryInput(view.query);
 	}, [view.query]);
 
-	/**
-	 * The command palette can only navigate, so "Add payment" arrives as `?new=1`.
-	 * It is consumed on sight: leaving it in the url would reopen the dialog on
-	 * every later change to the view.
-	 */
-	useEffect(() => {
-		if (!searchParams.has('new')) return;
-		setFormError(undefined);
-		setForm({ kind: 'create' });
-		setSearchParams(
-			(current) => updateFinanceSearchParams(current, { create: false }),
-			{ replace: true },
-		);
-	}, [searchParams, setSearchParams]);
+	// "Add payment" from the palette arrives as `?new=1` and opens the dialog.
+	useConsumeCreateParam(
+		useCallback(() => {
+			setFormError(undefined);
+			setForm({ kind: 'create' });
+		}, []),
+	);
 
 	/**
 	 * The bare letter that opens the form. Any dialog already being open is a
@@ -191,26 +171,6 @@ export default function Finance() {
 	);
 	const tags = useMemo(() => collectTags(payments), [payments]);
 	const remaining = remainingFor(settings.budget, totals, quote);
-
-	/**
-	 * The mirror is written first and synchronously: the screen has to reflect the
-	 * change whether or not the cache is reachable. The shared copy is reported on
-	 * because a budget that silently stayed on one device is exactly the problem
-	 * sharing it was meant to solve.
-	 */
-	function patchSettings(changes: Partial<FinanceSettings>) {
-		const next = { ...settings, ...changes };
-		setSettings(next);
-		saveFinanceSettings(window.localStorage, next);
-
-		void writeSharedSettings(next).then(
-			(stored) => {
-				if (!stored)
-					toast.error('Saved on this device only — the shared copy is down.');
-			},
-			() => toast.error('Saved on this device only — no connection.'),
-		);
-	}
 
 	// Written to the url so the view stays shareable, and remembered so opening
 	// Finance from the sidebar lands on the same period rather than resetting.

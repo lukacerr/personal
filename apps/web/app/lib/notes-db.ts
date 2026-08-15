@@ -1,13 +1,8 @@
 import type { authenticatedApi } from '@web/lib/authenticated-api';
 import { nextAvailableNoteTitle } from '@web/lib/notes';
 import type { NoteBlock } from '@web/lib/notes-schema';
+import type { TreatyData } from '@web/lib/treaty-data';
 import Dexie, { type Table } from 'dexie';
-
-type TreatyData<T> = T extends (...args: infer _Args) => infer Result
-	? Awaited<Result> extends { data: infer Data }
-		? NonNullable<Data>
-		: never
-	: never;
 
 type NotesRoute = ReturnType<typeof authenticatedApi.notes>;
 

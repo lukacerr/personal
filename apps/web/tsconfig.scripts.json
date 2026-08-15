@@ -1,0 +1,7 @@
+{
+	"extends": "../../tsconfig.json",
+	"include": ["scripts/**/*"],
+	"compilerOptions": {
+		"types": ["bun-types"]
+	}
+}

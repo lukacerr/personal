@@ -1,7 +1,8 @@
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import {
 	InlineRename,
 	type StorageActions,
-	uploadedLabel,
+	VIRTUALISE_ABOVE,
 } from '@web/components/storage/storage-row';
 import { Button } from '@web/components/ui/button';
 import { Checkbox } from '@web/components/ui/checkbox';
@@ -20,6 +21,7 @@ import {
 	parentFolder,
 } from '@web/lib/storage';
 import type { StoredFile } from '@web/lib/storage-api';
+import { timestampLabel } from '@web/lib/utils';
 import {
 	ChevronLeftIcon,
 	DownloadIcon,
@@ -52,8 +54,34 @@ export function StorageCards({
 	onToggle: (id: string) => void;
 }) {
 	const [editing, setEditing] = useState<string>();
+	// Where the cards begin in the document, so the window's scroll position can
+	// be read as a position in this list. The layout is always mounted —
+	// `md:hidden` is CSS — so without its own windowing it renders every row
+	// and cancels out the table's virtualisation.
+	const [list, setList] = useState<HTMLUListElement | null>(null);
+	const virtualised = files.length > VIRTUALISE_ABOVE;
+	const rows = useWindowVirtualizer({
+		count: virtualised ? files.length : 0,
+		scrollMargin: list?.offsetTop ?? 0,
+		// A file card is two meta lines tall; results carry their path as a third.
+		estimateSize: () => (resultMode ? 112 : 96),
+		overscan: 12,
+	});
+	const windowed = rows.getVirtualItems();
+	// `start`/`end` are document positions — they include the margin — while
+	// `getTotalSize()` is the height of the rows alone, so the margin comes off
+	// both ends or the list stops short of its last card.
+	const margin = rows.options.scrollMargin;
+	const paddingTop = (windowed[0]?.start ?? 0) - margin;
+	const paddingBottom =
+		windowed.length > 0
+			? rows.getTotalSize() - ((windowed.at(-1)?.end ?? 0) - margin)
+			: 0;
+	const visibleFiles = virtualised
+		? windowed.flatMap((row) => files[row.index] ?? [])
+		: files;
 	return (
-		<ul className="divide-y rounded-xl border bg-card md:hidden">
+		<ul ref={setList} className="divide-y rounded-xl border bg-card md:hidden">
 			{currentFolder && !resultMode ? (
 				<li>
 					<Button
@@ -125,7 +153,13 @@ export function StorageCards({
 					)}
 				</li>
 			))}
-			{files.map((file) => {
+			{/* Real list items holding the height of what is scrolled past, so the
+			    scrollbar still describes the whole list; two empty items is the
+			    smaller cost, the same trade the table makes with its spacer rows. */}
+			{virtualised && paddingTop > 0 ? (
+				<li style={{ height: paddingTop }} />
+			) : null}
+			{visibleFiles.map((file) => {
 				const Icon = fileTypeIcon(file.contentType);
 				const selected = selectedIds.has(file.id);
 				return (
@@ -167,7 +201,7 @@ export function StorageCards({
 									</span>
 									<span className="block truncate text-muted-foreground text-xs">
 										{fileTypeLabel(file.contentType)} · {formatBytes(file.size)}{' '}
-										· {uploadedLabel(file.createdAt)}
+										· {timestampLabel(file.createdAt)}
 									</span>
 									{resultMode ? (
 										<span className="block truncate text-muted-foreground text-xs">
@@ -215,6 +249,9 @@ export function StorageCards({
 					</li>
 				);
 			})}
+			{virtualised && paddingBottom > 0 ? (
+				<li style={{ height: paddingBottom }} />
+			) : null}
 		</ul>
 	);
 }

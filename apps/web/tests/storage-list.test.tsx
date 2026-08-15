@@ -269,6 +269,22 @@ describe('Storage list', () => {
 		expect(props.onNavigatePath).toHaveBeenCalledWith('work');
 	});
 
+	/**
+	 * The card layout is always mounted — `md:hidden` is CSS — so left
+	 * unwindowed it renders every row and cancels out the table's
+	 * virtualisation on exactly the lists that needed it.
+	 */
+	it('windows the card layout past the same threshold as the table', () => {
+		const files = Array.from({ length: 500 }, (_, index) =>
+			file({ id: `file-${index}`, name: `file-${index}.pdf` }),
+		);
+		renderList({ files });
+
+		const cards = document.querySelectorAll('ul > li');
+		expect(cards.length).toBeGreaterThan(0);
+		expect(cards.length).toBeLessThan(200);
+	});
+
 	it('offers folder actions separately from file actions', async () => {
 		const user = userEvent.setup();
 		const props = renderList({ folders: ['reports'], files: [] });

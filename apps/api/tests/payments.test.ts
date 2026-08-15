@@ -1,22 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { USD_RATE_KEY, USD_RATE_TTL_SECONDS } from '@api/dolar';
 import { cache, db } from '@api/env';
-import { app } from '@api/index';
+import { patchPaymentRow } from '@api/payments';
 import { payment } from '@api/schema';
 import { randomUUIDv7 } from 'bun';
 import { eq, inArray } from 'drizzle-orm';
-
-async function request(path: string, init?: RequestInit) {
-	return app.handle(new Request(`http://localhost${path}`, init));
-}
-
-async function json(path: string, method: string, body: unknown) {
-	return request(path, {
-		method,
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(body),
-	});
-}
+import { json, request } from './helpers';
 
 type PaymentBody = {
 	id: string;
@@ -61,11 +50,7 @@ async function seedQuote(compra = 1470, venta = 1520) {
 }
 
 async function storedRow(id: string) {
-	const [row] = await db
-		.select()
-		.from(payment)
-		.where(eq(payment.id, id))
-		.$withCache(false);
+	const [row] = await db.select().from(payment).where(eq(payment.id, id));
 	return row;
 }
 
@@ -202,6 +187,52 @@ describe('payments', () => {
 		});
 	});
 
+	/**
+	 * The read-merge-write race the PATCH handler cannot see: it validated
+	 * against the row it read, but a concurrent write landed before its UPDATE.
+	 * The UPDATE re-checks the invariant in its own WHERE over the final values,
+	 * so the stale half matches nothing instead of leaving `endedAt` on a row
+	 * with `isSubscription = false`. Exercised through the exported statement
+	 * because no HTTP interleaving can force this window deterministically.
+	 */
+	it('refuses the stale half of a race instead of breaking the window invariant', async () => {
+		const { body } = await create({
+			isSubscription: true,
+			paidAt: Date.UTC(2026, 0, 1),
+		});
+
+		// What the handler read still said "subscription"; this lands in between:
+		await db
+			.update(payment)
+			.set({ isSubscription: false })
+			.where(eq(payment.id, body.id));
+
+		const updated = await patchPaymentRow(body.id, {
+			endedAt: Date.UTC(2026, 5, 1),
+		});
+
+		expect(updated).toBeUndefined();
+		const stored = await storedRow(body.id);
+		expect(stored?.endedAt).toBeNull();
+	});
+
+	/**
+	 * Payment instants are user-chosen dates, not sync clocks: a subscription
+	 * cancelled "effective end of month" ends in the future, and the clock-skew
+	 * bound that protects LWW systems must not apply here.
+	 */
+	it('accepts a subscription window that ends in the future', async () => {
+		const endedAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+		const { response, body } = await create({
+			isSubscription: true,
+			paidAt: Date.UTC(2026, 0, 1),
+			endedAt,
+		});
+
+		expect(response.status).toBe(201);
+		expect(body.endedAt).toBe(endedAt);
+	});
+
 	it('cancels a subscription by closing its window, keeping the row', async () => {
 		const paidAt = Date.UTC(2026, 0, 10);
 		const endedAt = Date.UTC(2026, 5, 10);
@@ -239,30 +270,18 @@ describe('payments', () => {
 		});
 	});
 
-	it('lists newest first and revalidates with an entity tag', async () => {
+	// Conditional reads and tag invalidation live in the `payments index cache`
+	// suite below; this test owns only the ordering rule.
+	it('lists newest first', async () => {
 		const older = await create({ paidAt: Date.UTC(2026, 0, 1) });
 		const newer = await create({ paidAt: Date.UTC(2026, 6, 1) });
 
 		const first = await request('/payments');
-		const tag = first.headers.get('etag');
 		expect(first.status).toBe(200);
-		expect(tag).toBeTruthy();
 
 		const listed = (await first.json()) as PaymentBody[];
 		const ids = listed.map((row) => row.id);
 		expect(ids.indexOf(newer.body.id)).toBeLessThan(ids.indexOf(older.body.id));
-
-		const repeated = await request('/payments', {
-			headers: { 'if-none-match': tag ?? '' },
-		});
-		expect(repeated.status).toBe(304);
-		expect(await repeated.text()).toBe('');
-
-		await json(`/payments/${older.body.id}`, 'PATCH', { title: 'Renamed' });
-		const afterChange = await request('/payments', {
-			headers: { 'if-none-match': tag ?? '' },
-		});
-		expect(afterChange.status).toBe(200);
 	});
 
 	it('reads one payment and reports an unknown id as missing', async () => {
@@ -318,5 +337,94 @@ describe('usd rate endpoint', () => {
 		const response = await request('/payments/rate');
 		expect(response.status).toBe(503);
 		expect(await response.json()).toEqual({ error: 'USD_RATE_UNAVAILABLE' });
+	});
+});
+
+/**
+ * The index answers a matching `If-None-Match` from a tag remembered in Redis,
+ * so every write path must drop that tag before responding: a poll that gets a
+ * 304 for data that changed is worse than no cache at all.
+ */
+describe('payments index cache', () => {
+	async function indexTag() {
+		const response = await request('/payments');
+		expect(response.status).toBe(200);
+		return response.headers.get('etag') ?? '';
+	}
+
+	const writes: Array<{
+		name: string;
+		write: (seeded: PaymentBody) => Promise<(index: PaymentBody[]) => boolean>;
+	}> = [
+		{
+			name: 'recording a payment',
+			write: async () => {
+				const { body } = await create({});
+				return (index) => index.some((row) => row.id === body.id);
+			},
+		},
+		{
+			name: 'updating a payment',
+			write: async (seeded) => {
+				await json(`/payments/${seeded.id}`, 'PATCH', {
+					title: 'Renamed after the tag',
+				});
+				return (index) =>
+					index.some(
+						(row) =>
+							row.id === seeded.id && row.title === 'Renamed after the tag',
+					);
+			},
+		},
+		{
+			name: 'deleting a payment',
+			write: async (seeded) => {
+				await request(`/payments/${seeded.id}`, { method: 'DELETE' });
+				return (index) => index.every((row) => row.id !== seeded.id);
+			},
+		},
+	];
+
+	for (const entry of writes)
+		it(`serves a fresh index after ${entry.name}`, async () => {
+			const { body: seeded } = await create({});
+			const tag = await indexTag();
+			const unchanged = await request('/payments', {
+				headers: { 'if-none-match': tag },
+			});
+			expect(unchanged.status).toBe(304);
+
+			const reflected = await entry.write(seeded);
+
+			const after = await request('/payments', {
+				headers: { 'if-none-match': tag },
+			});
+			expect(after.status).toBe(200);
+			expect(reflected((await after.json()) as PaymentBody[])).toBe(true);
+		});
+
+	it('treats an unreadable cached tag as a miss', async () => {
+		await create({});
+		const tag = await indexTag();
+
+		await cache.set('finance:index-tag:v1', { not: 'a tag' });
+
+		// The full read recomputes the tag from the body, which has not changed.
+		const conditional = await request('/payments', {
+			headers: { 'if-none-match': tag },
+		});
+		expect(conditional.status).toBe(304);
+	});
+
+	it('still answers 304 after the cached tag is evicted', async () => {
+		await create({});
+		const tag = await indexTag();
+
+		await cache.del('finance:index-tag:v1');
+
+		const conditional = await request('/payments', {
+			headers: { 'if-none-match': tag },
+		});
+		expect(conditional.status).toBe(304);
 	});
 });

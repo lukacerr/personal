@@ -27,6 +27,7 @@ import {
 	parseStorageView,
 	reconcileStorageSelection,
 	sortStorageFiles,
+	storageSelectionKey,
 	storageSummary,
 	updateStorageSearchParams,
 	validateFileName,
@@ -71,7 +72,7 @@ export default function Storage() {
 	const [bulkDownloadError, setBulkDownloadError] = useState<string>();
 	const bulkDownloadController = useRef<AbortController | undefined>(undefined);
 	const fileInputRef = useRef<HTMLInputElement>(null);
-	const selectionViewKey = `${view.path ?? ''}\0${queryInput}\0${view.types.join(',')}\0${view.visibility}\0${view.uploaded}`;
+	const selectionViewKey = storageSelectionKey(view, queryInput);
 	const previousSelectionView = useRef(selectionViewKey);
 
 	const clearSelection = useCallback(() => setSelectedIds(new Set()), []);

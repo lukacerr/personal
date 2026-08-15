@@ -83,10 +83,19 @@ describe('OAuth session', () => {
 		expect(createLoginPath('https://example.com')).toBe('/login?returnTo=%2F');
 	});
 
+	/**
+	 * Transient means retrying can fix it: the network itself, the server, a
+	 * timeout or a rate limit. A 429 on refresh once counted as terminal and
+	 * permanently signed the session out for being briefly rate limited.
+	 */
 	it('survives a transient API failure but not a rejected credential', () => {
 		expect(isTransientApiFailure(503)).toBe(true);
 		expect(isTransientApiFailure(500)).toBe(true);
+		expect(isTransientApiFailure(0)).toBe(true);
+		expect(isTransientApiFailure(408)).toBe(true);
+		expect(isTransientApiFailure(429)).toBe(true);
 		expect(isTransientApiFailure(401)).toBe(false);
 		expect(isTransientApiFailure(403)).toBe(false);
+		expect(isTransientApiFailure(404)).toBe(false);
 	});
 });

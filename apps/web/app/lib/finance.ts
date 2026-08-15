@@ -372,6 +372,30 @@ function parseRange(
 	return { from: start, toExclusive };
 }
 
+/**
+ * One calendar day later, by components rather than by 86 400 000 ms: a DST
+ * transition makes some local days 23 or 25 hours long, and fixed milliseconds
+ * land the bound on the wrong date there.
+ */
+export function nextLocalDay(at: number) {
+	const date = new Date(at);
+	return new Date(
+		date.getFullYear(),
+		date.getMonth(),
+		date.getDate() + 1,
+	).getTime();
+}
+
+/** One calendar day earlier; the exact inverse of `nextLocalDay`. */
+export function previousLocalDay(at: number) {
+	const date = new Date(at);
+	return new Date(
+		date.getFullYear(),
+		date.getMonth(),
+		date.getDate() - 1,
+	).getTime();
+}
+
 export function formatLocalDate(at: number) {
 	const date = new Date(at);
 	const pad = (value: number) => String(value).padStart(2, '0');
@@ -440,7 +464,7 @@ export function updateFinanceSearchParams(
 		else next.set('from', formatLocalDate(from));
 		// Back to the inclusive form the url speaks.
 		if (toExclusive === null) next.delete('to');
-		else next.set('to', formatLocalDate(toExclusive - 86_400_000));
+		else next.set('to', formatLocalDate(previousLocalDay(toExclusive)));
 	}
 
 	// Defaults are deleted rather than spelled out, so a plain visit keeps a
@@ -507,7 +531,7 @@ export const formatMonth = (at: number) => monthYearFormat.format(at);
 export function formatPeriodLabel(range: DateRange) {
 	// The inclusive last day, which is what the label speaks.
 	const lastDay =
-		range.toExclusive === null ? null : range.toExclusive - 86_400_000;
+		range.toExclusive === null ? null : previousLocalDay(range.toExclusive);
 
 	if (range.from === null)
 		return lastDay === null
@@ -530,6 +554,11 @@ export function formatPeriodLabel(range: DateRange) {
  * Accepts both `1.234,56` and `1234.56`. The field is a text input rather than
  * `type="number"` because Android shows a keypad whose separator does not match
  * the locale, so whichever one the user reaches for has to work.
+ *
+ * With a single kind of separator, strict groups of three read as the es-AR
+ * thousands notation the app itself prints — `1.234` is what the list shows
+ * for one thousand — and anything else reads as a decimal. A leading zero
+ * cannot open a thousands group, so `0.500` stays half a peso.
  */
 export function parseAmount(input: string): number | undefined {
 	const trimmed = input.trim().replace(/\s/g, '');
@@ -537,7 +566,12 @@ export function parseAmount(input: string): number | undefined {
 
 	const lastComma = trimmed.lastIndexOf(',');
 	const lastDot = trimmed.lastIndexOf('.');
-	const decimal = lastComma > lastDot ? ',' : lastDot > lastComma ? '.' : '';
+	let decimal = lastComma > lastDot ? ',' : lastDot > lastComma ? '.' : '';
+
+	if (decimal && (lastComma === -1 || lastDot === -1)) {
+		const groups = new RegExp(`^[1-9]\\d{0,2}(?:\\${decimal}\\d{3})+$`);
+		if (groups.test(trimmed)) decimal = '';
+	}
 
 	const normalized = decimal
 		? `${trimmed.slice(0, decimal === ',' ? lastComma : lastDot).replace(/[.,]/g, '')}.${trimmed

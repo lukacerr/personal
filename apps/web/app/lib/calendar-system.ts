@@ -1,4 +1,5 @@
 import { type AppSystem, matchesCommandQuery } from '@web/lib/app-systems';
+import { clearLocalCalendar } from '@web/lib/calendar-db';
 import { CalendarDaysIcon } from 'lucide-react';
 
 /**
@@ -15,6 +16,9 @@ export const calendarSystem: AppSystem = {
 	key: 'calendar',
 	heading: 'Calendar',
 	icon: CalendarDaysIcon,
+
+	/** Events and their queued operations are private; sign-out erases them. */
+	clearLocalData: clearLocalCalendar,
 
 	async searchCommands(query, limit) {
 		if (limit < 1) return [];

@@ -242,8 +242,13 @@ function QuoteCard({
 				)}
 			</div>
 
-			{/* Same reserved line as the other three, so the row shares a baseline. */}
-			<span className="flex min-h-6 items-center truncate font-mono text-muted-foreground text-xs tabular-nums">
+			{/* Same reserved line as the other three, so the row shares a baseline.
+			    The age is computed once per render and then sits still, so the
+			    absolute time rides along in the title as the honest fallback. */}
+			<span
+				title={quote ? new Date(quote.fetchedAt).toLocaleString() : undefined}
+				className="flex min-h-6 items-center truncate font-mono text-muted-foreground text-xs tabular-nums"
+			>
 				{quote ? (
 					quote.stale ? (
 						'last one known'

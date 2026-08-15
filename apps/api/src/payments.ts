@@ -5,9 +5,10 @@ import {
 	financeSettingsSchema,
 	financeSettingsStore,
 } from '@api/finance-settings';
-import { entityTag, isUnchanged } from '@api/http-cache';
+import { createIndexCache } from '@api/http-cache';
 import { payment } from '@api/schema';
-import { desc, eq } from 'drizzle-orm';
+import { dateTimestampMs } from '@api/validation';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import Elysia, { status } from 'elysia';
 import { z } from 'zod';
 
@@ -29,9 +30,12 @@ const paymentValue = z
 	.max(MAX_PAYMENT_VALUE)
 	.transform((value) => Math.round(value * 100) / 100);
 
-/** Largest instant `Date` can represent, so a timestamp never becomes `Invalid Date`. */
-const TIMESTAMP_MAX_MS = 8_640_000_000_000_000;
-const timestampMs = z.number().int().nonnegative().max(TIMESTAMP_MAX_MS);
+/**
+ * Payment instants are user-chosen dates, not sync clocks: a subscription
+ * cancelled "effective end of month" ends in the future, so the clock-skew
+ * bound on `timestampMs` deliberately does not apply here.
+ */
+const paymentInstant = dateTimestampMs;
 
 const paymentColumns = {
 	id: payment.id,
@@ -99,6 +103,91 @@ function invalidWindow(row: {
 	return undefined;
 }
 
+type PaymentPatch = {
+	title?: string;
+	tag?: string | null;
+	value?: number;
+	currency?: 'ars' | 'usd';
+	isSubscription?: boolean;
+	paidAt?: number;
+	endedAt?: number | null;
+};
+
+/** The window fields the row ends up with after this patch lands on `current`. */
+function mergedWindow(current: PaymentRow, body: PaymentPatch) {
+	return {
+		isSubscription: body.isSubscription ?? current.isSubscription,
+		paidAt: body.paidAt ?? current.paidAt.getTime(),
+		endedAt:
+			body.endedAt === undefined
+				? (current.endedAt?.getTime() ?? null)
+				: body.endedAt,
+	};
+}
+
+/**
+ * Re-states the window invariants inside the UPDATE itself, over the values the
+ * row will actually end up with: a field the patch provides enters as a
+ * literal, an omitted one as its own column. The handler validates against the
+ * row it read, but a concurrent write can land between that read and the
+ * update; evaluating the invariant atomically on the final merged values closes
+ * that race instead of trusting the earlier snapshot.
+ */
+function windowGuard(body: PaymentPatch) {
+	// An explicit clear satisfies both invariants whatever else the row holds.
+	if (body.endedAt === null) return sql`true`;
+	const ended =
+		body.endedAt === undefined
+			? sql`${payment.endedAt}`
+			: sql`${new Date(body.endedAt).toISOString()}::timestamp`;
+	const paid =
+		body.paidAt === undefined
+			? sql`${payment.paidAt}`
+			: sql`${new Date(body.paidAt).toISOString()}::timestamp`;
+	const isSubscription =
+		body.isSubscription === undefined
+			? sql`${payment.isSubscription}`
+			: body.isSubscription
+				? sql`true`
+				: sql`false`;
+	return sql`(${ended} is null or (${isSubscription} and ${ended} >= ${paid}))`;
+}
+
+/**
+ * The PATCH's guarded update. Exported because the race it closes cannot be
+ * forced deterministically through HTTP: the test simulates the concurrent
+ * write itself and then issues this exact statement. Returns nothing when the
+ * row is missing or when applying the patch would break the window invariant.
+ */
+export async function patchPaymentRow(id: string, body: PaymentPatch) {
+	const [updated] = await db
+		.update(payment)
+		.set({
+			title: body.title,
+			tag: body.tag,
+			value: body.value,
+			currency: body.currency,
+			isSubscription: body.isSubscription,
+			paidAt: body.paidAt === undefined ? undefined : new Date(body.paidAt),
+			endedAt:
+				body.endedAt === undefined
+					? undefined
+					: body.endedAt === null
+						? null
+						: new Date(body.endedAt),
+		})
+		.where(and(eq(payment.id, id), windowGuard(body)))
+		.returning(paymentColumns);
+	return updated;
+}
+
+/**
+ * The remembered tag of `GET /payments`, so a poll that changed nothing costs
+ * one Redis GET instead of reading the whole ledger out of Neon. Every handler
+ * below that writes the `payment` table drops it before responding.
+ */
+const indexCache = createIndexCache('finance');
+
 export const paymentsRouter = new Elysia({
 	prefix: '/payments',
 	tags: ['Finance'],
@@ -106,18 +195,15 @@ export const paymentsRouter = new Elysia({
 	.use(authPlugin)
 	.get(
 		'/',
-		async ({ request, set }) => {
-			const payments = await db
-				.select(paymentColumns)
-				.from(payment)
-				.orderBy(desc(payment.paidAt))
-				.$withCache(false);
+		async ({ request, set }) =>
+			indexCache.conditional(request, set, async () => {
+				const payments = await db
+					.select(paymentColumns)
+					.from(payment)
+					.orderBy(desc(payment.paidAt));
 
-			const payload = payments.map(serialize);
-			const tag = entityTag(payload);
-			set.headers.etag = tag;
-			return isUnchanged(request, tag) ? status(304) : payload;
-		},
+				return payments.map(serialize);
+			}),
 		{
 			/**
 			 * No query parameters on purpose. The entity tag is derived from the
@@ -195,6 +281,7 @@ export const paymentsRouter = new Elysia({
 					endedAt: body.endedAt === null ? null : new Date(body.endedAt),
 				})
 				.returning(paymentColumns);
+			await indexCache.invalidate();
 
 			if (!created) throw new Error('Insert returned no row');
 			return status(201, serialize(created));
@@ -210,8 +297,8 @@ export const paymentsRouter = new Elysia({
 				value: paymentValue,
 				currency: paymentCurrency,
 				isSubscription: z.boolean().default(false),
-				paidAt: timestampMs.optional(),
-				endedAt: timestampMs.nullable().default(null),
+				paidAt: paymentInstant.optional(),
+				endedAt: paymentInstant.nullable().default(null),
 			}),
 			detail: { summary: 'Record a payment' },
 		},
@@ -223,8 +310,7 @@ export const paymentsRouter = new Elysia({
 				.select(paymentColumns)
 				.from(payment)
 				.where(eq(payment.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!result) return status(404, { error: 'PAYMENT_NOT_FOUND' });
 			return serialize(result);
@@ -241,21 +327,13 @@ export const paymentsRouter = new Elysia({
 				.select(paymentColumns)
 				.from(payment)
 				.where(eq(payment.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!current) return status(404, { error: 'PAYMENT_NOT_FOUND' });
 
-			// Merged against what is stored, so patching one half of the window is
+			// Merged against what was read, so patching one half of the window is
 			// still checked against the half that stays.
-			const paidAt = body.paidAt ?? current.paidAt.getTime();
-			const endedAt =
-				body.endedAt === undefined
-					? (current.endedAt?.getTime() ?? null)
-					: body.endedAt;
-			const isSubscription = body.isSubscription ?? current.isSubscription;
-
-			const invalid = invalidWindow({ isSubscription, paidAt, endedAt });
+			const invalid = invalidWindow(mergedWindow(current, body));
 			if (invalid) return status(422, { error: invalid });
 
 			/**
@@ -264,27 +342,27 @@ export const paymentsRouter = new Elysia({
 			 * cost; and since both sides are stored, a currency correction already
 			 * has the side it needs.
 			 */
-			const [updated] = await db
-				.update(payment)
-				.set({
-					title: body.title,
-					tag: body.tag,
-					value: body.value,
-					currency: body.currency,
-					isSubscription: body.isSubscription,
-					paidAt: body.paidAt === undefined ? undefined : new Date(paidAt),
-					endedAt:
-						body.endedAt === undefined
-							? undefined
-							: endedAt === null
-								? null
-								: new Date(endedAt),
-				})
-				.where(eq(payment.id, params.id))
-				.returning(paymentColumns);
+			const updated = await patchPaymentRow(params.id, body);
+			await indexCache.invalidate();
+			if (updated) return serialize(updated);
 
-			if (!updated) return status(404, { error: 'PAYMENT_NOT_FOUND' });
-			return serialize(updated);
+			// The guarded update matched nothing: the row is gone, or a concurrent
+			// write landed after the read above and the merged values no longer
+			// hold the invariant. Answer from the row as it stands now.
+			const [fresh] = await db
+				.select(paymentColumns)
+				.from(payment)
+				.where(eq(payment.id, params.id))
+				.limit(1);
+
+			if (!fresh) return status(404, { error: 'PAYMENT_NOT_FOUND' });
+			const conflict = invalidWindow(mergedWindow(fresh, body));
+			// The fallback is only reachable if yet another write made the merge
+			// valid between the update and this read; by then the guard's refusal
+			// can only have been about the subscription flag.
+			return status(422, {
+				error: conflict ?? 'PAYMENT_END_REQUIRES_SUBSCRIPTION',
+			});
 		},
 		{
 			params: z.object({ id: paymentId }),
@@ -294,8 +372,8 @@ export const paymentsRouter = new Elysia({
 				value: paymentValue.optional(),
 				currency: paymentCurrency.optional(),
 				isSubscription: z.boolean().optional(),
-				paidAt: timestampMs.optional(),
-				endedAt: timestampMs.nullable().optional(),
+				paidAt: paymentInstant.optional(),
+				endedAt: paymentInstant.nullable().optional(),
 			}),
 			detail: { summary: 'Update a payment' },
 		},
@@ -304,6 +382,7 @@ export const paymentsRouter = new Elysia({
 		'/:id',
 		async ({ params }) => {
 			await db.delete(payment).where(eq(payment.id, params.id));
+			await indexCache.invalidate();
 			return status(204);
 		},
 		{

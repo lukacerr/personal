@@ -1,21 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { db, env } from '@api/env';
-import { app } from '@api/index';
 import { credential } from '@api/schema';
 import { randomUUIDv7 } from 'bun';
 import { eq, inArray, sql } from 'drizzle-orm';
-
-async function request(path: string, init?: RequestInit) {
-	return app.handle(new Request(`http://localhost${path}`, init));
-}
-
-async function json(path: string, method: string, body: unknown) {
-	return request(path, {
-		method,
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(body),
-	});
-}
+import { json, request } from './helpers';
 
 /**
  * The client's half of the contract, which the API deliberately does not own.
@@ -90,8 +78,7 @@ async function storedValue(id: string) {
 	const [row] = await db
 		.select({ value: credential.value })
 		.from(credential)
-		.where(eq(credential.id, id))
-		.$withCache(false);
+		.where(eq(credential.id, id));
 	return row?.value;
 }
 
@@ -139,8 +126,7 @@ describe('credentials', () => {
 		const [{ count }] = await db
 			.select({ count: sql<number>`count(*)::int` })
 			.from(credential)
-			.where(eq(credential.title, title))
-			.$withCache(false);
+			.where(eq(credential.title, title));
 		expect(count).toBe(0);
 	});
 
@@ -187,32 +173,6 @@ describe('credentials', () => {
 			value: await sealed('hunter2'),
 		});
 		expect(response.status).toBe(409);
-	});
-
-	it('lists credentials and revalidates with an entity tag', async () => {
-		const { body } = await create(uniqueTitle('Listed'));
-
-		const first = await request('/credentials');
-		const tag = first.headers.get('etag');
-		expect(first.status).toBe(200);
-		expect(tag).toBeTruthy();
-		expect((await first.json()) as CredentialBody[]).toContainEqual(
-			expect.objectContaining({ id: body.id }),
-		);
-
-		const repeated = await request('/credentials', {
-			headers: { 'if-none-match': tag ?? '' },
-		});
-		expect(repeated.status).toBe(304);
-		expect(await repeated.text()).toBe('');
-
-		await json(`/credentials/${body.id}`, 'PATCH', {
-			title: uniqueTitle('Renamed'),
-		});
-		const afterChange = await request('/credentials', {
-			headers: { 'if-none-match': tag ?? '' },
-		});
-		expect(afterChange.status).toBe(200);
 	});
 
 	it('reads one credential and reports an unknown id as missing', async () => {
@@ -292,4 +252,65 @@ describe('credentials', () => {
 
 		expect(await storedValue(body.id)).toBeUndefined();
 	});
+});
+
+/**
+ * The index answers a matching `If-None-Match` from a tag remembered in Redis,
+ * so every write path must drop that tag before responding.
+ */
+describe('credentials index cache', () => {
+	async function indexTag() {
+		const response = await request('/credentials');
+		expect(response.status).toBe(200);
+		return response.headers.get('etag') ?? '';
+	}
+
+	const writes: Array<{
+		name: string;
+		write: (
+			seeded: CredentialBody,
+		) => Promise<(index: CredentialBody[]) => boolean>;
+	}> = [
+		{
+			name: 'creating a credential',
+			write: async () => {
+				const { body } = await create(uniqueTitle('Created after the tag'));
+				return (index) => index.some((row) => row.id === body.id);
+			},
+		},
+		{
+			name: 'updating a credential',
+			write: async (seeded) => {
+				const title = uniqueTitle('Renamed after the tag');
+				await json(`/credentials/${seeded.id}`, 'PATCH', { title });
+				return (index) =>
+					index.some((row) => row.id === seeded.id && row.title === title);
+			},
+		},
+		{
+			name: 'deleting a credential',
+			write: async (seeded) => {
+				await request(`/credentials/${seeded.id}`, { method: 'DELETE' });
+				return (index) => index.every((row) => row.id !== seeded.id);
+			},
+		},
+	];
+
+	for (const entry of writes)
+		it(`serves a fresh index after ${entry.name}`, async () => {
+			const { body: seeded } = await create(uniqueTitle('Seeded'));
+			const tag = await indexTag();
+			const unchanged = await request('/credentials', {
+				headers: { 'if-none-match': tag },
+			});
+			expect(unchanged.status).toBe(304);
+
+			const reflected = await entry.write(seeded);
+
+			const after = await request('/credentials', {
+				headers: { 'if-none-match': tag },
+			});
+			expect(after.status).toBe(200);
+			expect(reflected((await after.json()) as CredentialBody[])).toBe(true);
+		});
 });

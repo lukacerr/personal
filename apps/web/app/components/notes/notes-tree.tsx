@@ -1,4 +1,3 @@
-import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import {
 	DragDropProvider,
 	DragOverlay,
@@ -15,6 +14,7 @@ import {
 	InputGroupInput,
 } from '@web/components/ui/input-group';
 import { Spinner } from '@web/components/ui/spinner';
+import { dragSensors } from '@web/lib/dnd';
 import {
 	buildNoteTree,
 	collectFolderPaths,
@@ -453,21 +453,7 @@ export function NotesTree({
 
 	return (
 		<DragDropProvider
-			sensors={(defaults) => [
-				...defaults.filter((sensor) => sensor !== PointerSensor),
-				PointerSensor.configure({
-					activationConstraints(event) {
-						return event.pointerType === 'touch'
-							? [
-									new PointerActivationConstraints.Delay({
-										value: 250,
-										tolerance: 6,
-									}),
-								]
-							: [new PointerActivationConstraints.Distance({ value: 6 })];
-					},
-				}),
-			]}
+			sensors={dragSensors}
 			onDragStart={({ operation }) => {
 				const id = String(operation.source?.id ?? '').replace(/^note:/, '');
 				setDraggedId(id || undefined);

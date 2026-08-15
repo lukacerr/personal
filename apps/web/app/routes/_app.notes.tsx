@@ -217,12 +217,10 @@ export default function Notes() {
 		if (result.status !== 'move') return result.status;
 		const moving = notes.find((note) => note.id === id);
 		if (!moving) return 'missing';
-		try {
-			await updateAndSyncNoteMetadata(id, { path });
-			return 'moved';
-		} catch {
-			return 'failed';
-		}
+		// Offline-first: enqueued counts as moved. `updateAndSyncNoteMetadata`
+		// never throws — it answers `false` when the sync itself has to wait.
+		await updateAndSyncNoteMetadata(id, { path });
+		return 'moved';
 	};
 
 	const selectAfterRemoval = (removedIds: string[]) => {

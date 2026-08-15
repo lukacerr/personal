@@ -1,4 +1,5 @@
 import { cache } from '@api/env';
+import { dateTimestampMs } from '@api/validation';
 import { z } from 'zod';
 
 /**
@@ -14,12 +15,14 @@ import { z } from 'zod';
  * testable without a Redis.
  */
 
-/** Prefixed so it can never collide with Drizzle's global query cache. */
+/** Prefixed by system and versioned, like every key in this shared Redis. */
 export const FINANCE_SETTINGS_KEY = 'finance:settings:v1';
 
-/** Bounded so a stored timestamp can never become an `Invalid Date`. */
-const TIMESTAMP_MAX_MS = 8_640_000_000_000_000;
-const timestamp = z.number().int().nonnegative().max(TIMESTAMP_MAX_MS);
+/**
+ * Range bounds are user-chosen dates — the current month legitimately ends in
+ * the future — so they take the `Date`-ceiling bound, never the clock-skew one.
+ */
+const timestamp = dateTimestampMs;
 
 export const financeSettingsSchema = z.object({
 	budget: z

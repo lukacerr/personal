@@ -1,4 +1,3 @@
-import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { DragDropProvider, DragOverlay } from '@dnd-kit/react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { StorageCards } from '@web/components/storage/storage-cards';
@@ -8,6 +7,7 @@ import {
 	FolderDesktopRow,
 	ParentDesktopRow,
 	type StorageActions,
+	VIRTUALISE_ABOVE,
 } from '@web/components/storage/storage-row';
 import { Checkbox } from '@web/components/ui/checkbox';
 import {
@@ -18,6 +18,7 @@ import {
 	TableHeader,
 	TableRow,
 } from '@web/components/ui/table';
+import { dragSensors } from '@web/lib/dnd';
 import {
 	canDropFolder,
 	type FileMoveResult,
@@ -28,9 +29,6 @@ import type { StoredFile } from '@web/lib/storage-api';
 import { FileIcon, FolderIcon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
-
-/** Where windowing starts paying for itself. */
-const VIRTUALISE_ABOVE = 120;
 
 /** What is being dragged, read back from the id the drag was started with. */
 type DragSource =
@@ -199,21 +197,7 @@ export function StorageList({
 
 	return (
 		<DragDropProvider
-			sensors={(defaults) => [
-				...defaults.filter((sensor) => sensor !== PointerSensor),
-				PointerSensor.configure({
-					activationConstraints(event) {
-						return event.pointerType === 'touch'
-							? [
-									new PointerActivationConstraints.Delay({
-										value: 250,
-										tolerance: 6,
-									}),
-								]
-							: [new PointerActivationConstraints.Distance({ value: 6 })];
-					},
-				}),
-			]}
+			sensors={dragSensors}
 			onDragStart={({ operation }) => {
 				const source = readSource(String(operation.source?.id ?? ''));
 				setDragging(source);

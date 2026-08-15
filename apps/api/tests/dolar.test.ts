@@ -16,9 +16,13 @@ const QUOTE = {
 	fechaActualizacion: '2026-08-11T11:00:00.000Z',
 };
 
-/** A cache stub that records what was written, standing in for Upstash. */
-function fakeCache(initial?: UsdQuote) {
-	let stored = initial;
+/**
+ * A cache stub that records what was written, standing in for Upstash. It holds
+ * `unknown` on purpose: what comes back from a shared Redis is not guaranteed to
+ * be a quote, and the reader has to survive that.
+ */
+function fakeCache(initial?: unknown) {
+	let stored: unknown = initial;
 	const writes: Array<{ value: UsdQuote; ex: number }> = [];
 	return {
 		writes,
@@ -140,6 +144,40 @@ describe('Usd rate reader', () => {
 
 		expect(await read()).toEqual({ ...cached, stale: true });
 		expect(cache.writes).toEqual([]);
+	});
+
+	/**
+	 * Redis is shared infrastructure and its contents are not this module's to
+	 * trust: anything that does not parse as a quote is a cache miss, never a
+	 * value handed to callers.
+	 */
+	it('treats an unreadable cached value as a miss and refetches', async () => {
+		const cache = fakeCache({ compra: 'garbage', fetchedAt: 5_000 });
+		const read = createUsdRateReader({
+			fetchQuote: async () => QUOTE,
+			cache,
+			now: () => 5_000,
+		});
+
+		expect(await read()).toEqual({
+			compra: 1470,
+			venta: 1520,
+			fetchedAt: 5_000,
+			stale: false,
+		});
+	});
+
+	it('never serves an unreadable cached value, even with the feed down', async () => {
+		const cache = fakeCache({ compra: 1470, venta: 1520, fetchedAt: 'ayer' });
+		const read = createUsdRateReader({
+			fetchQuote: async () => {
+				throw new Error('dolarapi is down');
+			},
+			cache,
+			now: () => 5_000,
+		});
+
+		expect(await read()).toBeUndefined();
 	});
 
 	it('reports no quote at all rather than inventing one', async () => {

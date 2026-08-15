@@ -4,11 +4,12 @@ import { z } from 'zod';
  * The two things that are Luka's rather than the ledger's: the budget a period
  * is measured against, and the last range he looked at.
  *
- * Neither belongs on the server — the budget because there is no reason for it
- * to leave this browser, and the range because it is how he reads the data, not
- * the data. The range is remembered rather than derived: a card that opens and
- * closes on irregular days, without a fixed length, cannot be computed from an
- * anchor, so the honest model is "whatever you picked last time".
+ * Both are shared across devices through `GET`/`PUT /payments/settings`; what
+ * lives here is the local mirror that seeds the shared copy the first time and
+ * keeps the screen working with no network. The range is remembered rather
+ * than derived: a card that opens and closes on irregular days, without a
+ * fixed length, cannot be computed from an anchor, so the honest model is
+ * "whatever you picked last time".
  */
 
 export const FINANCE_SETTINGS_KEY = 'personal-finance-settings:v2';

@@ -1,5 +1,9 @@
 import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
-import { type AppSystem, matchesCommandQuery } from '@web/lib/app-systems';
+import {
+	type AppSystem,
+	matchesCommandQuery,
+	systemPath,
+} from '@web/lib/app-systems';
 import {
 	credentialsSnapshot,
 	useCredentialsStore,
@@ -8,10 +12,6 @@ import { KeyRoundIcon } from 'lucide-react';
 
 const CREDENTIALS_PATH = '/credentials';
 
-function credentialsPath(params: Record<string, string>) {
-	return `${CREDENTIALS_PATH}?${new URLSearchParams(params).toString()}`;
-}
-
 export const credentialsSystem: AppSystem = {
 	key: 'credentials',
 	heading: 'Credentials',
@@ -19,9 +19,14 @@ export const credentialsSystem: AppSystem = {
 
 	/**
 	 * Credentials keep no local database, so nothing the shell watches would ever
-	 * tell it these commands changed. The store reports for itself instead.
+	 * tell it these commands changed. The store reports for itself instead —
+	 * only when the rows themselves move: the shell re-runs every system's
+	 * loaders on each report, and a status flip changes nothing it can show.
 	 */
-	subscribe: (onChange) => useCredentialsStore.subscribe(onChange),
+	subscribe: (onChange) =>
+		useCredentialsStore.subscribe((state, previous) => {
+			if (state.credentials !== previous.credentials) onChange();
+		}),
 
 	/**
 	 * The index is fetched the first time somebody actually searches, not when the
@@ -39,7 +44,7 @@ export const credentialsSystem: AppSystem = {
 			.map((credential) => ({
 				id: credential.id,
 				label: credential.title,
-				to: credentialsPath({ credential: credential.id }),
+				to: systemPath(CREDENTIALS_PATH, { credential: credential.id }),
 			}));
 	},
 

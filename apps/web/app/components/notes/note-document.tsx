@@ -58,7 +58,7 @@ import {
 	unavailableSlashItems,
 } from '@web/lib/notes-editor';
 import { readClipboardImages } from '@web/lib/notes-file-upload';
-import { splitPastedImages } from '@web/lib/notes-files';
+import { attachmentOutcome, splitPastedImages } from '@web/lib/notes-files';
 import type { NotesPreferences } from '@web/lib/notes-preferences';
 import { type NoteBlock, notesSchema } from '@web/lib/notes-schema';
 import { syncNoteOutbox, updateAndSyncNoteMetadata } from '@web/lib/notes-sync';
@@ -77,6 +77,25 @@ import {
 } from 'lucide-react';
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+
+/**
+ * Attaches what it can and answers with what to say about it. The files the
+ * upload dropped along the way are reported as their own failure — the same
+ * split `attachPastedImages` already makes — while a batch where nothing
+ * attached still rejects into the caller's error toast.
+ */
+async function reportPartialAttachment(
+	editor: Parameters<typeof attachFilesToNote>[0],
+	selected: File[],
+) {
+	const stored = await attachFilesToNote(editor, selected);
+	const outcome = attachmentOutcome(
+		selected.map((file) => file.name),
+		stored.length,
+	);
+	if (outcome.failure) toast.error(outcome.failure);
+	return outcome;
+}
 
 const serverVersionFormat = new Intl.DateTimeFormat(undefined, {
 	dateStyle: 'short',
@@ -265,9 +284,11 @@ export function NoteDocument({
 			selected.length === 1
 				? `“${selected[0]?.name}”`
 				: `${selected.length} files`;
-		toast.promise(attachFilesToNote(editor, selected), {
+		toast.promise(reportPartialAttachment(editor, selected), {
 			loading: `Uploading ${label}…`,
-			success: `${label} attached.`,
+			// On what actually attached, not on what was selected: the upload
+			// quietly drops the files that failed unless all of them did.
+			success: (outcome) => outcome.success,
 			error: () =>
 				navigator.onLine
 					? `${label} could not be attached.`
@@ -345,9 +366,9 @@ export function NoteDocument({
 			if (selected.length === 0) return;
 			const label =
 				selected.length === 1 ? 'Image' : `${selected.length} images`;
-			toast.promise(attachFilesToNote(editor, selected), {
+			toast.promise(reportPartialAttachment(editor, selected), {
 				loading: `Uploading ${label.toLowerCase()}…`,
-				success: `${label} attached.`,
+				success: (outcome) => outcome.success,
 				error: () =>
 					navigator.onLine
 						? `${label} could not be attached.`

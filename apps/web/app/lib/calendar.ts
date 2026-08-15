@@ -548,7 +548,12 @@ export function completionKey(eventId: string, date: string) {
 	return `${eventId}:${date}`;
 }
 
-function completionsByKey(completions: CalendarCompletion[]) {
+/**
+ * The completion lookup `dayAgenda` resolves against. Loop-invariant for a
+ * window of dates, so a caller iterating days builds it once and passes it
+ * through instead of paying O(completions) per day.
+ */
+export function completionsByKey(completions: CalendarCompletion[]) {
 	return new Map(
 		completions.map((row) => [
 			completionKey(row.eventId, row.date),
@@ -560,7 +565,7 @@ function completionsByKey(completions: CalendarCompletion[]) {
 function toItem(
 	event: CalendarEvent,
 	date: string,
-	resolved: Map<string, CompletionStatus>,
+	resolved: ReadonlyMap<string, CompletionStatus>,
 ): AgendaItem {
 	const recurring = event.recurrence !== null;
 	const status = recurring
@@ -585,10 +590,12 @@ function byTimeThenEntry(a: AgendaItem, b: AgendaItem) {
 
 export function dayAgenda(
 	events: CalendarEvent[],
-	completions: CalendarCompletion[],
+	completions: CalendarCompletion[] | ReadonlyMap<string, CompletionStatus>,
 	date: string,
 ): AgendaItem[] {
-	const resolved = completionsByKey(completions);
+	const resolved = Array.isArray(completions)
+		? completionsByKey(completions)
+		: completions;
 	return events
 		.filter((event) => occurrencesInRange(event, date, date).length > 0)
 		.map((event) => toItem(event, date, resolved))

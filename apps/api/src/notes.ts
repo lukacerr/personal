@@ -1,50 +1,51 @@
 import { authPlugin } from '@api/auth';
 import { db } from '@api/env';
-import { entityTag, isUnchanged } from '@api/http-cache';
+import { inFolder } from '@api/folder-paths';
+import { createIndexCache } from '@api/http-cache';
 import {
 	isKeyframe,
 	reconstructVersion,
 	reverseDelta,
 } from '@api/note-versions';
 import { note, noteMutation } from '@api/schema';
+import { TIMESTAMP_MAX_MS, timestampMs } from '@api/validation';
 import type { Block } from '@blocknote/core';
-import { and, desc, eq, gte, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import Elysia, { status } from 'elysia';
 import { z } from 'zod';
 
 const noteId = z.uuid();
-const notePath = z
+
+/**
+ * A folder, as the folder endpoints see it. The refinement lives on the
+ * non-nullable schema and the nullable form is derived from it, never the
+ * other way around: `.unwrap()` hands back the inner schema without the checks
+ * added afterwards, so a refinement placed on the nullable parent would leave
+ * the folder endpoints validating nothing but the length.
+ */
+const noteFolderPath = z
 	.string()
 	.trim()
 	.max(1024)
-	.nullable()
 	.refine(
 		(path) =>
-			path === null ||
-			(!path.startsWith('/') &&
-				!path.endsWith('/') &&
-				path
-					.split('/')
-					.every((part) => part !== '' && part !== '.' && part !== '..')),
+			!path.startsWith('/') &&
+			!path.endsWith('/') &&
+			path
+				.split('/')
+				.every((part) => part !== '' && part !== '.' && part !== '..'),
 		'Invalid note path',
 	);
 
-/** Largest instant `Date` can represent, so a timestamp never becomes `Invalid Date`. */
-const TIMESTAMP_MAX_MS = 8_640_000_000_000_000;
-const timestampMs = z.number().int().nonnegative().max(TIMESTAMP_MAX_MS);
+/** The folder a note sits in, where `null` is the root. */
+const notePath = noteFolderPath.nullable();
+
+/** Reads take stored clocks back out, so they are bounded by `Date` alone. */
 const coercedTimestampMs = z.coerce
 	.number()
 	.int()
 	.nonnegative()
 	.max(TIMESTAMP_MAX_MS);
-
-/**
- * Escapes the `LIKE` metacharacters so a folder named `plan_a` or `%` matches
- * itself instead of acting as a pattern. Pairs with `escape '\'` in the query.
- */
-function likeDescendantsOf(path: string) {
-	return `${path.replace(/[\\%_]/g, (character) => `\\${character}`)}/%`;
-}
 
 function isBlock(value: unknown): value is Block {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -91,34 +92,74 @@ function timestamp(date: Date) {
 	return date.getTime();
 }
 
+const mutationColumns = {
+	createdAt: noteMutation.createdAt,
+	content: noteMutation.content,
+	delta: noteMutation.delta,
+	baseCreatedAt: noteMutation.baseCreatedAt,
+};
+
+/**
+ * The rows a reconstruction walks: the requested version plus newer ones, but
+ * only up to the first stored snapshot at or above the target. A chain of
+ * reverse deltas only ever points upward and stops at the first
+ * content-bearing row it meets, so anything past that anchor is dead weight —
+ * on a note edited for years, most of the history. When no snapshot bounds the
+ * walk, the chain anchors at the note's current document and every newer row
+ * rides along. Exported because the bound cannot be observed through HTTP.
+ */
+export async function reconstructionWindow(noteId: string, createdAt: Date) {
+	return db
+		.select(mutationColumns)
+		.from(noteMutation)
+		.where(
+			and(
+				eq(noteMutation.noteId, noteId),
+				gte(noteMutation.createdAt, createdAt),
+				sql`${noteMutation.createdAt} <= coalesce((
+					select min(anchor.created_at)
+					from ${noteMutation} as anchor
+					where anchor.note_id = ${noteId}::uuid
+						and anchor.created_at >= ${createdAt.toISOString()}::timestamp
+						and anchor.content is not null
+				), 'infinity'::timestamp)`,
+			),
+		)
+		.orderBy(desc(noteMutation.createdAt));
+}
+
+/**
+ * The remembered tag of `GET /notes`, so a poll that changed nothing costs one
+ * Redis GET instead of reading every summary out of Neon. Every handler below
+ * that writes the `note` or `note_mutation` tables drops it before responding.
+ */
+const indexCache = createIndexCache('notes');
+
 export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 	.use(authPlugin)
 	.get(
 		'/',
-		async ({ request, set }) => {
-			// Both timestamps live on the note itself, so listing needs no history.
-			const notes = await db
-				.select({
-					id: note.id,
-					title: note.title,
-					path: note.path,
-					isPublic: note.isPublic,
-					createdAt: note.createdAt,
-					updatedAt: note.updatedAt,
-				})
-				.from(note)
-				.orderBy(note.path, note.title)
-				.$withCache(false);
+		async ({ request, set }) =>
+			indexCache.conditional(request, set, async () => {
+				// Both timestamps live on the note itself, so listing needs no history.
+				const notes = await db
+					.select({
+						id: note.id,
+						title: note.title,
+						path: note.path,
+						isPublic: note.isPublic,
+						createdAt: note.createdAt,
+						updatedAt: note.updatedAt,
+					})
+					.from(note)
+					.orderBy(note.path, note.title);
 
-			const payload = notes.map((item) => ({
-				...item,
-				createdAt: timestamp(item.createdAt),
-				updatedAt: timestamp(item.updatedAt),
-			}));
-			const tag = entityTag(payload);
-			set.headers.etag = tag;
-			return isUnchanged(request, tag) ? status(304) : payload;
-		},
+				return notes.map((item) => ({
+					...item,
+					createdAt: timestamp(item.createdAt),
+					updatedAt: timestamp(item.updatedAt),
+				}));
+			}),
 		{ detail: { summary: 'List note summaries' } },
 	)
 	.patch(
@@ -130,18 +171,14 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 					// A path equal to `from` yields an empty tail, so this also renames the folder itself.
 					path: sql<string>`${body.to} || substr(${note.path}, char_length(${body.from}) + 1)`,
 				})
-				.where(
-					or(
-						sql`lower(${note.path}) = lower(${body.from})`,
-						sql`lower(${note.path}) like lower(${likeDescendantsOf(body.from)}) escape '\\'`,
-					),
-				)
+				.where(inFolder(note.path, body.from))
 				.returning({ id: note.id });
+			await indexCache.invalidate();
 
 			return { updated: renamed.length };
 		},
 		{
-			body: z.object({ from: notePath.unwrap(), to: notePath.unwrap() }),
+			body: z.object({ from: noteFolderPath, to: noteFolderPath }),
 			detail: { summary: 'Rename note folder' },
 		},
 	)
@@ -150,18 +187,14 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 		async ({ body }) => {
 			const deleted = await db
 				.delete(note)
-				.where(
-					or(
-						sql`lower(${note.path}) = lower(${body.path})`,
-						sql`lower(${note.path}) like lower(${likeDescendantsOf(body.path)}) escape '\\'`,
-					),
-				)
+				.where(inFolder(note.path, body.path))
 				.returning({ id: note.id });
+			await indexCache.invalidate();
 
 			return { deleted: deleted.length };
 		},
 		{
-			body: z.object({ path: notePath.unwrap() }),
+			body: z.object({ path: noteFolderPath }),
 			detail: { summary: 'Delete note folder' },
 		},
 	)
@@ -178,6 +211,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 					path: note.path,
 					isPublic: note.isPublic,
 				});
+			await indexCache.invalidate();
 
 			if (!updated) return status(404, { error: 'NOTE_NOT_FOUND' });
 			return updated;
@@ -204,8 +238,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 				})
 				.from(note)
 				.where(eq(note.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!result) return status(404, { error: 'NOTE_NOT_FOUND' });
 
@@ -224,6 +257,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 		'/:id',
 		async ({ params }) => {
 			await db.delete(note).where(eq(note.id, params.id));
+			await indexCache.invalidate();
 			return status(204);
 		},
 		{
@@ -242,8 +276,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 				.select({ updatedAt: note.updatedAt })
 				.from(note)
 				.where(eq(note.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!current) return status(404, { error: 'NOTE_NOT_FOUND' });
 
@@ -264,8 +297,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 					),
 				)
 				.orderBy(desc(noteMutation.createdAt))
-				.limit(query.limit + 1 - head.length)
-				.$withCache(false);
+				.limit(query.limit + 1 - head.length);
 
 			const page = [
 				...head,
@@ -296,37 +328,37 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 				.select({ updatedAt: note.updatedAt, content: note.content })
 				.from(note)
 				.where(eq(note.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!head) return status(404, { error: 'NOTE_NOT_FOUND' });
 
-			// The requested version plus every newer one: a chain of reverse deltas
-			// only ever points at versions above it, and a keyframe or the note's
-			// current document bounds how far up the walk actually goes.
-			const rows = await db
-				.select({
-					createdAt: noteMutation.createdAt,
-					content: noteMutation.content,
-					delta: noteMutation.delta,
-					baseCreatedAt: noteMutation.baseCreatedAt,
-				})
-				.from(noteMutation)
-				.where(
-					and(
-						eq(noteMutation.noteId, params.id),
-						gte(noteMutation.createdAt, createdAt),
-					),
-				)
-				.orderBy(desc(noteMutation.createdAt))
-				.$withCache(false);
+			const rows = await reconstructionWindow(params.id, createdAt);
 
+			// The target row itself is always inside the window, so existence can
+			// be decided before reconstructing.
 			const known =
 				createdAt.getTime() === head.updatedAt.getTime() ||
 				rows.some((row) => row.createdAt.getTime() === createdAt.getTime());
 			if (!known) return status(404, { error: 'NOTE_MUTATION_NOT_FOUND' });
 
-			const content = reconstructVersion(head, rows, createdAt);
+			let content = reconstructVersion(head, rows, createdAt);
+			if (!content) {
+				// An out-of-order snapshot can sit between two hops of the chain
+				// without being on it, and the window — bounded by time, not by
+				// pointers — then cuts the chain short. Rare enough to pay one
+				// unbounded read instead of walking pointers in SQL.
+				const everyRow = await db
+					.select(mutationColumns)
+					.from(noteMutation)
+					.where(
+						and(
+							eq(noteMutation.noteId, params.id),
+							gte(noteMutation.createdAt, createdAt),
+						),
+					)
+					.orderBy(desc(noteMutation.createdAt));
+				content = reconstructVersion(head, everyRow, createdAt);
+			}
 			if (!content) return status(422, { error: 'NOTE_VERSION_UNRECOVERABLE' });
 
 			return { createdAt: timestamp(createdAt), content };
@@ -384,8 +416,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 					})
 					.from(note)
 					.where(eq(note.id, params.id))
-					.limit(1)
-					.$withCache(false);
+					.limit(1);
 
 				if (!previous) return status(500, { error: 'NOTE_SAVE_FAILED' });
 
@@ -441,6 +472,9 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 					saved = current[0];
 				}
 			}
+
+			// After every branch: each one ran at least an insert attempt.
+			await indexCache.invalidate();
 
 			if (!saved) return status(500, { error: 'NOTE_SAVE_FAILED' });
 

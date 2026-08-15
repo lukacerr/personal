@@ -105,24 +105,33 @@ services:
       timeout: 3s
       retries: 10
 
+  # Shim propio del endpoint HTTP `/sql` de Neon
+  # (apps/api/scripts/neon-http-shim.ts). El proxy `local-neon-http-proxy` que
+  # reemplaza re-consultaba secretos SCRAM contra su control plane mock en cada
+  # request (~150 ms por query de 0.6 ms).
   db-proxy:
-    image: ghcr.io/timowilhelm/local-neon-http-proxy@sha256:cd2ae14edf2feafbc3330492de5c80506f77274c3bd013154cdef697bdeb768a
+    build:
+      context: .
+      dockerfile: dev.Dockerfile
+    working_dir: /app/apps/api
+    command: bun scripts/neon-http-shim.ts
     environment:
       PG_CONNECTION_STRING: postgres://personal:personal-local-password@db:5432/personal
     ports:
       - '127.0.0.1:4444:4444'
+    volumes:
+      - ./apps/api/scripts:/app/apps/api/scripts:ro
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
       test:
-        - CMD-SHELL
-        - >-
-          curl -fsS
-          -H 'Neon-Connection-String: postgres://personal:personal-local-password@db:5432/personal'
-          -H 'Content-Type: application/json'
-          --data '{"query":"SELECT 1","params":[]}'
-          http://127.0.0.1:4444/sql >/dev/null
+        [
+          'CMD',
+          'bun',
+          '-e',
+          'const response = await fetch("http://127.0.0.1:4444/health"); if (!response.ok) process.exit(1)',
+        ]
       interval: 5s
       timeout: 3s
       retries: 20

@@ -44,8 +44,7 @@ export const publicFilesRouter = new Elysia({
 			.select({ name: file.name, contentType: file.contentType })
 			.from(file)
 			.where(and(eq(file.id, params.id), eq(file.isPublic, true)))
-			.limit(1)
-			.$withCache(false);
+			.limit(1);
 
 		// A private file and one that never existed answer identically, or this
 		// endpoint becomes an oracle for which ids exist.

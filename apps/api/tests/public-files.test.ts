@@ -1,24 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { cache, db, storage } from '@api/env';
 import { objectKey, uploadKey } from '@api/files-storage';
-import { app } from '@api/index';
 import { file } from '@api/schema';
 import { randomUUIDv7 } from 'bun';
 import { inArray } from 'drizzle-orm';
+import { json, request } from './helpers';
 
 const createdIds = new Set<string>();
-
-async function request(path: string, init?: RequestInit) {
-	return app.handle(new Request(`http://localhost${path}`, init));
-}
-
-async function json(path: string, method: string, body: unknown) {
-	return request(path, {
-		method,
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(body),
-	});
-}
 
 async function storeFile({
 	name = 'shared.txt',

@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { db } from '@api/env';
-import { app } from '@api/index';
+import { KEYFRAME_INTERVAL } from '@api/note-versions';
+import { reconstructionWindow } from '@api/notes';
 import { note, noteMutation } from '@api/schema';
+import { MAX_CLOCK_SKEW_MS } from '@api/validation';
 import { randomUUIDv7 } from 'bun';
 import { eq, inArray, sql } from 'drizzle-orm';
+import { request } from './helpers';
 
 const createdNoteIds = new Set<string>();
 
@@ -21,10 +24,6 @@ function document(text: string) {
 			children: [],
 		},
 	];
-}
-
-async function request(path: string, init?: RequestInit) {
-	return app.handle(new Request(`http://localhost${path}`, init));
 }
 
 async function saveNote({
@@ -474,6 +473,117 @@ describe('Notes', () => {
 		expect(unsupported.response.status).toBe(422);
 	});
 
+	/**
+	 * A save clock from the far future would out-rank every later edit for good:
+	 * the note becomes uneditable because no honest clock can ever beat it.
+	 */
+	it('rejects a save clocked further ahead than clock skew can explain', async () => {
+		const tooFar = await saveNote({
+			createdAt: Date.now() + MAX_CLOCK_SKEW_MS + 60_000,
+		});
+
+		expect(tooFar.response.status).toBe(422);
+	});
+
+	/**
+	 * The folder endpoints take the same kind of path a note does and must reject
+	 * the same things. Deriving the non-null schema by unwrapping a nullable one
+	 * quietly drops the refinements added after `.nullable()`, leaving nothing
+	 * validated but the length.
+	 */
+	it.each([
+		['a trailing slash', 'a/'],
+		['nothing at all', ''],
+		['a parent reference', '..'],
+		['a leading slash', '/a'],
+		['an empty segment', 'a//b'],
+	])('refuses a folder path with %s', async (_case, path) => {
+		const renamed = await request('/notes/folders', {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ from: path, to: 'archive' }),
+		});
+		const renamedTo = await request('/notes/folders', {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ from: 'work', to: path }),
+		});
+		const deleted = await request('/notes/folders', {
+			method: 'DELETE',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ path }),
+		});
+
+		expect(renamed.status).toBe(422);
+		expect(renamedTo.status).toBe(422);
+		expect(deleted.status).toBe(422);
+	});
+
+	// Crossing a keyframe takes KEYFRAME_INTERVAL+ sequential saves, so this
+	// test cannot fit the default 5 s timeout.
+	it('rebuilds an old version reading only up to the nearest keyframe', async () => {
+		const id = randomUUIDv7();
+		const base = Date.now() - 600_000;
+		const revisions = Array.from(
+			{ length: KEYFRAME_INTERVAL + 3 },
+			(_, index) => ({
+				createdAt: base + index * 1_000,
+				content: document(`Revision ${index}`),
+			}),
+		);
+		for (const revision of revisions) await saveNote({ id, ...revision });
+
+		const oldest = await request(
+			`/notes/${id}/mutations/${revisions[0]?.createdAt}`,
+		);
+		expect(oldest.status).toBe(200);
+		expect(await oldest.json()).toEqual({
+			createdAt: revisions[0]?.createdAt,
+			content: revisions[0]?.content,
+		});
+
+		// The route reads only up to the anchor. Asserted on the exported query
+		// because HTTP cannot observe how many rows were fetched.
+		const rows = await reconstructionWindow(
+			id,
+			new Date(revisions[0]?.createdAt ?? 0),
+		);
+		expect(rows.length).toBe(KEYFRAME_INTERVAL);
+		expect(rows.length).toBeLessThan(revisions.length - 1);
+		// Newest first, so the anchor keyframe heads the window.
+		expect(rows[0]?.content).not.toBeNull();
+	}, 30_000);
+
+	/**
+	 * An out-of-order save is a standalone snapshot the surrounding chain skips
+	 * right over. The bounded window stops at the first snapshot by time, which
+	 * cuts this chain short — the route must still rebuild the version instead of
+	 * reporting it unrecoverable.
+	 */
+	it('rebuilds a version whose chain hops over an out-of-order snapshot', async () => {
+		const id = randomUUIDv7();
+		const base = Date.now() - 60_000;
+		const first = document('First');
+		await saveNote({ id, createdAt: base, content: first });
+		await saveNote({
+			id,
+			createdAt: base + 10_000,
+			content: document('Second'),
+		});
+		await saveNote({
+			id,
+			createdAt: base + 20_000,
+			content: document('Third'),
+		});
+		// Synced late: lands between the first two as its own snapshot.
+		await saveNote({ id, createdAt: base + 5_000, content: document('Late') });
+
+		const response = await request(`/notes/${id}/mutations/${base}`);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ createdAt: base, content: first });
+	});
+
 	it('dates a note from its first mutation instead of its sync time', async () => {
 		const createdAt = Date.now() - 7 * 24 * 60 * 60 * 1000;
 		const saved = await saveNote({ createdAt });
@@ -506,4 +616,125 @@ describe('Notes', () => {
 		expect(firstDelete.status).toBe(204);
 		expect(secondDelete.status).toBe(204);
 	});
+});
+
+type NoteSummary = {
+	id: string;
+	title: string;
+	path: string | null;
+	isPublic: boolean;
+	createdAt: number;
+	updatedAt: number;
+};
+
+/**
+ * The index answers a matching `If-None-Match` from a tag remembered in Redis,
+ * so every write path — saves, metadata, deletes and both folder operations —
+ * must drop that tag before responding.
+ */
+describe('notes index cache', () => {
+	async function indexTag() {
+		const response = await request('/notes');
+		expect(response.status).toBe(200);
+		return response.headers.get('etag') ?? '';
+	}
+
+	function uniqueFolder() {
+		return `cache-${randomUUIDv7()}`;
+	}
+
+	const writes: Array<{
+		name: string;
+		write: (seeded: {
+			id: string;
+			path: string;
+			createdAt: number;
+		}) => Promise<(index: NoteSummary[]) => boolean>;
+	}> = [
+		{
+			name: 'saving a new note',
+			write: async () => {
+				const { id } = await saveNote();
+				return (index) => index.some((row) => row.id === id);
+			},
+		},
+		{
+			name: 'saving an existing note',
+			write: async (seeded) => {
+				await saveNote({
+					id: seeded.id,
+					title: 'Renamed by a save',
+					createdAt: seeded.createdAt + 1,
+				});
+				return (index) =>
+					index.some(
+						(row) => row.id === seeded.id && row.title === 'Renamed by a save',
+					);
+			},
+		},
+		{
+			name: 'updating note metadata',
+			write: async (seeded) => {
+				await patchNote(seeded.id, { title: 'Renamed metadata', path: null });
+				return (index) =>
+					index.some(
+						(row) => row.id === seeded.id && row.title === 'Renamed metadata',
+					);
+			},
+		},
+		{
+			name: 'deleting a note',
+			write: async (seeded) => {
+				await request(`/notes/${seeded.id}`, { method: 'DELETE' });
+				return (index) => index.every((row) => row.id !== seeded.id);
+			},
+		},
+		{
+			name: 'renaming a folder',
+			write: async (seeded) => {
+				const to = uniqueFolder();
+				await request('/notes/folders', {
+					method: 'PATCH',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ from: seeded.path, to }),
+				});
+				return (index) =>
+					index.some((row) => row.id === seeded.id && row.path === to);
+			},
+		},
+		{
+			name: 'deleting a folder',
+			write: async (seeded) => {
+				await request('/notes/folders', {
+					method: 'DELETE',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ path: seeded.path }),
+				});
+				return (index) => index.every((row) => row.id !== seeded.id);
+			},
+		},
+	];
+
+	for (const entry of writes)
+		it(`serves a fresh index after ${entry.name}`, async () => {
+			const path = uniqueFolder();
+			const seeded = await saveNote({ path });
+			const tag = await indexTag();
+			const unchanged = await request('/notes', {
+				headers: { 'if-none-match': tag },
+			});
+			expect(unchanged.status).toBe(304);
+
+			const reflected = await entry.write({
+				id: seeded.id,
+				path,
+				createdAt: seeded.createdAt,
+			});
+
+			const after = await request('/notes', {
+				headers: { 'if-none-match': tag },
+			});
+			expect(after.status).toBe(200);
+			expect(reflected((await after.json()) as NoteSummary[])).toBe(true);
+		});
 });

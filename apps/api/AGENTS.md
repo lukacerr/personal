@@ -8,11 +8,68 @@ Lee este archivo antes de modificar:
 
 | System | Archivos |
 | --- | --- |
+| Auth | `src/auth.ts` |
 | Calendar | `src/events.ts`, `src/schema/event.ts`, `src/schema/event-completion.ts` |
 | Credentials | `src/credentials.ts`, `src/credentials-crypto.ts`, `src/schema/credential.ts` |
 | Finance | `src/payments.ts`, `src/dolar.ts`, `src/schema/payment.ts` |
 | Notes | `src/notes.ts`, `src/note-versions.ts`, `src/public-notes.ts`, `src/schema/note.ts`, `src/schema/note-mutation.ts` |
 | Storage | `src/files.ts`, `src/files-multipart.ts`, `src/files-storage.ts`, `src/public-files.ts`, `src/schema/file.ts` |
+
+## Cache
+
+- **No hay query cache de Drizzle y no debe volver por defecto.** Neon HTTP y
+  Upstash REST cuestan un round-trip similar: cachear en Redis una query que ya
+  viaja en una sola ida no gana latencia, solo mueve el costo. La config
+  `global: true` que existió pagaba además una invalidación REST por cada
+  escritura para un cache que ningún select leía (todos hacían
+  `$withCache(false)`). Por eso tampoco queda ningún `$withCache` en el código.
+- Lo único cacheado por performance es **el ETag de cada índice**
+  (`createIndexCache` en `http-cache.ts`, keys `<system>:index-tag:v1`).
+  Revalidar es lo que la web hace en cada foco, reconexión y montaje, y la
+  respuesta común es 304: ese poll se responde con un solo GET a Redis, sin
+  query, sin transferir filas y sin despertar Neon. En un miss se corre la
+  query completa, el tag se recalcula **desde el cuerpo** — nunca puede afirmar
+  una frescura que el payload no tiene — y se resiembra. El payload no se
+  cachea: la única repetición real es el 304, y cachear el cuerpo obligaría a
+  duplicar el contrato de cada respuesta en un schema del valor cacheado.
+- **Todo handler que ejecute INSERT/UPDATE/DELETE sobre tablas de un system
+  invalida su index tag después de la sentencia y antes de responder**,
+  incondicionalmente aunque la sentencia pueda no haber matcheado filas: un DEL
+  de más es inofensivo y uno de menos sirve 304 sobre datos que cambiaron, que
+  es peor que no cachear. En Storage eso incluye reconcile, folders y bulk. Un
+  endpoint de escritura nuevo agrega su `invalidate()` y una fila al test
+  table-driven de invalidación de su system.
+- Redis caído nunca rompe un request: un tag ilegible es un miss (`safeParse`),
+  un resembrado fallido se omite y una invalidación fallida se traga. El TTL de
+  una hora (`INDEX_TAG_TTL_SECONDS`) no es la invalidación: solo acota cuánto
+  puede durar un DEL perdido o la carrera entre un resembrado y una escritura
+  concurrente.
+- Deliberadamente sin cache: `GET /files/unreferenced` (cara pero acción manual
+  rara, y su invalidación cruzaría Notes y Storage), los GET de una sola fila y
+  los routers públicos (una ida barata, y despublicar debe cortar al instante),
+  y los presigned links (la firma debe ser fresca). La cotización y los
+  settings ya tienen sus stores manuales (`dolar.ts`, `finance-settings.ts`,
+  `calendar-settings.ts`).
+
+## Auth
+
+- El parámetro `redirect` de `/auth/google/login` acepta cualquier URL y el
+  CORS refleja el origin **deliberadamente**: la API puede servir más
+  front-ends que la web actual, y restringirlos a una allowlist es una decisión
+  que el usuario ya rechazó. No lo "arregles".
+- Access y refresh token comparten secreto y claim `email`; lo único que impide
+  intercambiarlos es el claim `typ` (`'access'`/`'refresh'`): `authPlugin` solo
+  acepta `access` y `/auth/refresh-token` solo `refresh`. **El check es un `if`
+  explícito en cada punto de verificación**: el `schema` Zod de `@elysia/jwt`
+  tipa `sign`/`verify` pero no rechaza un payload que no matchea en runtime
+  (comprobado empíricamente), así que no lo trates como enforcement. No emitas
+  un token sin `typ` ni relajes los checks.
+- `authPlugin` sale de `createAuthPlugin(env.NODE_ENV)`. La factory existe para
+  que los tests construyan la variante `production` y cubran el enforcement,
+  inalcanzable bajo `.env.test`; el bypass de desarrollo vive únicamente dentro
+  de esa función.
+- El state OAuth vive en Redis bajo `auth:state:<state>`, prefijado como toda
+  key de este Redis compartido.
 
 ## Calendar
 
@@ -27,10 +84,15 @@ Lee este archivo antes de modificar:
   persistido por ocurrencia es su fila en `event_completion`. No agregues
   queries que interpreten la recurrencia server-side.
 - `updatedAt` es **el reloj de edición del cliente**, no auditoría, y está
-  acotado en el límite HTTP. El PATCH resuelve last-write-wins contra él: un
-  patch con reloj viejo **no es un error** — responde 200 con la fila
-  almacenada para que el cliente la adopte. No lo conviertas en 409: la cola
-  offline lo reintentaría para siempre.
+  acotado en el límite HTTP (`timestampMs` de `@api/validation`, con cota de
+  skew). El PATCH resuelve last-write-wins contra él: un patch con reloj viejo
+  **no es un error** — responde 200 con la fila almacenada para que el cliente
+  la adopte. No lo conviertas en 409: la cola offline lo reintentaría para
+  siempre. La comparación en memoria no alcanza: el UPDATE re-chequea el reloj
+  en su propio WHERE (`patchEventRow`), porque entre la lectura y la escritura
+  puede aterrizar otro patch y sin la guarda ganaría el que escribe último,
+  no el más nuevo. Si la guarda no matchea filas, se responde la fila
+  almacenada con el mismo contrato 200.
 - El POST toma el `id` del cliente y es **idempotente** vía
   `onConflictDoNothing` + select: la cola reintenta creates cuya respuesta se
   perdió, y el segundo intento debe converger en la misma fila, no duplicar ni
@@ -80,7 +142,7 @@ Lee este archivo antes de modificar:
 - Las suscripciones son la excepción al congelado: el cliente las convierte con la cotización viva, porque se vuelven a pagar cada mes al precio de hoy. Por eso una suscripción no es un punto sino una **ventana** — cuenta para cualquier período entre `paidAt` y `endedAt`. Cancelar escribe `endedAt` y **no** borra la fila; borrarla la sacaría de todos los períodos que ya la pagaron.
 - Las dos invariantes (`endedAt >= paidAt`, y `endedAt` solo con `isSubscription`) se validan en el router y **no** como CHECK: un 23514 saldría por el handler global como 500 y el mensaje de dominio hay que producirlo acá igual. `endedAt >= paidAt` además es carga estructural: el cliente decide la pertenencia a un período ramificando por `isSubscription` en vez de unir las dos formas con OR, y ambas solo son equivalentes mientras una ventana no pueda correr hacia atrás.
 - `parseDolarQuote` exige **las dos** puntas y rechaza un spread invertido (`compra > venta`) y una `casa` distinta de `oficial`: media cotización no sirve, y un endpoint repuntado a blue o MEP contaminaría todos los sellos siguientes en silencio.
-- La cotización vive en Redis bajo `finance:usd-rate:v1`, prefijada porque la query cache de Drizzle es global sobre el mismo Redis. **Una key, un TTL:** la frescura es un `fetchedAt` dentro del valor, no una segunda key. Los 30 min deciden si salir a la red; las 24 h son la memoria que mantiene la pantalla viva durante una caída. Un fetch fallido devuelve lo cacheado con `stale: true` y **nunca** lo pisa.
+- La cotización vive en Redis bajo `finance:usd-rate:v1`, prefijada como toda key de este Redis compartido. **Una key, un TTL:** la frescura es un `fetchedAt` dentro del valor, no una segunda key. Los 30 min deciden si salir a la red; las 24 h son la memoria que mantiene la pantalla viva durante una caída. Un fetch fallido devuelve lo cacheado con `stale: true` y **nunca** lo pisa.
 - `GET /payments/rate` va declarado **antes** de `/:id`, que parsea su parámetro como uuid y respondería 422 — la misma lección que `/files/unreferenced`.
 - El índice `GET /payments` **no toma query params a propósito**. El ETag sale del cuerpo, así que filtrar server-side sería un tag por query string y caminar prev/next por períodos revalidaría nada. Además el conjunto visible no es un subconjunto del período: las suscripciones entran desde afuera. El filtrado vive en el cliente. Si el payload llega a ~1 MB, el camino de salida es un único `?since=<ms>` en el índice (un valor canónico, un tag), no un filtro por vista.
 - El body no acepta `rateBuy`/`rateSell`: son observación del servidor y esta app está en internet público.
@@ -95,6 +157,7 @@ Lee este archivo antes de modificar:
 - Las versiones pasadas se guardan como deltas inversos: `delta` aplicado a la versión que indica `baseCreatedAt` reconstruye esa versión, y un `baseCreatedAt` igual al `updatedAt` de la nota ancla la cadena en el documento actual. En cada fila hay exactamente uno de `content` o (`delta` + `baseCreatedAt`).
 - `baseCreatedAt` es un puntero explícito y no debe reemplazarse por "la siguiente versión por `createdAt`". Un save que llega fuera de orden se inserta entre dos versiones y haría que el delta de la anterior se aplique sobre una base equivocada, devolviendo un documento corrupto en silencio. Un save fuera de orden se guarda como snapshot propio y no se empalma en ninguna cadena.
 - Una de cada `KEYFRAME_INTERVAL` versiones conserva su snapshot completo para que reconstruir nunca recorra una cadena ilimitada. La regla se aplica sobre la cantidad de versiones existentes al escribir; que un save fuera de orden corra ese conteo solo mueve dónde caen los keyframes y nunca afecta la reconstrucción, que sigue la cadena almacenada.
+- La query que alimenta una reconstrucción también está acotada (`reconstructionWindow`): trae desde el target hasta el primer snapshot almacenado por encima, no todo el historial más nuevo. La cota es por tiempo y la cadena es por punteros, así que un snapshot fuera de orden intercalado entre dos saltos puede cortar la ventana antes del ancla real; en ese caso el router reintenta una sola vez sin cota en vez de responder `NOTE_VERSION_UNRECOVERABLE`. No quites ese fallback ni muevas la cota a `reconstructVersion`.
 - La lógica de diff y reconstrucción vive en `apps/api/src/note-versions.ts` y es pura, para poder testearla sin base de datos. Su `objectHash` debe devolver siempre un string, igual que el del cliente: devolver `undefined` hace que jsondiffpatch reporte cada item como borrado y re-agregado.
 - Si una cadena de deltas no se puede reconstruir, responde un error explícito y nunca un documento parcial o vacío.
 - `note.isPublic` es metadata, no contenido: solo el PATCH de metadata puede cambiarlo. `saveNoteBody` no lo acepta, para que un cliente desactualizado no despublique una nota al escribirla.
@@ -105,7 +168,7 @@ Lee este archivo antes de modificar:
 
 - La tabla `file` de Storage describe únicamente archivos que ya existen en el bucket: no tiene `uploadId` ni `uploadedAt`. Toda subida en curso vive en Redis bajo `storage:upload:<id>` (estado) y `storage:name:<path>/<name>` (reserva del nombre, escrita con `NX`), con TTL de 24 h renovado en cada pedido de partes. La fila se escribe recién en `POST /files/:id/complete`, así que el listado no filtra nada y `createdAt` es cuándo el archivo empezó a existir. No reintroduzcas columnas de estado intermedio.
 - La key en S3 es `files/<id>` y es inmutable: renombrar o mover un archivo es un `UPDATE` puro y nunca un `CopyObject` + `DeleteObject`, que no es atómico. Nombre y carpeta viven solo en la DB.
-- `complete` lee el tamaño real con `stat()` y nunca confía en el `size` declarado. Si el objeto no existe, aborta el multipart y libera las claves sin crear fila. Si el `INSERT` falla porque alguien tomó el nombre, borra el objeto recién subido antes de responder: un objeto sin fila es basura que solo `reconcile` puede encontrar.
+- `complete` lee el tamaño real con `stat()` y nunca confía en el `size` declarado. Si el objeto no existe, aborta el multipart y libera las claves sin crear fila. Si el `INSERT` falla porque alguien tomó el nombre, borra el objeto recién subido antes de responder: un objeto sin fila es basura que solo `reconcile` puede encontrar. Un conflicto sobre el **id** es lo contrario y no cae en ese catch: significa que un `complete` concurrente o reintentado ya escribió esta misma fila, así que se responde la fila almacenada (201) sin tocar el objeto — borrarlo dejaría la fila del ganador apuntando a nada. Por eso el insert lleva `onConflictDoNothing({ target: file.id })`.
 - El orden de borrado es siempre S3 primero y Postgres después. Al revés, un fallo deja un objeto que ya nadie sabe que existe.
 - `Bun.S3Client` no expone multipart: su `presign` firma una operación simple sobre una key, y `partNumber`/`uploadId` entran en la firma canónica de SigV4. `apps/api/src/files-multipart.ts` usa `aws4fetch` para `CreateMultipartUpload`, firmar partes, `Complete` y `Abort`. `CompleteMultipartUpload` responde `200 OK` con un `<Error>` en el body: verifica el body, nunca solo el status.
 - La reserva en Redis se escribe **antes** de abrir el multipart. Al revés, existe una ventana donde `reconcile` ve un upload sin reserva y aborta una subida sana.

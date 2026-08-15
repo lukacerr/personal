@@ -84,20 +84,38 @@ export function usePwaAvailability(): PwaAvailability {
 export function useApiHealth(): ApiHealth {
 	const [health, setHealth] = useState<ApiHealth>({ status: 'loading' });
 
+	// One check at mount goes stale the moment the laptop sleeps or the tab is
+	// backgrounded. Coming back online or to the foreground re-asks — the two
+	// moments the answer can have changed — with no continuous polling.
 	useEffect(() => {
 		let isCurrent = true;
-		void api.health
-			.get()
-			.then((result) => {
-				if (!isCurrent) return;
-				setHealth(getApiHealth(result));
-			})
-			.catch(() => {
-				if (isCurrent) setHealth({ status: 'down' });
-			});
+		let inFlight = false;
+		const check = () => {
+			if (inFlight) return;
+			inFlight = true;
+			void api.health
+				.get()
+				.then((result) => {
+					if (isCurrent) setHealth(getApiHealth(result));
+				})
+				.catch(() => {
+					if (isCurrent) setHealth({ status: 'down' });
+				})
+				.finally(() => {
+					inFlight = false;
+				});
+		};
+		const handleVisibility = () => {
+			if (document.visibilityState === 'visible') check();
+		};
 
+		check();
+		window.addEventListener('online', check);
+		document.addEventListener('visibilitychange', handleVisibility);
 		return () => {
 			isCurrent = false;
+			window.removeEventListener('online', check);
+			document.removeEventListener('visibilitychange', handleVisibility);
 		};
 	}, []);
 

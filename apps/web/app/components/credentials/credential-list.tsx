@@ -5,20 +5,9 @@ import {
 import { Button } from '@web/components/ui/button';
 import type { CredentialValueState } from '@web/lib/credentials';
 import type { Credential } from '@web/lib/credentials-api';
+import { timestampLabel } from '@web/lib/utils';
 import { KeyRoundIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useEffect, useRef } from 'react';
-
-const dateFormat = new Intl.DateTimeFormat(undefined, {
-	dateStyle: 'medium',
-});
-const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
-
-function changedLabel(timestamp: number) {
-	const date = new Date(timestamp);
-	return date.toDateString() === new Date().toDateString()
-		? `Today, ${timeFormat.format(date)}`
-		: dateFormat.format(date);
-}
 
 /**
  * The credential list.
@@ -102,7 +91,7 @@ export function CredentialList({
 								<p className="text-muted-foreground text-xs">
 									Updated{' '}
 									<time dateTime={new Date(credential.updatedAt).toISOString()}>
-										{changedLabel(credential.updatedAt)}
+										{timestampLabel(credential.updatedAt)}
 									</time>
 								</p>
 							</div>

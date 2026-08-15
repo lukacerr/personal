@@ -20,8 +20,7 @@ export const publicNotesRouter = new Elysia({
 			.select({ id: note.id, title: note.title, content: note.content })
 			.from(note)
 			.where(and(eq(note.id, params.id), eq(note.isPublic, true)))
-			.limit(1)
-			.$withCache(false);
+			.limit(1);
 
 		// A private note and one that never existed answer identically, or this
 		// endpoint becomes an oracle for which ids exist.

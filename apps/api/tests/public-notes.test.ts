@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { db } from '@api/env';
-import { app } from '@api/index';
 import { note } from '@api/schema';
 import { randomUUIDv7 } from 'bun';
 import { inArray } from 'drizzle-orm';
+import { request } from './helpers';
 
 const createdNoteIds = new Set<string>();
 
@@ -21,10 +21,6 @@ function document(text: string) {
 			children: [],
 		},
 	];
-}
-
-async function request(path: string, init?: RequestInit) {
-	return app.handle(new Request(`http://localhost${path}`, init));
 }
 
 async function createNote({

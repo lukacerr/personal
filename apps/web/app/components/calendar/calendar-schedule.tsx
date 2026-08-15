@@ -9,6 +9,7 @@ import {
 	type CalendarEvent,
 	scheduleItems,
 } from '@web/lib/calendar';
+import { useMemo } from 'react';
 
 /**
  * Everything beyond the visible days — the note's "Schedule" section, flat
@@ -36,8 +37,16 @@ export function CalendarSchedule({
 	selectedKey: string | null;
 	editingKey: string | null;
 } & ItemHandlers) {
-	const items = scheduleItems(events, completions, visible).filter(
-		(item) => showDone || item.status !== 'done',
+	// Memoized on what feeds it: the selection travels as a prop, and rescanning
+	// a year ahead for every series on each arrow keypress adds up. The window
+	// has to arrive referentially stable for this to hold — the route passes its
+	// own memoized `week`.
+	const items = useMemo(
+		() =>
+			scheduleItems(events, completions, visible).filter(
+				(item) => showDone || item.status !== 'done',
+			),
+		[events, completions, visible, showDone],
 	);
 
 	return (

@@ -189,6 +189,24 @@ describe('CalendarWeek', () => {
 		expect(spacer?.textContent).toBe('\u00a0'.repeat(5));
 	});
 
+	/**
+	 * The three actions sit inline on the row from `sm`: hiding them behind the
+	 * menu on a desktop costs a click each. `actionsInMenu` belongs to the
+	 * Schedule, whose narrow column is the one place the menu is the only form.
+	 */
+	it('shows the row actions inline from sm, not only behind the menu', () => {
+		renderWeek([makeEvent({ title: 'Rosita', date: '2026-08-18' })]);
+
+		const inline = screen
+			.getByRole('button', { name: 'Edit: Rosita' })
+			.closest('div');
+		expect(inline?.className).toContain('sm:flex');
+
+		// The menu stays, but only below `sm`, where there is no room inline.
+		const menu = screen.getByRole('button', { name: 'Actions for Rosita' });
+		expect(menu.className).toContain('sm:hidden');
+	});
+
 	it('renders detail lines as sub-checks that toggle by line', async () => {
 		const event = makeEvent({
 			title: 'Pagar todo',

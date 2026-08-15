@@ -17,6 +17,7 @@ import {
 	backlogItems,
 	type CalendarDayGroup,
 	collectEventTags,
+	completionsByKey,
 	dayAgenda,
 	isAddEventShortcut,
 	isCloneShortcut,
@@ -62,11 +63,15 @@ import {
 	refreshCalendar,
 	syncCalendarOutbox,
 } from '@web/lib/calendar-sync';
+import { useConsumeCreateParam } from '@web/lib/create-param';
 import { isEditableTarget } from '@web/lib/keyboard';
+import {
+	type SharedSettingsAdapter,
+	useSharedSettings,
+} from '@web/lib/shared-settings';
 import { cn } from '@web/lib/utils';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 export function meta() {
@@ -102,12 +107,25 @@ function pushChanges() {
 
 const saveFailed = () => toast.error('Could not save on this device.');
 
-export default function Calendar() {
-	const [searchParams, setSearchParams] = useSearchParams();
+/** Module-level so the hook's one-shot reconciliation stays one-shot. */
+const settingsAdapter: SharedSettingsAdapter<CalendarSettings> = {
+	defaults: DEFAULT_CALENDAR_SETTINGS,
+	loadLocal: () => loadCalendarSettings(window.localStorage),
+	saveLocal: (settings) => saveCalendarSettings(window.localStorage, settings),
+	readShared: readSharedCalendarSettings,
+	writeShared: writeSharedCalendarSettings,
+	reconcile: reconcileCalendarSettings,
+};
 
-	// Read once per mount rather than per render: a fresh date in three places
-	// could straddle midnight.
-	const today = useMemo(() => todayLocalDate(), []);
+/** Stable fallbacks: a fresh `[]` per render would defeat every memo below. */
+const NO_TAGS: string[] = [];
+const NO_GROUPS: CalendarDayGroup[] = [];
+
+export default function Calendar() {
+	// One date per render — a fresh read in three places could straddle
+	// midnight — and refreshed on returning to the foreground, so a PWA
+	// reopened the next morning does not keep planning yesterday.
+	const [today, setToday] = useState(() => todayLocalDate());
 	const [offset, setOffset] = useState(0);
 	const [deleting, setDeleting] = useState<CalendarEvent>();
 	const [refreshing, setRefreshing] = useState(false);
@@ -142,11 +160,10 @@ export default function Calendar() {
 	 */
 	const undoStack = useRef<Array<() => Promise<void>>>([]);
 
-	const [settings, setSettings] = useState<CalendarSettings>(() =>
-		typeof window === 'undefined'
-			? DEFAULT_CALENDAR_SETTINGS
-			: loadCalendarSettings(window.localStorage),
-	);
+	// Adopt the shared groups and tag filter, or seed them from this device;
+	// every later change writes the local mirror first and reports a failed
+	// share — the same one-shot reconciliation Finance runs.
+	const { settings, patchSettings } = useSharedSettings(settingsAdapter);
 
 	const data = useLiveQuery(async () => {
 		const [events, completions] = await Promise.all([
@@ -160,6 +177,9 @@ export default function Calendar() {
 	// open and focused also gets the manual button in the toolbar.
 	useEffect(() => {
 		const refresh = () => {
+			// The date refreshes with the data: a same-value set bails out, so
+			// this only re-renders when midnight actually went by.
+			setToday(todayLocalDate());
 			if (!navigator.onLine) return;
 			void refreshCalendar().then(reportRefresh);
 		};
@@ -176,54 +196,16 @@ export default function Calendar() {
 		};
 	}, []);
 
-	/**
-	 * Adopt the shared groups and tag filter, or seed them from this device —
-	 * the same one-shot reconciliation Finance runs. A change made while the
-	 * answer is in flight wins, because `settled` stops it from landing on top.
-	 */
-	useEffect(() => {
-		let settled = false;
-
-		void readSharedCalendarSettings().then((shared) => {
-			if (settled) return;
-			const { settings: next, push } = reconcileCalendarSettings(
-				shared,
-				loadCalendarSettings(window.localStorage),
-			);
-
-			setSettings(next);
-			saveCalendarSettings(window.localStorage, next);
-			if (push) void writeSharedCalendarSettings(next);
-		});
-
-		return () => {
-			settled = true;
-		};
-	}, []);
-
-	/**
-	 * The command palette can only navigate, so "Add event" arrives as `?new=1`
-	 * and lands the caret on the add line — the form it used to open is gone.
-	 */
-	useEffect(() => {
-		if (!searchParams.has('new')) return;
-		addRef.current?.focus();
-		setSearchParams(
-			(current) => {
-				const next = new URLSearchParams(current);
-				next.delete('new');
-				return next;
-			},
-			{ replace: true },
-		);
-	}, [searchParams, setSearchParams]);
+	// "Add event" from the palette arrives as `?new=1` and lands the caret on
+	// the add line — the form it used to open is gone.
+	useConsumeCreateParam(useCallback(() => addRef.current?.focus(), []));
 
 	const week = useMemo(() => weekWindow(today, offset), [today, offset]);
 	const events = data?.events ?? [];
 	const completions = data?.completions ?? [];
-	const hiddenTags = settings.hiddenTags ?? [];
+	const hiddenTags = settings.hiddenTags ?? NO_TAGS;
 	const hideUntagged = settings.hideUntagged ?? false;
-	const groups = settings.groups ?? [];
+	const groups = settings.groups ?? NO_GROUPS;
 	const searching = searchOpen && searchQuery.trim() !== '';
 	// A live search overrules every filter: it answers "where is this thing",
 	// and a hidden tag, a done mark or a folded panel are not answers.
@@ -248,10 +230,13 @@ export default function Calendar() {
 	const ordered = useMemo(() => {
 		const keep = (item: AgendaItem) =>
 			effectiveShowDone || item.status !== 'done';
+		// Built once for the whole window: the lookup is loop-invariant and
+		// rebuilding it per date pays O(completions) twenty-odd times over.
+		const resolved = completionsByKey(completions);
 		const dayItems = weekBuckets(week.start, week.end, groups)
 			.flatMap((bucket) =>
 				bucket.dates.flatMap((date) =>
-					dayAgenda(visibleEvents, completions, date),
+					dayAgenda(visibleEvents, resolved, date),
 				),
 			)
 			.filter(keep);
@@ -289,26 +274,6 @@ export default function Calendar() {
 	function pushSoon() {
 		if (pushTimer.current !== undefined) window.clearTimeout(pushTimer.current);
 		pushTimer.current = window.setTimeout(pushChanges, 400);
-	}
-
-	/**
-	 * The mirror is written first and synchronously: the screen has to reflect
-	 * the change whether or not the cache is reachable. The shared copy is
-	 * reported on, because groups that silently stayed on one device are
-	 * exactly the problem sharing them was meant to solve.
-	 */
-	function patchSettings(changes: Partial<CalendarSettings>) {
-		const next = { ...settings, ...changes };
-		setSettings(next);
-		saveCalendarSettings(window.localStorage, next);
-
-		void writeSharedCalendarSettings(next).then(
-			(stored) => {
-				if (!stored)
-					toast.error('Saved on this device only — the shared copy is down.');
-			},
-			() => toast.error('Saved on this device only — no connection.'),
-		);
 	}
 
 	function toggleTag(tag: string) {
@@ -777,7 +742,10 @@ export default function Calendar() {
 							<CalendarSchedule
 								events={visibleEvents}
 								completions={completions}
-								window={weekWindow(today, 0)}
+								// `week` *is* this window while the offset is 0, and unlike a
+								// fresh `weekWindow(today, 0)` it is referentially stable, which
+								// is what the schedule's memo keys on.
+								window={week}
 								today={today}
 								showDone={showDone}
 								selectedKey={selectedKey}

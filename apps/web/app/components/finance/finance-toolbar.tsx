@@ -19,6 +19,8 @@ import {
 	type DateRange,
 	formatLocalDate,
 	formatPeriodLabel,
+	nextLocalDay,
+	previousLocalDay,
 } from '@web/lib/finance';
 import {
 	CalendarOffIcon,
@@ -29,7 +31,7 @@ import {
 	TagIcon,
 	XIcon,
 } from 'lucide-react';
-import { useId } from 'react';
+import { useId, useState } from 'react';
 
 /**
  * Sticky, because the payment worth adding usually occurs to you while reading
@@ -68,9 +70,15 @@ export function FinanceToolbar({
 	const fromId = useId();
 	const toId = useId();
 
-	// The inclusive end the url and the date inputs both speak.
+	// An inverted pick is refused, but never in silence: the input snaps back
+	// to the applied range, so without this line nothing would say why. Inline
+	// rather than a toast because the condition stays true until it is fixed.
+	const [inverted, setInverted] = useState(false);
+
+	// The inclusive end the url and the date inputs both speak. By calendar
+	// components, not ±24h: a DST day is not 86 400 000 ms long.
 	const inclusiveEnd =
-		range.toExclusive === null ? null : range.toExclusive - 86_400_000;
+		range.toExclusive === null ? null : previousLocalDay(range.toExclusive);
 
 	/** An emptied input clears that side rather than being ignored. */
 	function setBound(which: 'from' | 'to', value: string) {
@@ -79,7 +87,7 @@ export function FinanceToolbar({
 			const [year, month, date] = value.split('-').map(Number);
 			const parsed = new Date(year, month - 1, date).getTime();
 			if (Number.isNaN(parsed)) return;
-			at = which === 'to' ? parsed + 86_400_000 : parsed;
+			at = which === 'to' ? nextLocalDay(parsed) : parsed;
 		}
 
 		const next =
@@ -87,11 +95,15 @@ export function FinanceToolbar({
 				? { from: at, toExclusive: range.toExclusive }
 				: { from: range.from, toExclusive: at };
 		if (
-			next.from === null ||
-			next.toExclusive === null ||
-			next.from < next.toExclusive
-		)
-			onRangeChange(next);
+			next.from !== null &&
+			next.toExclusive !== null &&
+			next.from >= next.toExclusive
+		) {
+			setInverted(true);
+			return;
+		}
+		setInverted(false);
+		onRangeChange(next);
 	}
 
 	return (
@@ -173,6 +185,13 @@ export function FinanceToolbar({
 									) : null}
 								</div>
 							</div>
+							{inverted ? (
+								<p role="alert" className="text-destructive text-xs">
+									The start has to be on or before the end, so that pick was not
+									applied.
+								</p>
+							) : null}
+
 							<p className="text-muted-foreground text-xs">
 								Both dates are included, and either can be left empty to leave
 								that side open. Whatever you pick is remembered, so Finance

@@ -23,7 +23,8 @@ import {
 	UPLOAD_TTL_SECONDS,
 	uploadKey,
 } from '@api/files-storage';
-import { entityTag, isUnchanged } from '@api/http-cache';
+import { inFolder } from '@api/folder-paths';
+import { createIndexCache } from '@api/http-cache';
 import { file, note } from '@api/schema';
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import Elysia, { status } from 'elysia';
@@ -162,21 +163,6 @@ function serialize(row: FileRow) {
 	};
 }
 
-/**
- * Escapes the `LIKE` metacharacters so a folder named `plan_a` or `%` matches
- * itself instead of acting as a pattern. Pairs with `escape '\'` in the query.
- */
-function likeDescendantsOf(path: string) {
-	return `${path.replace(/[\\%_]/g, (character) => `\\${character}`)}/%`;
-}
-
-function inFolder(path: string) {
-	return or(
-		sql`lower(${file.path}) = lower(${path})`,
-		sql`lower(${file.path}) like lower(${likeDescendantsOf(path)}) escape '\\'`,
-	);
-}
-
 async function readPendingUpload(id: string) {
 	return (await cache.get<PendingUpload>(uploadKey(id))) ?? undefined;
 }
@@ -200,23 +186,29 @@ async function listObjectIds() {
 	);
 }
 
+/**
+ * The remembered tag of `GET /files`, so the re-listing that follows every
+ * upload, move, rename and delete costs one Redis GET when nothing changed
+ * since. Every handler below that writes the `file` table — including
+ * reconcile — drops it before responding; the upload reservations live in
+ * Redis only and are not part of this payload.
+ */
+const indexCache = createIndexCache('storage');
+
 export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 	.use(authPlugin)
 	.get(
 		'/',
-		async ({ request, set }) => {
-			// No filter: every row here has its object in storage by construction.
-			const files = await db
-				.select(fileColumns)
-				.from(file)
-				.orderBy(file.path, file.name)
-				.$withCache(false);
+		async ({ request, set }) =>
+			indexCache.conditional(request, set, async () => {
+				// No filter: every row here has its object in storage by construction.
+				const files = await db
+					.select(fileColumns)
+					.from(file)
+					.orderBy(file.path, file.name);
 
-			const payload = files.map(serialize);
-			const tag = entityTag(payload);
-			set.headers.etag = tag;
-			return isUnchanged(request, tag) ? status(304) : payload;
-		},
+				return files.map(serialize);
+			}),
 		{ detail: { summary: 'List stored files' } },
 	)
 	.get(
@@ -232,9 +224,10 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 			// into the API to walk it in JavaScript is exactly what to avoid.
 			// `$.**` descends through the whole block tree, and `#>> '{}'` unwraps
 			// the jsonb string into text so it can be compared to an id. In lax
-			// mode that descent reports each match more than once, which `not
-			// exists` does not care about — but anything building a list of ids
-			// out of it would have to dedupe.
+			// mode that descent reports each match more than once, so the derived
+			// table dedupes with `distinct`. Materialising the referenced ids once
+			// lets the planner anti-join against them, instead of re-walking every
+			// note's whole document for each candidate file.
 			//
 			// Only the current document of each note counts. History lives mostly
 			// as jsondiffpatch deltas, where a removed file's id sits at a path
@@ -247,13 +240,15 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 						eq(file.uploadedFromNotes, true),
 						sql`not exists (
 							select 1
-							from ${note}, jsonb_path_query(${note.content}, '$.**.props.fileId') as ref
-							where ref #>> '{}' = ${file.id}::text
+							from (
+								select distinct ref #>> '{}' as file_id
+								from ${note}, jsonb_path_query(${note.content}, '$.**.props.fileId') as ref
+							) as refs
+							where refs.file_id = ${file.id}::text
 						)`,
 					),
 				)
-				.orderBy(desc(file.createdAt))
-				.$withCache(false);
+				.orderBy(desc(file.createdAt));
 
 			return files.map(serialize);
 		},
@@ -262,23 +257,36 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 	.post(
 		'/uploads',
 		async ({ body }) => {
-			// One request for a whole selection, and one result per file: a name
-			// clash on the third file cannot take the other five down with it.
-			const results = await Promise.all(
-				body.files.map(async (request) => {
-					const [existing] = await db
-						.select({ id: file.id })
-						.from(file)
-						.where(
+			// The advisory pre-check for every name travels as one SELECT rather
+			// than one per file: each pair keeps the `lower(coalesce(path, ''))` /
+			// `lower(name)` shape so the unique index still serves it, and the OR
+			// preserves a result per file. Advisory only — the NX claim below is
+			// what actually arbitrates a race.
+			// NUL-joined: neither part can contain it, so keys cannot collide.
+			const takenName = (path: string | null, name: string) =>
+				`${(path ?? '').toLowerCase()}\u0000${name.toLowerCase()}`;
+			const stored = await db
+				.select({ path: file.path, name: file.name })
+				.from(file)
+				.where(
+					or(
+						...body.files.map((request) =>
 							and(
 								sql`lower(coalesce(${file.path}, '')) = lower(${request.path ?? ''})`,
 								sql`lower(${file.name}) = lower(${request.name})`,
 							),
-						)
-						.limit(1)
-						.$withCache(false);
+						),
+					),
+				);
+			const takenNames = new Set(
+				stored.map((row) => takenName(row.path, row.name)),
+			);
 
-					if (existing)
+			// One request for a whole selection, and one result per file: a name
+			// clash on the third file cannot take the other five down with it.
+			const results = await Promise.all(
+				body.files.map(async (request) => {
+					if (takenNames.has(takenName(request.path, request.name)))
 						return { id: request.id, status: 'rejected', error: 'NAME_TAKEN' };
 
 					// Claiming the name up front is what stops two concurrent uploads
@@ -367,8 +375,10 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 				return status(422, { error: 'PART_OUT_OF_RANGE' });
 
 			// Sliding expiration: an upload that keeps moving keeps its reservation.
-			await cache.expire(uploadKey(upload.id), UPLOAD_TTL_SECONDS);
-			await cache.expire(nameKey(upload.path, upload.name), UPLOAD_TTL_SECONDS);
+			await Promise.all([
+				cache.expire(uploadKey(upload.id), UPLOAD_TTL_SECONDS),
+				cache.expire(nameKey(upload.path, upload.name), UPLOAD_TTL_SECONDS),
+			]);
 
 			return {
 				parts: await presignParts(
@@ -426,7 +436,9 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 
 			try {
 				// The single write to the database, and it happens only once the
-				// object is known to be complete.
+				// object is known to be complete. A conflict on the id is swallowed
+				// rather than caught: it means a concurrent or retried complete
+				// already wrote this very row, which is success, not garbage.
 				const [created] = await db
 					.insert(file)
 					.values({
@@ -437,11 +449,14 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 						size: stat.size,
 						uploadedFromNotes: upload.uploadedFromNotes,
 					})
+					.onConflictDoNothing({ target: file.id })
 					.returning(fileColumns);
+				await indexCache.invalidate();
 
-				if (!created) throw new Error('Insert returned no row');
-				await releaseUpload(upload);
-				return status(201, serialize(created));
+				if (created) {
+					await releaseUpload(upload);
+					return status(201, serialize(created));
+				}
 			} catch (error) {
 				// Someone took the name between the reservation and now. An object
 				// with no row is silent garbage, so it goes before the error does.
@@ -449,6 +464,19 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 				await releaseUpload(upload);
 				throw error;
 			}
+
+			// The row already exists under this id: answer with it. Deleting the
+			// object here — as the name-conflict path does — would leave the
+			// winner's row pointing at nothing.
+			const [existing] = await db
+				.select(fileColumns)
+				.from(file)
+				.where(eq(file.id, upload.id))
+				.limit(1);
+
+			if (!existing) throw new Error('Insert returned no row');
+			await releaseUpload(upload);
+			return status(201, serialize(existing));
 		},
 		{
 			params: z.object({ id: fileId }),
@@ -470,7 +498,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 		'/reconcile',
 		async () => {
 			const [rows, stored, pending] = await Promise.all([
-				db.select({ id: file.id }).from(file).$withCache(false),
+				db.select({ id: file.id }).from(file),
 				listObjectIds(),
 				listPendingUploads(),
 			]);
@@ -514,8 +542,10 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 					abortMultipartUpload(upload.id, upload.uploadId),
 				),
 			]);
-			if (deletedRows.length > 0)
+			if (deletedRows.length > 0) {
 				await db.delete(file).where(inArray(file.id, deletedRows));
+				await indexCache.invalidate();
+			}
 
 			return {
 				deletedObjects,
@@ -541,6 +571,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 					),
 				)
 				.returning(fileColumns);
+			await indexCache.invalidate();
 
 			if (moved.length !== body.ids.length)
 				return status(404, { error: 'FILES_NOT_FOUND' });
@@ -563,8 +594,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 			const rows = await db
 				.select(fileColumns)
 				.from(file)
-				.where(inArray(file.id, body.ids))
-				.$withCache(false);
+				.where(inArray(file.id, body.ids));
 			if (rows.length !== body.ids.length)
 				return status(404, { error: 'FILES_NOT_FOUND' });
 
@@ -596,8 +626,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 			const existing = await db
 				.select({ id: file.id })
 				.from(file)
-				.where(inArray(file.id, body.ids))
-				.$withCache(false);
+				.where(inArray(file.id, body.ids));
 			const existingIds = new Set(existing.map((entry) => entry.id));
 			const result = await deleteStoredFiles(
 				body.ids.filter((id) => existingIds.has(id)),
@@ -608,6 +637,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 					},
 				},
 			);
+			await indexCache.invalidate();
 			const deleted = new Set([
 				...result.deleted,
 				...body.ids.filter((id) => !existingIds.has(id)),
@@ -633,8 +663,9 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 				.set({
 					path: sql<string>`${body.to} || substr(${file.path}, char_length(${body.from}) + 1)`,
 				})
-				.where(inFolder(body.from))
+				.where(inFolder(file.path, body.from))
 				.returning({ id: file.id });
+			await indexCache.invalidate();
 
 			return { updated: renamed.length };
 		},
@@ -649,8 +680,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 			const targets = await db
 				.select({ id: file.id })
 				.from(file)
-				.where(inFolder(body.path))
-				.$withCache(false);
+				.where(inFolder(file.path, body.path));
 			const result = await deleteStoredFiles(
 				targets.map((entry) => entry.id),
 				{
@@ -660,6 +690,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 					},
 				},
 			);
+			await indexCache.invalidate();
 
 			return { deleted: result.deleted.length, failed: result.failed };
 		},
@@ -675,8 +706,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 				.select(fileColumns)
 				.from(file)
 				.where(eq(file.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!result) return status(404, { error: 'FILE_NOT_FOUND' });
 			return serialize(result);
@@ -693,8 +723,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 				.select({ name: file.name, contentType: file.contentType })
 				.from(file)
 				.where(eq(file.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!result) return status(404, { error: 'FILE_NOT_FOUND' });
 
@@ -725,6 +754,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 				.set(body)
 				.where(eq(file.id, params.id))
 				.returning(fileColumns);
+			await indexCache.invalidate();
 
 			if (!updated) return status(404, { error: 'FILE_NOT_FOUND' });
 			return serialize(updated);
@@ -754,8 +784,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 				.select({ id: file.id })
 				.from(file)
 				.where(eq(file.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 			if (existing) {
 				const result = await deleteStoredFiles([params.id], {
 					deleteObject,
@@ -763,6 +792,7 @@ export const filesRouter = new Elysia({ prefix: '/files', tags: ['Storage'] })
 						await db.delete(file).where(eq(file.id, id));
 					},
 				});
+				await indexCache.invalidate();
 				if (result.failed.length > 0)
 					return status(503, { error: result.failed[0]?.error });
 			}

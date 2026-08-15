@@ -2,9 +2,13 @@ import {
 	currentMonthRange,
 	filterPayments,
 	financeTotals,
+	formatLocalDate,
 	formatPeriodLabel,
 	inPeriod,
+	nextLocalDay,
+	parseAmount,
 	parseFinanceView,
+	previousLocalDay,
 	remainingFor,
 	sortPayments,
 	tagBreakdown,
@@ -580,5 +584,71 @@ describe('the view in the url', () => {
 		});
 		expect(next.get('q')).toBe('movi');
 		expect(next.get('subs')).toBe('0');
+	});
+});
+
+describe('stepping between inclusive and exclusive days', () => {
+	/** Runs the block in a zone that still observes DST; Argentina does not. */
+	function inSantiago(run: () => void) {
+		const previous = process.env.TZ;
+		process.env.TZ = 'America/Santiago';
+		try {
+			// The guard: if the runtime ignored the change, this test proves nothing.
+			expect(new Date(2026, 8, 1).getTimezoneOffset()).toBe(240);
+			run();
+		} finally {
+			process.env.TZ = previous;
+		}
+	}
+
+	/**
+	 * The half-open bound becomes the inclusive last day by calendar
+	 * components, never by subtracting 24 hours: Chilean summer time starts on
+	 * 2026-09-06, a 23-hour day, where fixed milliseconds land on the 5th.
+	 */
+	it('writes the right inclusive end across a 23-hour DST day', () => {
+		inSantiago(() => {
+			const next = updateFinanceSearchParams(new URLSearchParams(), {
+				range: {
+					from: new Date(2026, 8, 1).getTime(),
+					toExclusive: new Date(2026, 8, 7).getTime(),
+				},
+			});
+			expect(next.get('to')).toBe('2026-09-06');
+		});
+	});
+
+	it('steps by calendar day and round-trips across the transition', () => {
+		inSantiago(() => {
+			const exclusiveEnd = new Date(2026, 8, 7).getTime();
+			expect(formatLocalDate(previousLocalDay(exclusiveEnd))).toBe(
+				'2026-09-06',
+			);
+			expect(nextLocalDay(previousLocalDay(exclusiveEnd))).toBe(exclusiveEnd);
+		});
+	});
+});
+
+describe('parsing an amount', () => {
+	it.each([
+		// The single separator followed by exactly three digits is the es-AR
+		// thousands notation the app itself prints, not a decimal point.
+		["the app's own thousands format", '1.234', 1234],
+		['a comma used for thousands', '1,234', 1234],
+		['repeated thousands groups', '1.234.567', 1_234_567],
+		['thousands and decimals together', '1.234,56', 1234.56],
+		['a plain decimal', '1234.56', 1234.56],
+		['a short decimal', '1,23', 1.23],
+		['a sub-unit decimal', '0.5', 0.5],
+		// A leading zero cannot open a thousands group, so this stays decimal.
+		['a zero-led three-digit decimal', '0.500', 0.5],
+	])('reads %s', (_case, input, expected) => {
+		expect(parseAmount(input)).toBe(expected);
+	});
+
+	it('still refuses junk and non-positive amounts', () => {
+		expect(parseAmount('')).toBeUndefined();
+		expect(parseAmount('abc')).toBeUndefined();
+		expect(parseAmount('0')).toBeUndefined();
 	});
 });

@@ -5,6 +5,7 @@ import { financeSystem } from '@web/lib/finance-system';
 import { notesSystem } from '@web/lib/notes-system';
 import { storageSystem } from '@web/lib/storage-system';
 import type { LucideIcon } from 'lucide-react';
+import type { ComponentType } from 'react';
 
 export type SystemCommand = {
 	/** Unique within the system; the shell namespaces it with the system key. */
@@ -56,7 +57,37 @@ export type AppSystem = {
 	 * the loaders already tracks every table they read.
 	 */
 	subscribe?: (onChange: () => void) => () => void;
+	/**
+	 * Mounted once by the private shell, for systems that need background work
+	 * — refreshes on focus, sync on reconnect — while the app is open.
+	 */
+	Bootstrap?: ComponentType;
+	/**
+	 * Erases this system's local footprint (databases, queues). The shell runs
+	 * every one on sign-out; a system the shell does not know by name still gets
+	 * its data cleared.
+	 */
+	clearLocalData?: () => Promise<void>;
 };
+
+/** A deep link into a system: its path plus the state carried in the query. */
+export function systemPath(base: string, params: Record<string, string>) {
+	return `${base}?${new URLSearchParams(params).toString()}`;
+}
+
+/**
+ * Sign-out's local wipe. Every system is attempted even if one fails, and the
+ * first failure is rethrown so the caller can say something went wrong.
+ */
+export async function clearLocalSystemData() {
+	const results = await Promise.allSettled(
+		appSystems.map((system) => system.clearLocalData?.()),
+	);
+	const failure = results.find(
+		(result): result is PromiseRejectedResult => result.status === 'rejected',
+	);
+	if (failure) throw failure.reason;
+}
 
 export const appSystems: AppSystem[] = [
 	calendarSystem,
@@ -126,6 +157,12 @@ const navigationRank = (system: AppSystem) => {
 export const systemsInSidebarOrder = () =>
 	[...appSystems].sort((a, b) => navigationRank(a) - navigationRank(b));
 
+/**
+ * `limit` caps the whole answer, not each system's share: every system may
+ * return up to `limit` matches, and the total is then trimmed in sidebar order
+ * — earlier systems keep their results, the overflow comes out of the last.
+ * Without the total cap, five systems à 25 results is a 125-row palette.
+ */
 export async function searchSystemCommands(
 	query: string,
 	limit: number,
@@ -136,7 +173,17 @@ export async function searchSystemCommands(
 			commands: await system.searchCommands(query, limit),
 		})),
 	);
-	return groups.filter((group) => group.commands.length > 0);
+
+	let remaining = limit;
+	const capped: SystemCommandGroup[] = [];
+	for (const group of groups) {
+		if (remaining <= 0) break;
+		const commands = group.commands.slice(0, remaining);
+		if (commands.length === 0) continue;
+		remaining -= commands.length;
+		capped.push({ system: group.system, commands });
+	}
+	return capped;
 }
 
 /** Case-insensitive substring, which is what a person means when they type. */

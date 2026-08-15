@@ -10,10 +10,14 @@ import {
 	type AppBreadcrumbItem,
 	getBreadcrumbItems,
 } from '@web/lib/app-navigation';
-import { loadSystemBreadcrumbTrail } from '@web/lib/app-systems';
+import {
+	getSystemDataRevision,
+	loadSystemBreadcrumbTrail,
+	subscribeToSystemData,
+} from '@web/lib/app-systems';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { FolderIcon } from 'lucide-react';
-import { Fragment } from 'react';
+import { Fragment, useSyncExternalStore } from 'react';
 import { Link } from 'react-router';
 
 function BreadcrumbItems({
@@ -99,9 +103,17 @@ export function AppBreadcrumb({
 	pathname: string;
 	search: string;
 }) {
+	// A system whose data is not in Dexie reports its own changes — the same
+	// signal the palette listens to. Without it, a deep link resolves the trail
+	// against a store that has not loaded yet and never recomputes.
+	const systemRevision = useSyncExternalStore(
+		subscribeToSystemData,
+		getSystemDataRevision,
+		getSystemDataRevision,
+	);
 	const trail = useLiveQuery(
 		() => loadSystemBreadcrumbTrail(pathname, search),
-		[pathname, search],
+		[pathname, search, systemRevision],
 		[],
 	);
 	const items = getBreadcrumbItems(pathname, trail);

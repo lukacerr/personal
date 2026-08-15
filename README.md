@@ -61,7 +61,7 @@ bun run docker:rebuild
 
 Este comando espera los healthchecks y deja el stack corriendo en segundo plano. Los datos bajo `./volumes` se conservan. `api.Dockerfile` sigue reservado para la imagen compilada de producción de Cloud Run; Compose usa `dev.Dockerfile`.
 
-Compose configura la API con `DATABASE_URL=postgres://personal:personal-local-password@db:5432/personal` y `NEON_FETCH_ENDPOINT=http://db-proxy:4444/sql`. El segundo valor hace que `@neondatabase/serverless` envíe las consultas de `neon()` por HTTP al proxy local; en producción se omite y el driver usa el endpoint HTTPS de la URL de Neon Cloud.
+Compose configura la API con `DATABASE_URL=postgres://personal:personal-local-password@db:5432/personal` y `NEON_FETCH_ENDPOINT=http://db-proxy:4444/sql`. El segundo valor hace que `@neondatabase/serverless` envíe las consultas de `neon()` por HTTP al shim local del endpoint `/sql` de Neon (`apps/api/scripts/neon-http-shim.ts`); en producción se omite y el driver usa el endpoint HTTPS de la URL de Neon Cloud.
 
 Para ejecutar la API con Bun en el host y mantener solo la infraestructura en Docker, los valores equivalentes ya están en `apps/api/.env.example` con `localhost`:
 

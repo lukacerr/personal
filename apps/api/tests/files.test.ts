@@ -1,25 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { cache, db, storage } from '@api/env';
 import { nameKey, objectKey, uploadKey } from '@api/files-storage';
-import { app } from '@api/index';
 import { file, note } from '@api/schema';
 import { randomUUIDv7 } from 'bun';
 import { inArray } from 'drizzle-orm';
+import { json, request } from './helpers';
 
 const touchedIds = new Set<string>();
 const noteIds = new Set<string>();
-
-async function request(path: string, init?: RequestInit) {
-	return app.handle(new Request(`http://localhost${path}`, init));
-}
-
-async function json(path: string, method: string, body: unknown) {
-	return request(path, {
-		method,
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(body),
-	});
-}
 
 type Reservation = {
 	id: string;
@@ -654,19 +642,6 @@ describe('Files', () => {
 		expect(await repeated.text()).toBe('');
 	});
 
-	it('sends the list again once it has actually changed', async () => {
-		await uploadSingle({ name: 'before-change.txt', path: 'work' });
-		const tag = (await request('/files')).headers.get('etag') ?? '';
-
-		await uploadSingle({ name: 'after-change.txt', path: 'work' });
-		const repeated = await request('/files', {
-			headers: { 'if-none-match': tag },
-		});
-
-		expect(repeated.status).toBe(200);
-		expect(((await repeated.json()) as unknown[]).length).toBeGreaterThan(1);
-	});
-
 	it('answers 404 for a file that does not exist', async () => {
 		expect((await request(`/files/${randomUUIDv7()}`)).status).toBe(404);
 	});
@@ -778,6 +753,52 @@ describe('Files', () => {
 		expect(completed.status).toBe(409);
 		expect(await db.$count(file, inArray(file.id, [reservation.id]))).toBe(0);
 		expect(await storage.exists(objectKey(reservation.id))).toBe(false);
+	});
+
+	/**
+	 * Two completes can race past the same reservation, or a retry can land after
+	 * a response was lost. Losing the INSERT on the id means the row already
+	 * exists — success, not garbage: deleting the object here would leave the
+	 * winner's row pointing at nothing.
+	 */
+	it('answers a complete that lost the insert race with the stored row, keeping the object', async () => {
+		const { results } = await reserve([
+			{ name: 'raced.txt', path: 'work', contentType: 'text/plain', size: 5 },
+		]);
+		const [reservation] = results.results;
+		if (!reservation?.url) throw new Error('Expected a presigned upload URL');
+		await put(reservation.url, 'hello', 'text/plain');
+
+		const first = await json(`/files/${reservation.id}/complete`, 'POST', {});
+		expect(first.status).toBe(201);
+
+		// The competing complete still holds the reservation the winner released:
+		await cache.set(
+			uploadKey(reservation.id),
+			{
+				id: reservation.id,
+				name: 'raced.txt',
+				path: 'work',
+				contentType: 'text/plain',
+				size: 5,
+				uploadedFromNotes: false,
+				partSize: 5,
+				partCount: 1,
+			},
+			{ ex: 60 },
+		);
+
+		const second = await json(`/files/${reservation.id}/complete`, 'POST', {});
+
+		expect(second.status).toBe(201);
+		expect(await second.json()).toMatchObject({
+			id: reservation.id,
+			name: 'raced.txt',
+		});
+		expect(await storage.exists(objectKey(reservation.id))).toBe(true);
+		expect(await db.$count(file, inArray(file.id, [reservation.id]))).toBe(1);
+		// The loser also lets go of its reservation.
+		expect(await cache.get(uploadKey(reservation.id))).toBeNull();
 	});
 
 	it('rejects a batch larger than one request is meant to carry', async () => {
@@ -1026,4 +1047,128 @@ describe('Bulk files', () => {
 		const response = await json('/files/bulk/delete', 'POST', { ids });
 		expect(response.status).toBe(422);
 	});
+});
+
+type FileSummary = {
+	id: string;
+	name: string;
+	path: string | null;
+};
+
+/**
+ * The index answers a matching `If-None-Match` from a tag remembered in Redis,
+ * so every path that writes the `file` table — completes, metadata, deletes,
+ * bulk operations, folder operations and reconcile — must drop that tag
+ * before responding.
+ */
+describe('files index cache', () => {
+	async function indexTag() {
+		const response = await request('/files');
+		expect(response.status).toBe(200);
+		return response.headers.get('etag') ?? '';
+	}
+
+	const uniqueName = () => `${randomUUIDv7()}.txt`;
+
+	const writes: Array<{
+		name: string;
+		write: (seeded: {
+			id: string;
+			path: string;
+		}) => Promise<(index: FileSummary[]) => boolean>;
+	}> = [
+		{
+			name: 'completing an upload',
+			write: async () => {
+				const uploaded = await uploadSingle({ name: uniqueName() });
+				return (index) => index.some((row) => row.id === uploaded.id);
+			},
+		},
+		{
+			name: 'updating file metadata',
+			write: async (seeded) => {
+				await json(`/files/${seeded.id}`, 'PATCH', {
+					name: 'renamed-after-the-tag.txt',
+					path: seeded.path,
+					isPublic: false,
+				});
+				return (index) =>
+					index.some(
+						(row) =>
+							row.id === seeded.id && row.name === 'renamed-after-the-tag.txt',
+					);
+			},
+		},
+		{
+			name: 'deleting a file',
+			write: async (seeded) => {
+				await request(`/files/${seeded.id}`, { method: 'DELETE' });
+				return (index) => index.every((row) => row.id !== seeded.id);
+			},
+		},
+		{
+			name: 'moving files in bulk',
+			write: async (seeded) => {
+				const to = `moved-${randomUUIDv7()}`;
+				await json('/files/bulk/move', 'PATCH', { ids: [seeded.id], path: to });
+				return (index) =>
+					index.some((row) => row.id === seeded.id && row.path === to);
+			},
+		},
+		{
+			name: 'deleting files in bulk',
+			write: async (seeded) => {
+				await json('/files/bulk/delete', 'POST', { ids: [seeded.id] });
+				return (index) => index.every((row) => row.id !== seeded.id);
+			},
+		},
+		{
+			name: 'renaming a folder',
+			write: async (seeded) => {
+				const to = `renamed-${randomUUIDv7()}`;
+				await json('/files/folders', 'PATCH', { from: seeded.path, to });
+				return (index) =>
+					index.some((row) => row.id === seeded.id && row.path === to);
+			},
+		},
+		{
+			name: 'deleting a folder',
+			write: async (seeded) => {
+				await request('/files/folders', {
+					method: 'DELETE',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ path: seeded.path }),
+				});
+				return (index) => index.every((row) => row.id !== seeded.id);
+			},
+		},
+		{
+			name: 'reconciling a row whose object is gone',
+			write: async (seeded) => {
+				// Simulates the object being deleted outside the app.
+				await storage.delete(objectKey(seeded.id));
+				await json('/files/reconcile', 'POST', {});
+				return (index) => index.every((row) => row.id !== seeded.id);
+			},
+		},
+	];
+
+	for (const entry of writes)
+		it(`serves a fresh index after ${entry.name}`, async () => {
+			const path = `cache-${randomUUIDv7()}`;
+			const seeded = await uploadSingle({ name: uniqueName(), path });
+			const tag = await indexTag();
+			const unchanged = await request('/files', {
+				headers: { 'if-none-match': tag },
+			});
+			expect(unchanged.status).toBe(304);
+
+			const reflected = await entry.write({ id: seeded.id, path });
+
+			const after = await request('/files', {
+				headers: { 'if-none-match': tag },
+			});
+			expect(after.status).toBe(200);
+			expect(reflected((await after.json()) as FileSummary[])).toBe(true);
+		});
 });

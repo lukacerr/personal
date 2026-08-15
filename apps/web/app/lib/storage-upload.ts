@@ -159,6 +159,9 @@ export function createUploadQueue({
 	): Promise<{ etag: string | null }> {
 		let lastError: unknown;
 		for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+			// An aborted transfer must not start another attempt: the workers keep
+			// draining their task lists after the abort, and this is what stops them.
+			if (options.signal?.aborted) break;
 			try {
 				return await transport.put(url, body, options);
 			} catch (error) {
@@ -167,7 +170,7 @@ export function createUploadQueue({
 				if (attempt < maxAttempts) await delay(2 ** attempt * 100);
 			}
 		}
-		throw lastError;
+		throw lastError ?? new Error('The upload was aborted.');
 	}
 
 	async function transfer(
@@ -218,14 +221,22 @@ export function createUploadQueue({
 							(partNumber - 1) * partSize,
 							partNumber * partSize,
 						);
-						const { etag } = await putWithRetry(url, chunk, {
-							signal: controller.signal,
-							onProgress: (fraction) => {
-								sent[partNumber - 1] = fraction * chunk.size;
-								report();
-							},
-						});
-						return { partNumber, etag: etag ?? '' };
+						try {
+							const { etag } = await putWithRetry(url, chunk, {
+								signal: controller.signal,
+								onProgress: (fraction) => {
+									sent[partNumber - 1] = fraction * chunk.size;
+									report();
+								},
+							});
+							return { partNumber, etag: etag ?? '' };
+						} catch (error) {
+							// A part that is out of attempts dooms the whole file, and
+							// `run` is already on its way to cancelling the reservation.
+							// The other workers must stop feeding it parts now.
+							controller.abort();
+							throw error;
+						}
 					}),
 					partConcurrency,
 				);
@@ -295,9 +306,20 @@ export function createUploadQueue({
 				});
 			emit();
 
-			const reservations = await transport.reserve(
-				candidates.map(({ body: _body, ...request }) => request),
-			);
+			let reservations: UploadReservation[];
+			try {
+				reservations = await transport.reserve(
+					candidates.map(({ body: _body, ...request }) => request),
+				);
+			} catch (error) {
+				// A reservation that never happened fails the whole batch at once.
+				// Rethrowing instead would leave every item `pending` in the panel
+				// forever, since nothing downstream ever touches them again.
+				const message = describeUploadFailure(error);
+				for (const candidate of candidates)
+					update(candidate.id, { status: 'failed', error: message });
+				return;
+			}
 			const byId = new Map(
 				reservations.map((reservation) => [reservation.id, reservation]),
 			);

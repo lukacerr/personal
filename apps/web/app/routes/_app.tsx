@@ -4,7 +4,6 @@ import { AppCommandPalette } from '@web/components/app-command-palette';
 import { AppEnvironmentBadge } from '@web/components/app-environment-badge';
 import { AppSidebar } from '@web/components/app-sidebar';
 import { AuthLoading } from '@web/components/auth-loading';
-import { NotesBootstrap } from '@web/components/notes-bootstrap';
 import {
 	SidebarInset,
 	SidebarProvider,
@@ -13,6 +12,7 @@ import {
 import { Toaster } from '@web/components/ui/sonner';
 import { TooltipProvider } from '@web/components/ui/tooltip';
 import { rememberAppLocation, useStartupRedirect } from '@web/lib/app-location';
+import { appSystems } from '@web/lib/app-systems';
 import { useAuthStore } from '@web/lib/auth-store';
 import { useApiHealth, usePwaAvailability } from '@web/lib/availability';
 import { env } from '@web/lib/env';
@@ -53,7 +53,11 @@ export default function AuthenticatedLayout() {
 	return (
 		<TooltipProvider>
 			<SidebarProvider>
-				<NotesBootstrap />
+				{/* Each system's background work, mounted from the registry: the
+				    shell does not know which systems need it, or that any do. */}
+				{appSystems.map(({ Bootstrap, key }) =>
+					Bootstrap ? <Bootstrap key={key} /> : null,
+				)}
 				<Toaster position="bottom-right" />
 				<a
 					href="#main-content"

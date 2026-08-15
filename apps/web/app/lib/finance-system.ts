@@ -1,13 +1,13 @@
 import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
-import { type AppSystem, matchesCommandQuery } from '@web/lib/app-systems';
+import {
+	type AppSystem,
+	matchesCommandQuery,
+	systemPath,
+} from '@web/lib/app-systems';
 import { financeSnapshot, useFinanceStore } from '@web/lib/finance-store';
 import { ChartNoAxesCombinedIcon } from 'lucide-react';
 
 const FINANCE_PATH = '/finance';
-
-function financePath(params: Record<string, string>) {
-	return `${FINANCE_PATH}?${new URLSearchParams(params).toString()}`;
-}
 
 export const financeSystem: AppSystem = {
 	key: 'finance',
@@ -16,9 +16,14 @@ export const financeSystem: AppSystem = {
 
 	/**
 	 * Finance keeps no local database, so nothing the shell watches would ever
-	 * tell it the breadcrumb changed. The store reports for itself instead.
+	 * tell it the breadcrumb changed. The store reports for itself instead —
+	 * only when the rows themselves move: the shell re-runs every system's
+	 * loaders on each report, and a status flip changes nothing it can show.
 	 */
-	subscribe: (onChange) => useFinanceStore.subscribe(onChange),
+	subscribe: (onChange) =>
+		useFinanceStore.subscribe((state, previous) => {
+			if (state.payments !== previous.payments) onChange();
+		}),
 
 	/**
 	 * Only the action, deliberately: individual payments are not things you go
@@ -39,7 +44,7 @@ export const financeSystem: AppSystem = {
 				id: 'create',
 				label: 'Add payment',
 				detail: 'Finance',
-				to: financePath({ new: '1' }),
+				to: systemPath(FINANCE_PATH, { new: '1' }),
 			},
 		];
 	},

@@ -9,11 +9,12 @@ import {
 	type CalendarCompletion,
 	type CalendarDayGroup,
 	type CalendarEvent,
+	completionsByKey,
 	dayAgenda,
 	weekBuckets,
 } from '@web/lib/calendar';
 import { cn } from '@web/lib/utils';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 /**
  * The window's days, one bucket each unless a custom group reads several as
@@ -47,20 +48,26 @@ export function CalendarWeek({
 } & ItemHandlers) {
 	const [dropDate, setDropDate] = useState<string | null>(null);
 
-	const buckets = weekBuckets(week.start, week.end, groups)
-		.map((bucket) => {
-			const items = bucket.dates.flatMap((date) =>
-				dayAgenda(events, completions, date),
-			);
-			return {
-				...bucket,
-				items,
-				visible: showDone
-					? items
-					: items.filter((item) => item.status !== 'done'),
-			};
-		})
-		.filter((bucket) => bucket.visible.length > 0);
+	// Memoized on what actually feeds it: the selection travels as a prop, and
+	// re-expanding ~21 days of series per arrow keypress is exactly the
+	// roughness a held key turns into.
+	const buckets = useMemo(() => {
+		const resolved = completionsByKey(completions);
+		return weekBuckets(week.start, week.end, groups)
+			.map((bucket) => {
+				const items = bucket.dates.flatMap((date) =>
+					dayAgenda(events, resolved, date),
+				);
+				return {
+					...bucket,
+					items,
+					visible: showDone
+						? items
+						: items.filter((item) => item.status !== 'done'),
+				};
+			})
+			.filter((bucket) => bucket.visible.length > 0);
+	}, [completions, week.start, week.end, groups, events, showDone]);
 
 	if (buckets.length === 0)
 		return (

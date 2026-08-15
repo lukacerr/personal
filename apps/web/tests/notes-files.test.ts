@@ -1,5 +1,9 @@
 // @vitest-environment happy-dom
-import { pastedImageName, splitPastedImages } from '@web/lib/notes-files';
+import {
+	attachmentOutcome,
+	pastedImageName,
+	splitPastedImages,
+} from '@web/lib/notes-files';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -39,6 +43,41 @@ describe('Pasted markup', () => {
 		expect(
 			splitPastedImages('<img src="one.png"><img src="two.png">').sources,
 		).toEqual(['one.png', 'two.png']);
+	});
+});
+
+/**
+ * `uploadNoteFiles` quietly drops the files that failed unless all of them
+ * did, so a toast that counts what was selected overstates what happened. The
+ * success message counts what was actually attached, and the difference is a
+ * failure of its own.
+ */
+describe('Attachment outcome', () => {
+	it('names a single file that fully attached', () => {
+		expect(attachmentOutcome(['photo.png'], 1)).toEqual({
+			success: '“photo.png” attached.',
+			failure: undefined,
+		});
+	});
+
+	it('counts a batch that fully attached', () => {
+		expect(attachmentOutcome(['a.png', 'b.png'], 2)).toEqual({
+			success: '2 files attached.',
+			failure: undefined,
+		});
+	});
+
+	it('reports the files that were dropped along the way', () => {
+		expect(attachmentOutcome(['a.png', 'b.png', 'c.png'], 1)).toEqual({
+			success: '1 file attached.',
+			failure: '2 files could not be attached.',
+		});
+	});
+
+	it('singularises a lone failure', () => {
+		expect(attachmentOutcome(['a.png', 'b.png'], 1).failure).toBe(
+			'1 file could not be attached.',
+		);
 	});
 });
 

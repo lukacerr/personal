@@ -1,3 +1,4 @@
+import { isTransientApiFailure } from '@web/lib/api';
 import { authenticatedApi } from '@web/lib/authenticated-api';
 import type { CalendarSettings } from '@web/lib/calendar-settings';
 
@@ -55,7 +56,7 @@ export class CalendarApiError extends Error {
 	constructor(readonly status: number) {
 		super(terminalMessages[status] ?? `Calendar API returned ${status}`);
 		this.terminal =
-			status >= 400 && status < 500 && status !== 408 && status !== 429;
+			status >= 400 && status < 500 && !isTransientApiFailure(status);
 	}
 }
 

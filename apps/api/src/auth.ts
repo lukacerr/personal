@@ -5,8 +5,26 @@ import { HttpError } from 'elysia-logger';
 import { decodeIdToken, oauth2 } from 'elysia-oauth2';
 import z from 'zod';
 
-const jwtPayload = z.object({ email: z.email() });
+/**
+ * Access and refresh tokens share the secret and the email claim, so the `typ`
+ * claim is the only thing keeping them from being interchangeable — without it
+ * a 12-hour access token doubles as a 7-day refresh token. `authPlugin` only
+ * accepts `access`; `/auth/refresh-token` only accepts `refresh`.
+ *
+ * Each verification site checks the claim explicitly: the plugin's `schema`
+ * types `sign`/`verify` but does **not** reject a mismatching payload at
+ * runtime (verified empirically — a wrong `typ` sails through `verify`), so
+ * the literal here is documentation and typing, never enforcement.
+ */
+const accessPayload = z.object({ email: z.email(), typ: z.literal('access') });
+const refreshPayload = z.object({
+	email: z.email(),
+	typ: z.literal('refresh'),
+});
 const authQueryPayload = z.object({ redirect: z.url() });
+
+/** Prefixed so it can never collide with anything else on this shared Redis. */
+const stateKey = (state: string) => `auth:state:${state}`;
 
 export function createSessionRedirect(
 	redirectUrl: string,
@@ -19,13 +37,13 @@ export function createSessionRedirect(
 	return url.href;
 }
 
-const jwtPlugin = new Elysia()
+export const jwtPlugin = new Elysia()
 	.use(
 		jwt({
 			name: 'jwt',
 			exp: '12h',
 			secret: env.LUKA_SECRET,
-			schema: jwtPayload,
+			schema: accessPayload,
 		}),
 	)
 	.use(
@@ -33,7 +51,7 @@ const jwtPlugin = new Elysia()
 			name: 'refreshJwt',
 			exp: '7d',
 			secret: env.LUKA_SECRET,
-			schema: jwtPayload,
+			schema: refreshPayload,
 		}),
 	);
 
@@ -59,7 +77,7 @@ const googleRouter = new Elysia({ prefix: `/google` })
 			const url = oauth2.createURL('Google', ['openid', 'profile', 'email']);
 			const state = url.searchParams.get('state');
 			if (!state) throw new HttpError(409, 'STATE_NOT_FOUND');
-			await cache.set(state, query, { ex: 900 });
+			await cache.set(stateKey(state), query, { ex: 900 });
 			return redirect(url.href);
 		},
 		{
@@ -71,7 +89,7 @@ const googleRouter = new Elysia({ prefix: `/google` })
 		'/callback',
 		async ({ oauth2, query, jwt, refreshJwt }) => {
 			const q = await cache.getdel<z.infer<typeof authQueryPayload>>(
-				query.state,
+				stateKey(query.state),
 			);
 			if (!q) throw new HttpError(412, 'STATE_NOT_FOUND');
 
@@ -85,10 +103,10 @@ const googleRouter = new Elysia({ prefix: `/google` })
 			)
 				throw new HttpError(403, 'EMAIL_NOT_ALLOWED');
 
-			const signValue = { email: String(decoded.email) };
+			const email = String(decoded.email);
 			const [at, rt] = await Promise.all([
-				jwt.sign(signValue),
-				refreshJwt.sign(signValue),
+				jwt.sign({ email, typ: 'access' }),
+				refreshJwt.sign({ email, typ: 'refresh' }),
 			]);
 
 			return redirect(createSessionRedirect(q.redirect, { at, rt }));
@@ -104,12 +122,15 @@ export const authRouter = new Elysia({ prefix: '/auth', tags: ['Auth'] })
 		'/refresh-token',
 		async ({ body: { refreshToken }, refreshJwt, jwt }) => {
 			const payload = await refreshJwt.verify(refreshToken);
-			if (!payload) throw new HttpError(401, 'INVALID_REFRESH_TOKEN');
+			// The explicit claim check is what refuses an access token here; the
+			// plugin schema alone would let it through.
+			if (payload === false || payload.typ !== 'refresh')
+				throw new HttpError(401, 'INVALID_REFRESH_TOKEN');
 
-			const signValue = { email: String(payload.email) };
+			const email = String(payload.email);
 			const [at, rt] = await Promise.all([
-				jwt.sign(signValue),
-				refreshJwt.sign(signValue),
+				jwt.sign({ email, typ: 'access' }),
+				refreshJwt.sign({ email, typ: 'refresh' }),
 			]);
 
 			return { at, rt };
@@ -120,20 +141,32 @@ export const authRouter = new Elysia({ prefix: '/auth', tags: ['Auth'] })
 		},
 	);
 
-export const authPlugin = (app: Elysia) =>
-	app
-		.use(jwtPlugin)
-		.guard({
-			headers: z.object({
-				authorization: z.templateLiteral(['Bearer ', z.string()]).optional(),
-			}),
-		})
-		.resolve(async ({ headers: { authorization }, jwt }) => {
-			if (env.NODE_ENV !== 'production')
-				return { authPayload: { email: 'dev@localhost' } };
+/**
+ * Factory over the mode so the tests can build the `production` variant and
+ * exercise the enforcement branches, which under `.env.test` are otherwise
+ * unreachable. The application only ever uses `authPlugin` below; the bypass
+ * stays inside this function and must not be reproduced elsewhere.
+ */
+export const createAuthPlugin =
+	(mode: (typeof env)['NODE_ENV']) => (app: Elysia) =>
+		app
+			.use(jwtPlugin)
+			.guard({
+				headers: z.object({
+					authorization: z.templateLiteral(['Bearer ', z.string()]).optional(),
+				}),
+			})
+			.resolve(async ({ headers: { authorization }, jwt }) => {
+				if (mode !== 'production')
+					return { authPayload: { email: 'dev@localhost' } };
 
-			if (!authorization) throw new HttpError(401, 'MISSING_TOKEN');
-			const payload = await jwt.verify(authorization.split(' ')[1]);
-			if (!payload) throw new HttpError(401, 'INVALID_TOKEN');
-			return { authPayload: payload };
-		});
+				if (!authorization) throw new HttpError(401, 'MISSING_TOKEN');
+				const payload = await jwt.verify(authorization.split(' ')[1]);
+				// The explicit claim check is what refuses a refresh token used as a
+				// bearer; the plugin schema alone would let it through.
+				if (payload === false || payload.typ !== 'access')
+					throw new HttpError(401, 'INVALID_TOKEN');
+				return { authPayload: payload };
+			});
+
+export const authPlugin = createAuthPlugin(env.NODE_ENV);

@@ -1,0 +1,3 @@
+ALTER TABLE "thread" DISABLE ROW LEVEL SECURITY;
+DROP TABLE "thread" CASCADE;
+DROP INDEX "note_mutation_latest";

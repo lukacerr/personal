@@ -98,6 +98,22 @@ export function PaymentFormDialog({
 			return;
 		}
 
+		// Editing never reopens a closed window by accident, and a duplicate
+		// always starts open: cancelling is its own action either way. Unticking
+		// "Recurring" drops the window with it — an end date only means anything
+		// on a subscription, and a one-off carrying a leftover `endedAt` would be
+		// a shape the screen never shows or edits again.
+		const endedAt = isSubscription ? (editing?.endedAt ?? null) : null;
+		const paidAtMs = localDateToMs(paidAt);
+		// The same rule the cancel dialog enforces, from this entry point too:
+		// the client's period predicate depends on `endedAt >= paidAt` holding.
+		if (endedAt !== null && paidAtMs > endedAt) {
+			setInvalid(
+				`It cannot start after it ended (${formatLocalDate(endedAt)}). Move the date back, or untick “Recurring monthly”.`,
+			);
+			return;
+		}
+
 		setInvalid(undefined);
 		onSubmit({
 			title: trimmed,
@@ -105,10 +121,8 @@ export function PaymentFormDialog({
 			value,
 			currency,
 			isSubscription,
-			paidAt: localDateToMs(paidAt),
-			// Editing never reopens a closed window by accident, and a duplicate
-			// always starts open: cancelling is its own action either way.
-			endedAt: editing?.endedAt ?? null,
+			paidAt: paidAtMs,
+			endedAt,
 		});
 	}
 
@@ -406,7 +420,7 @@ export function BudgetDialog({
 					<DialogHeader>
 						<DialogTitle>Budget</DialogTitle>
 						<DialogDescription>
-							What the period is measured against. Kept in this browser only.
+							What the period is measured against. Shared across your devices.
 						</DialogDescription>
 					</DialogHeader>
 

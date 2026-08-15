@@ -6,12 +6,7 @@ import type {
 	UploadRequest,
 	UploadTransport,
 } from '@web/lib/storage-upload';
-
-type TreatyData<T> = T extends (...args: infer _Args) => infer Result
-	? Awaited<Result> extends { data: infer Data }
-		? NonNullable<Data>
-		: never
-	: never;
+import type { TreatyData } from '@web/lib/treaty-data';
 
 type StoredFiles = Extract<
 	TreatyData<typeof authenticatedApi.files.get>,

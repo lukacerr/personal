@@ -44,9 +44,14 @@ export function shouldRestorePaletteFocus(reason: 'dismiss' | 'navigate') {
 	return reason === 'dismiss';
 }
 
+/**
+ * Ctrl+Space (Shift allowed, for Vivaldi which claims the plain chord). Never
+ * a key the browser already uses for something people do — Ctrl+P claimed
+ * printing app-wide via preventDefault.
+ */
 export function isCommandPaletteShortcut(event: CommandPaletteShortcut) {
 	return (
-		(event.key === ' ' || event.key === 'p') &&
+		event.key === ' ' &&
 		event.ctrlKey &&
 		!event.metaKey &&
 		!event.altKey &&

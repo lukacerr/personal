@@ -14,6 +14,30 @@ import { paymentsRouter } from './payments';
 import { publicFilesRouter } from './public-files';
 import { publicNotesRouter } from './public-notes';
 
+/**
+ * `/health` is anonymous and fans out to Neon, Upstash and R2 on every hit, so
+ * each probe has a real cost billed per request. A short in-memory memo caps
+ * what a public prober can make this instance spend, while a ~10 s staleness on
+ * a health signal changes nothing for its readers. Per instance on purpose:
+ * putting it in Redis would make the health check depend on one of the very
+ * services it reports on.
+ */
+const HEALTH_CACHE_MS = 10_000;
+let lastHealth:
+	| {
+			at: number;
+			body: {
+				status: 'operational' | 'partial';
+				checkedAt: string;
+				services: {
+					dbCheck: boolean;
+					cacheCheck: boolean;
+					storageCheck: boolean;
+				};
+			};
+	  }
+	| undefined;
+
 export const app = new Elysia()
 	.onError(({ code, error, status }) => {
 		if (code === 'VALIDATION')
@@ -89,6 +113,11 @@ export const app = new Elysia()
 	.get(
 		'/health',
 		async ({ status }) => {
+			if (lastHealth && Date.now() - lastHealth.at < HEALTH_CACHE_MS)
+				return lastHealth.body.status === 'operational'
+					? lastHealth.body
+					: status(503, lastHealth.body);
+
 			const [dbCheck, cacheCheck, storageCheck] = await Promise.all([
 				db
 					.execute('SELECT true')
@@ -108,10 +137,11 @@ export const app = new Elysia()
 			const isOperational = Object.values(services).every(Boolean);
 
 			const response = {
-				status: isOperational ? 'operational' : 'partial',
+				status: isOperational ? ('operational' as const) : ('partial' as const),
 				checkedAt: new Date().toISOString(),
 				services,
 			};
+			lastHealth = { at: Date.now(), body: response };
 
 			return isOperational ? response : status(503, response);
 		},

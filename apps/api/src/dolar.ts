@@ -9,7 +9,7 @@ import { z } from 'zod';
  * the feed lies — is testable without a network or a Redis.
  */
 
-/** Prefixed so it can never collide with Drizzle's global query cache. */
+/** Prefixed by system and versioned, like every key in this shared Redis. */
 export const USD_RATE_KEY = 'finance:usd-rate:v1';
 
 /**
@@ -51,6 +51,18 @@ const dolarQuote = z
 export type UsdQuote = { compra: number; venta: number; fetchedAt: number };
 export type UsdRate = UsdQuote & { stale: boolean };
 
+/**
+ * What a cached entry must look like to be believed. Redis is shared
+ * infrastructure and its contents are not this module's to trust: anything that
+ * does not parse is a cache miss — refetch, never a crash and never a garbage
+ * number handed to callers or stamped onto rows.
+ */
+const cachedQuote = z.object({
+	compra: rate,
+	venta: rate,
+	fetchedAt: z.number().int().nonnegative(),
+});
+
 /** The two sides of a response worth believing, or `undefined`. */
 export function parseDolarQuote(payload: unknown) {
 	const parsed = dolarQuote.safeParse(payload);
@@ -59,7 +71,7 @@ export function parseDolarQuote(payload: unknown) {
 }
 
 type QuoteCache = {
-	get: (key: string) => Promise<UsdQuote | null | undefined>;
+	get: (key: string) => Promise<unknown>;
 	set: (
 		key: string,
 		value: UsdQuote,
@@ -86,8 +98,9 @@ export function createUsdRateReader({
 	now,
 }: RateReaderDependencies) {
 	return async function readUsdRate(): Promise<UsdRate | undefined> {
-		const cached =
-			(await store.get(USD_RATE_KEY).catch(() => undefined)) ?? undefined;
+		const raw = await store.get(USD_RATE_KEY).catch(() => undefined);
+		const parsed = cachedQuote.safeParse(raw);
+		const cached = parsed.success ? parsed.data : undefined;
 		const at = now();
 		if (cached && at - cached.fetchedAt < USD_RATE_FRESH_MS)
 			return { ...cached, stale: false };

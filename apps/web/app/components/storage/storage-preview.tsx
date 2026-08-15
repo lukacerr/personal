@@ -37,9 +37,15 @@ export function StoragePreview({
 	const [rows, setRows] = useState<Array<Array<unknown>>>();
 	const documentRef = useRef<HTMLDivElement>(null);
 	const kind = file ? previewKind(file.contentType) : 'unknown';
+	// The route recomputes `file` with `.find(...)` over an array the store
+	// replaces on every mutation, so the same file arrives as a new object
+	// whenever anything else changes. The effect keys on the fields it reads,
+	// or renaming another file re-downloads the one being previewed.
+	const fileId = file?.id;
+	const contentType = file?.contentType ?? '';
 
 	useEffect(() => {
-		if (!file) return;
+		if (!fileId) return;
 		let current = true;
 		const controller = new AbortController();
 		setState({ status: 'loading' });
@@ -50,7 +56,7 @@ export function StoragePreview({
 		documentRef.current?.replaceChildren();
 
 		(async () => {
-			const link = await getFileLink(file.id, 'inline');
+			const link = await getFileLink(fileId, 'inline');
 			if (!current) return;
 			setUrl(link);
 
@@ -74,7 +80,7 @@ export function StoragePreview({
 				setText(await readTextPrefix(response, MAX_TEXT_BYTES));
 			} else if (kind === 'sheet') {
 				const buffer = await response.arrayBuffer();
-				setRows(await readSheet(buffer, file.contentType));
+				setRows(await readSheet(buffer, contentType));
 			} else if (kind === 'document') {
 				const buffer = await response.arrayBuffer();
 				const container = documentRef.current;
@@ -105,7 +111,7 @@ export function StoragePreview({
 			current = false;
 			controller.abort();
 		};
-	}, [file, kind]);
+	}, [contentType, fileId, kind]);
 
 	if (!file) return null;
 

@@ -1,8 +1,6 @@
 import { note } from '@api/schema/note';
 import type { Block } from '@blocknote/core';
-import { desc } from 'drizzle-orm';
 import {
-	index,
 	jsonb,
 	pgTable,
 	primaryKey,
@@ -34,8 +32,7 @@ export const noteMutation = pgTable(
 		delta: jsonb().$type<Delta>(),
 		baseCreatedAt: timestamp(),
 	},
-	(t) => [
-		primaryKey({ columns: [t.noteId, t.createdAt] }),
-		index('note_mutation_latest').on(t.noteId, desc(t.createdAt)),
-	],
+	// The composite primary key also serves newest-first reads: a btree scans
+	// backwards as cheaply as forwards, so no separate descending index.
+	(t) => [primaryKey({ columns: [t.noteId, t.createdAt] })],
 );

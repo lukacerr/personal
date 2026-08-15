@@ -1,5 +1,9 @@
 import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
-import { type AppSystem, matchesCommandQuery } from '@web/lib/app-systems';
+import {
+	type AppSystem,
+	matchesCommandQuery,
+	systemPath,
+} from '@web/lib/app-systems';
 import { collectFolderPaths, storageBreadcrumb } from '@web/lib/storage';
 import type { StoredFile } from '@web/lib/storage-api';
 import { storageSnapshot, useStorageStore } from '@web/lib/storage-store';
@@ -7,9 +11,8 @@ import { FileIcon, FolderIcon, FolderOpenIcon } from 'lucide-react';
 
 const STORAGE_PATH = '/storage';
 
-function storagePath(params: Record<string, string>) {
-	return `${STORAGE_PATH}?${new URLSearchParams(params).toString()}`;
-}
+const storagePath = (params: Record<string, string>) =>
+	systemPath(STORAGE_PATH, params);
 
 /** At most this many folders, so files always have room in the results. */
 const FOLDER_RESULTS = 5;
@@ -38,9 +41,14 @@ export const storageSystem: AppSystem = {
 
 	/**
 	 * Storage keeps no local database, so nothing the shell watches would ever
-	 * tell it these commands changed. The store reports for itself instead.
+	 * tell it these commands changed. The store reports for itself instead —
+	 * only when the index itself moves: the shell re-runs every system's
+	 * loaders on each report, and a status flip changes nothing it can show.
 	 */
-	subscribe: (onChange) => useStorageStore.subscribe(onChange),
+	subscribe: (onChange) =>
+		useStorageStore.subscribe((state, previous) => {
+			if (state.files !== previous.files) onChange();
+		}),
 
 	/**
 	 * The index is fetched the first time somebody actually searches, not when

@@ -13,18 +13,26 @@ import {
 	useSidebar,
 } from '@web/components/ui/sidebar';
 import { appNavigation } from '@web/lib/app-navigation';
+import { clearLocalSystemData } from '@web/lib/app-systems';
 import { useAuthStore } from '@web/lib/auth-store';
-import { clearLocalNotes } from '@web/lib/notes-db';
 import { LogOutIcon } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router';
+import { toast } from 'sonner';
 
 export function AppSidebar() {
 	const clearSession = useAuthStore(({ clearSession }) => clearSession);
 	const { isMobile, setOpenMobile } = useSidebar();
 	const { pathname } = useLocation();
 	const signOut = async () => {
-		await clearLocalNotes();
-		clearSession();
+		try {
+			await clearLocalSystemData();
+		} catch {
+			// Signing out must still happen, but leaving data behind on a device
+			// being handed back is worth saying out loud, at the point of action.
+			toast.error('Some local data could not be cleared from this device.');
+		} finally {
+			clearSession();
+		}
 	};
 
 	return (

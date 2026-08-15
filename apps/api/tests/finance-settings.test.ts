@@ -5,7 +5,7 @@ import {
 	FINANCE_SETTINGS_KEY,
 	type FinanceSettings,
 } from '@api/finance-settings';
-import { app } from '@api/index';
+import { request } from './helpers';
 
 /** A cache stub that records what was written, standing in for Upstash. */
 function fakeCache(initial?: unknown) {
@@ -27,10 +27,6 @@ const SETTINGS: FinanceSettings = {
 	budget: { amount: 3_000_000, currency: 'ars' },
 	range: { from: 1_754_006_400_000, toExclusive: 1_756_684_800_000 },
 };
-
-async function request(path: string, init?: RequestInit) {
-	return app.handle(new Request(`http://localhost${path}`, init));
-}
 
 describe('shared finance settings', () => {
 	it('scopes the key under its own prefix', () => {
@@ -141,6 +137,27 @@ describe('the finance settings endpoints', () => {
 				})
 			).status,
 		).toBe(422);
+	});
+
+	/**
+	 * The current-month range ends at the first day of the next month, so a
+	 * range bound legitimately sits weeks in the future. The clock-skew cap on
+	 * sync clocks must never apply to these.
+	 */
+	it('accepts a range reaching into the future, as the current month does', async () => {
+		const response = await request('/payments/settings', {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				range: {
+					from: Date.now() - 1000,
+					toExclusive: Date.now() + 30 * 24 * 60 * 60 * 1000,
+				},
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		await cache.del(FINANCE_SETTINGS_KEY);
 	});
 
 	it('accepts an open range on either side', async () => {

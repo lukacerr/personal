@@ -1,7 +1,7 @@
 import { authPlugin } from '@api/auth';
 import { decryptCredentialValue } from '@api/credentials-crypto';
 import { db, env } from '@api/env';
-import { entityTag, isUnchanged } from '@api/http-cache';
+import { createIndexCache } from '@api/http-cache';
 import { credential } from '@api/schema';
 import { eq } from 'drizzle-orm';
 import Elysia, { status } from 'elysia';
@@ -64,6 +64,13 @@ async function inspectEnvelope(envelope: string) {
 		: ('ok' as const);
 }
 
+/**
+ * The remembered tag of `GET /credentials`, so a poll that changed nothing
+ * costs one Redis GET instead of reading every envelope out of Neon. Every
+ * handler below that writes the `credential` table drops it before responding.
+ */
+const indexCache = createIndexCache('credentials');
+
 export const credentialsRouter = new Elysia({
 	prefix: '/credentials',
 	tags: ['Credentials'],
@@ -71,18 +78,15 @@ export const credentialsRouter = new Elysia({
 	.use(authPlugin)
 	.get(
 		'/',
-		async ({ request, set }) => {
-			const credentials = await db
-				.select(credentialColumns)
-				.from(credential)
-				.orderBy(credential.title)
-				.$withCache(false);
+		async ({ request, set }) =>
+			indexCache.conditional(request, set, async () => {
+				const credentials = await db
+					.select(credentialColumns)
+					.from(credential)
+					.orderBy(credential.title);
 
-			const payload = credentials.map(serialize);
-			const tag = entityTag(payload);
-			set.headers.etag = tag;
-			return isUnchanged(request, tag) ? status(304) : payload;
-		},
+				return credentials.map(serialize);
+			}),
 		{ detail: { summary: 'List credentials' } },
 	)
 	.post(
@@ -98,6 +102,7 @@ export const credentialsRouter = new Elysia({
 				.insert(credential)
 				.values({ title: body.title, value: body.value })
 				.returning(credentialColumns);
+			await indexCache.invalidate();
 
 			if (!created) throw new Error('Insert returned no row');
 			return status(201, serialize(created));
@@ -114,8 +119,7 @@ export const credentialsRouter = new Elysia({
 				.select(credentialColumns)
 				.from(credential)
 				.where(eq(credential.id, params.id))
-				.limit(1)
-				.$withCache(false);
+				.limit(1);
 
 			if (!result) return status(404, { error: 'CREDENTIAL_NOT_FOUND' });
 			return serialize(result);
@@ -149,6 +153,7 @@ export const credentialsRouter = new Elysia({
 				.set(changes)
 				.where(eq(credential.id, params.id))
 				.returning(credentialColumns);
+			await indexCache.invalidate();
 
 			if (!updated) return status(404, { error: 'CREDENTIAL_NOT_FOUND' });
 			return serialize(updated);
@@ -170,6 +175,7 @@ export const credentialsRouter = new Elysia({
 		'/:id',
 		async ({ params }) => {
 			await db.delete(credential).where(eq(credential.id, params.id));
+			await indexCache.invalidate();
 			return status(204);
 		},
 		{

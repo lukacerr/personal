@@ -32,7 +32,7 @@ import {
 } from '@web/lib/notes-math';
 import type { NotesEditor } from '@web/lib/notes-schema';
 import { SigmaIcon } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const MATH_MENU_GROUP = 'Math';
 
@@ -66,7 +66,12 @@ function LatexOutput({
 	latex: string;
 	displayMode: boolean;
 }) {
-	const rendered = renderLatex(latex, displayMode);
+	// KaTeX parses and renders on every call, and a node view re-renders on
+	// every editor state change; the markup only depends on these two inputs.
+	const rendered = useMemo(
+		() => renderLatex(latex, displayMode),
+		[latex, displayMode],
+	);
 	if (rendered.kind === 'empty')
 		return (
 			<span className="text-sm text-muted-foreground">Empty equation</span>

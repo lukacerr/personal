@@ -400,7 +400,7 @@ function CalendarItemRowBase({
 			</div>
 			<RowActions
 				item={item}
-				always={true}
+				always={actionsInMenu}
 				onEdit={() => handlers.onEdit(item)}
 				onClone={() => handlers.onClone(item)}
 				onDelete={() => handlers.onDelete(event)}
