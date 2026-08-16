@@ -117,12 +117,26 @@ Lee este archivo antes de modificar `apps/web/app/components/calendar/**`,
   todos los anchos.** Hubo botones inline desde `sm` y se sacaron a pedido: la
   pantalla es keyboard-first (`e`, `c`, Delete cubren lo mismo) y el espacio
   horizontal se prefiere para leer títulos. No los reintroduzcas; el trigger
-  conserva `max-sm:size-11` como target táctil.
+  conserva `max-sm:size-11` como target táctil. El menú además lleva un
+  `finalFocus` que **no devuelve el foco al trigger si un campo editable ya lo
+  reclamó**: clonar abre el editor de la copia mientras el menú todavía se
+  está cerrando, y la restauración lo blureaba — y el blur del editor
+  commitea, así que se cerraba solo antes de una tecla.
+- **Clone ancla la copia en la ocurrencia clonada (`item.date`), no en el
+  ancla de la serie**: un ancla vieja criaba ocurrencias pasadas fantasma al
+  pagear atrás y abría el editor en una fecha que `MM/dd` no puede decir. La
+  `editingKey` de la copia se arma con esa misma fecha — con la del ancla
+  apuntaba a una fila que la ventana no renderiza y el editor nunca abría
+  (el bug original de "clonar no deja editar").
 - **El modal de evento murió a propósito** (los date pickers de WebKitGTK y
   la edición por texto lo dejaron sin trabajo): crear es la línea de add y
   editar es **inline** — la fila se convierte en su propio texto vía
   `formatQuickAdd`, que es inversa exacta de `parseQuickAdd` (hay test de
-  round-trip; si tocás una tenés que tocar la otra). Enter commitea,
+  round-trip; si tocás una tenés que tocar la otra). **Una serie nunca
+  deletrea un año**: el ancla que `MM/dd` no alcanza no se escribe, y
+  `editedEventDate` la conserva al commitear un texto sin fecha
+  (`dateExplicit` en el parse) — el par round-tripea a nivel evento, no a
+  nivel texto. Escribir una fecha explícita sí rebasea la serie. Enter commitea,
   Shift+Enter agrega línea de details, Esc descarta, blur commitea. Solo
   sobreviven el confirm de borrado y el cheatsheet de `?`. `a` y `?new=1` de
   la palette llevan el caret a la línea de add.
@@ -164,8 +178,12 @@ Lee este archivo antes de modificar `apps/web/app/components/calendar/**`,
   (backlog, días, schedule) vía `order-*` sobre el mismo markup — no dupliques
   secciones para reordenarlas. Ninguna columna scrollea por su cuenta.
 - **Hay un solo quick-add y vive en la toolbar**, con la gramática completa de
-  la nota: `08/16 12:00 Texto` — fecha y hora opcionales, hoy por defecto, año
-  inferido hacia adelante (`01/05` en agosto es enero próximo). Una fecha u
+  la nota: `08/16 12:00 Texto` — fecha y hora opcionales, hoy por defecto. El
+  año de un `MM/dd` se infiere primero al **pasado reciente** (hasta 35 días
+  atrás, cruzando el año: `12/28` en enero es el diciembre que acaba de pasar)
+  y si no hacia adelante (`01/05` en agosto es enero próximo); sin la ventana
+  hacia atrás, la edición inline no podía round-tripear una fecha recién
+  vivida y caía a `YYYY-MM-DD`. Una fecha u
   hora imposible es palabras, y una pelada sin texto después queda como título
   (`parseQuickAdd`, pura y testeada). Enter crea y conserva el foco para
   encadenar líneas. **Todo entra por esa gramática**: recurrencia (`*repeat`),

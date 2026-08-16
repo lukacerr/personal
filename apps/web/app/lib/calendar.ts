@@ -243,26 +243,41 @@ export function parseTimeInput(value: string): number | null {
 	return hours * 60 + minutes;
 }
 
-/** `MM/dd` in this year, or the next one if that day already went by. */
-function resolveShortDate(token: string, today: string): string | null {
-	const full = /^\d{4}-\d{2}-\d{2}$/.test(token) ? token : null;
-	const match = /^(\d{1,2})\/(\d{1,2})$/.exec(token);
-	if (!full && !match) return null;
-	const pad = (value: string) => value.padStart(2, '0');
-	const sameYear =
-		full ??
-		`${today.slice(0, 4)}-${pad(match?.[1] ?? '')}-${pad(match?.[2] ?? '')}`;
-	const candidate =
-		!full && sameYear < today
-			? `${Number(today.slice(0, 4)) + 1}${sameYear.slice(4)}`
-			: sameYear;
-	// The parts must survive the round trip: 02/30 is words, not a date.
+/** How far back `MM/dd` reads as the recent past instead of rolling forward. */
+const SHORT_DATE_LOOKBEHIND_DAYS = 35;
+
+/** The parts must survive the round trip: 02/30 is words, not a date. */
+function dayExists(candidate: string) {
 	const [year, month, day] = candidate.split('-').map(Number);
 	const parsed = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day));
-	return parsed.getUTCMonth() === (month ?? 1) - 1 &&
-		parsed.getUTCDate() === day
-		? candidate
-		: null;
+	return (
+		parsed.getUTCMonth() === (month ?? 1) - 1 && parsed.getUTCDate() === day
+	);
+}
+
+/**
+ * `MM/dd` names the recent past when that day just went by — an inline edit
+ * must round-trip yesterday's date, and "08/10 dinner" typed on the 14th is a
+ * late log, not next year — and otherwise the nearest today-or-forward day.
+ * The look-behind wraps the year (late December read in early January), and
+ * beyond it the old rule stands: the past rolls forward.
+ */
+function resolveShortDate(token: string, today: string): string | null {
+	const full = /^\d{4}-\d{2}-\d{2}$/.test(token) ? token : null;
+	if (full) return dayExists(full) ? full : null;
+	const match = /^(\d{1,2})\/(\d{1,2})$/.exec(token);
+	if (!match) return null;
+	const pad = (value: string) => value.padStart(2, '0');
+	const year = Number(today.slice(0, 4));
+	const monthDay = `${pad(match[1] ?? '')}-${pad(match[2] ?? '')}`;
+	const behind = addDays(today, -SHORT_DATE_LOOKBEHIND_DAYS);
+	// The window is shorter than a year, so at most one year fits it.
+	for (const candidate of [year - 1, year].map((y) => `${y}-${monthDay}`))
+		if (dayExists(candidate) && behind <= candidate && candidate < today)
+			return candidate;
+	for (const candidate of [year, year + 1].map((y) => `${y}-${monthDay}`))
+		if (dayExists(candidate) && candidate >= today) return candidate;
+	return null;
 }
 
 const KANJI_TO_WEEKDAY = new Map<string, number>(
@@ -302,6 +317,10 @@ export type QuickAddParse = {
 	done: boolean;
 	/** `null` is the backlog, asked for with `!b`. */
 	date: string | null;
+	/** Whether the text wrote the date out, or `date` is just today's default.
+	 * `editedEventDate` needs the difference: a series' edit text omits an
+	 * anchor `MM/dd` cannot spell, and committing it must not rebase to today. */
+	dateExplicit: boolean;
 	timeMinutes: number | null;
 	tag: string | null;
 	recurrence: EventRecurrence | null;
@@ -369,11 +388,13 @@ export function parseQuickAdd(
 	}
 
 	let date: string | null = today;
+	let dateExplicit = false;
 	let timeMinutes: number | null = null;
 	if (rest.length > 1) {
 		const explicit = resolveShortDate(rest[0] ?? '', today);
 		if (explicit !== null) {
 			date = explicit;
+			dateExplicit = true;
 			rest.shift();
 		}
 	}
@@ -397,18 +418,27 @@ export function parseQuickAdd(
 			title,
 			done: false,
 			date: null,
+			dateExplicit: false,
 			timeMinutes: null,
 			tag,
 			recurrence: null,
 			details,
 		};
-	return { title, done, date, timeMinutes, tag, recurrence, details };
+	return {
+		title,
+		done,
+		date,
+		dateExplicit,
+		timeMinutes,
+		tag,
+		recurrence,
+		details,
+	};
 }
 
-/** How far ahead `MM/dd` can point before the year has to be spelled out. */
+/** `MM/dd` wherever it finds its way back on parse; the full date beyond. */
 function shortDateToken(date: string, today: string) {
-	return date >= today &&
-		resolveShortDate(formatShortDate(date), today) === date
+	return resolveShortDate(formatShortDate(date), today) === date
 		? formatShortDate(date)
 		: date;
 }
@@ -427,10 +457,12 @@ function formatRepeat(recurrence: EventRecurrence, today: string) {
 
 /**
  * The exact inverse of `parseQuickAdd`, which is what makes inline editing
- * honest: the row turns into this text, and saving parses it back. The date
- * is always written — editing must not re-default to today — and it falls
- * back to the full `YYYY-MM-DD` whenever `MM/dd` would not resolve to the
- * same day again (the past rolls forward on parse).
+ * honest: the row turns into this text, and saving parses it back. A one-off
+ * always writes its date — editing must not re-default to today — falling
+ * back to the full `YYYY-MM-DD` when `MM/dd` would not resolve to the same
+ * day again. A series never spells a year: an anchor `MM/dd` cannot reach is
+ * left off the text, and `editedEventDate` keeps it on commit — the pair
+ * round-trips at the event level, not the text level.
  */
 export function formatQuickAdd(event: CalendarEvent, today: string) {
 	const parts: string[] = [];
@@ -438,7 +470,8 @@ export function formatQuickAdd(event: CalendarEvent, today: string) {
 	// backlog flag last — absence of the leading `[x]` is "not done".
 	if (event.date !== null && event.completedAt !== null) parts.push('[x]');
 	if (event.date !== null) {
-		parts.push(shortDateToken(event.date, today));
+		const token = shortDateToken(event.date, today);
+		if (!event.recurrence || token !== event.date) parts.push(token);
 		if (event.timeMinutes !== null) parts.push(formatTime(event.timeMinutes));
 	}
 	parts.push(event.title);
@@ -449,6 +482,18 @@ export function formatQuickAdd(event: CalendarEvent, today: string) {
 
 	const head = parts.join(' ');
 	return event.details ? `${head}\n${event.details}` : head;
+}
+
+/**
+ * The date an inline edit means. A series whose text carries no date keeps
+ * its own anchor: the editor leaves off an anchor `MM/dd` cannot spell, and
+ * re-parsing that text must not silently rebase the series to today. Writing
+ * a date out rebases it, as asked; everything else is `parseQuickAdd`'s call.
+ */
+export function editedEventDate(event: CalendarEvent, parsed: QuickAddParse) {
+	return event.recurrence && parsed.recurrence && !parsed.dateExplicit
+		? event.date
+		: parsed.date;
 }
 
 /* -------------------------------------------------------------------------- */

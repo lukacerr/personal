@@ -19,6 +19,7 @@ import {
 	collectEventTags,
 	completionsByKey,
 	dayAgenda,
+	editedEventDate,
 	isAddEventShortcut,
 	isCloneShortcut,
 	isEditSelectionShortcut,
@@ -354,6 +355,11 @@ export default function Calendar() {
 	function cloneItem(item: AgendaItem) {
 		const source = item.event;
 		const id = crypto.randomUUID();
+		// The copy starts at the occurrence it was cloned from, not at the
+		// series' anchor: an old anchor would grow phantom past occurrences
+		// and open the editor on a date MM/dd cannot spell. For a one-off
+		// they are the same day; the backlog has no day at all.
+		const date = item.date || source.date;
 		createLocalEvent(calendarDb, {
 			id,
 			createdAt: Date.now(),
@@ -361,12 +367,12 @@ export default function Calendar() {
 			title: source.title,
 			details: source.details,
 			tag: source.tag,
-			date: source.date,
+			date,
 			timeMinutes: source.timeMinutes,
 			recurrence: source.recurrence,
 		}).then(() => {
 			remember(() => deleteLocalEvent(calendarDb, id));
-			const key = `${id}:${source.date ?? 'b'}`;
+			const key = `${id}:${date ?? 'b'}`;
 			setSelectedKey(key);
 			setEditingKey(key);
 			pushSoon();
@@ -411,7 +417,7 @@ export default function Calendar() {
 			title: parsed.title,
 			details: parsed.details,
 			tag: parsed.tag,
-			date: parsed.date,
+			date: editedEventDate(event, parsed),
 			timeMinutes: parsed.timeMinutes,
 			recurrence: parsed.recurrence,
 			// A series has no row-level done mark; only occurrences resolve. For

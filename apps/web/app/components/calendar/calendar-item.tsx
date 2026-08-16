@@ -23,6 +23,7 @@ import {
 } from '@web/lib/calendar';
 import type { CalendarEvent } from '@web/lib/calendar-api';
 import type { LocalEvent } from '@web/lib/calendar-db';
+import { isEditableTarget } from '@web/lib/keyboard';
 import { cn } from '@web/lib/utils';
 import {
 	CopyIcon,
@@ -148,7 +149,14 @@ function RowActions({
 					</Button>
 				}
 			/>
-			<DropdownMenuContent align="end">
+			<DropdownMenuContent
+				align="end"
+				// Closing must not reclaim focus an inline editor already took:
+				// cloning opens the copy's editor while this menu is still on its
+				// way out, and restoring focus to the trigger would blur the
+				// editor — whose blur commits, closing it before one keystroke.
+				finalFocus={() => !isEditableTarget(document.activeElement)}
+			>
 				<DropdownMenuItem onClick={onEdit}>
 					<PencilIcon /> Edit
 				</DropdownMenuItem>

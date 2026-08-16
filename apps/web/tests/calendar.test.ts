@@ -5,6 +5,7 @@ import {
 	backlogItems,
 	collectEventTags,
 	dayAgenda,
+	editedEventDate,
 	formatQuickAdd,
 	formatTime,
 	isoWeekday,
@@ -87,6 +88,7 @@ describe('parseQuickAdd', () => {
 			title: 'Innovación',
 			done: false,
 			date: '2026-08-18',
+			dateExplicit: true,
 			timeMinutes: 1125,
 			tag: 'uade',
 			recurrence: { kind: 'weekly', weekdays: [2], until: '2026-12-15' },
@@ -99,6 +101,7 @@ describe('parseQuickAdd', () => {
 			title: 'Lavaseca',
 			done: false,
 			date: today,
+			dateExplicit: false,
 			timeMinutes: null,
 			tag: null,
 			recurrence: null,
@@ -115,6 +118,7 @@ describe('parseQuickAdd', () => {
 			title: 'N4 JP',
 			done: false,
 			date: null,
+			dateExplicit: false,
 			timeMinutes: null,
 			tag: 'idioma',
 			recurrence: null,
@@ -159,6 +163,23 @@ describe('parseQuickAdd', () => {
 		});
 		expect(parseQuickAdd('2026-08-20 Turno', today)).toMatchObject({
 			date: '2026-08-20',
+			dateExplicit: true,
+		});
+	});
+
+	it('reads a date a few weeks back as the recent past, not next year', () => {
+		// Yesterday-ish is the date just lived, not the same day next year:
+		// this is what lets an inline edit round-trip a recent anchor as MM/dd.
+		expect(parseQuickAdd('08/10 Cena', today)).toMatchObject({
+			date: '2026-08-10',
+		});
+		// The window wraps the year: late December read in early January.
+		expect(parseQuickAdd('12/28 Cena', '2027-01-10')).toMatchObject({
+			date: '2026-12-28',
+		});
+		// Further back than the window, the old rule stands: forward.
+		expect(parseQuickAdd('07/01 Cena', today)).toMatchObject({
+			date: '2027-07-01',
 		});
 	});
 
@@ -228,13 +249,69 @@ describe('formatQuickAdd', () => {
 		});
 	});
 
-	it('spells the year out when MM/dd could not find its way back', () => {
-		// A past date would otherwise roll forward a year on the next parse.
-		const past = makeEvent({ title: 'Viejo', date: '2026-08-10' });
-		expect(formatQuickAdd(past, today)).toBe('2026-08-10 Viejo');
-		expect(parseQuickAdd(formatQuickAdd(past, today), today)).toMatchObject({
+	it('keeps MM/dd for the recent past and spells the year beyond it', () => {
+		// Within the look-behind window MM/dd finds its way back on parse.
+		const recent = makeEvent({ title: 'Cena', date: '2026-08-10' });
+		expect(formatQuickAdd(recent, today)).toBe('08/10 Cena');
+		expect(parseQuickAdd('08/10 Cena', today)).toMatchObject({
 			date: '2026-08-10',
 		});
+		// Beyond it, MM/dd would roll forward a year, so the year is spelled.
+		const old = makeEvent({ title: 'Viejo', date: '2026-01-10' });
+		expect(formatQuickAdd(old, today)).toBe('2026-01-10 Viejo');
+		expect(parseQuickAdd(formatQuickAdd(old, today), today)).toMatchObject({
+			date: '2026-01-10',
+		});
+	});
+
+	it('leaves an aged series anchor off the text instead of spelling it', () => {
+		// A series edited months in never shows YYYY-MM-DD: the anchor MM/dd
+		// cannot express is simply not written, and committing a dateless
+		// series keeps the anchor (see editedEventDate).
+		const series = makeEvent({
+			title: 'Fast',
+			date: '2026-01-10',
+			timeMinutes: 525,
+			recurrence: { kind: 'everyDays', interval: 1 },
+		});
+		expect(formatQuickAdd(series, today)).toBe('08:45 Fast *d');
+		// A reachable anchor still prints, as MM/dd.
+		const fresh = makeEvent({
+			title: 'Fast',
+			date: '2026-08-10',
+			timeMinutes: 525,
+			recurrence: { kind: 'everyDays', interval: 1 },
+		});
+		expect(formatQuickAdd(fresh, today)).toBe('08/10 08:45 Fast *d');
+	});
+});
+
+describe('editedEventDate', () => {
+	const today = '2026-08-14';
+
+	it('keeps the anchor of a series whose edit text carries no date', () => {
+		const series = makeEvent({
+			date: '2026-01-10',
+			timeMinutes: 525,
+			recurrence: { kind: 'everyDays', interval: 1 },
+		});
+		const parsed = parseQuickAdd(formatQuickAdd(series, today), today);
+		expect(parsed && editedEventDate(series, parsed)).toBe('2026-01-10');
+	});
+
+	it('rebases the series when a date is written out, as asked', () => {
+		const series = makeEvent({
+			date: '2026-01-10',
+			recurrence: { kind: 'everyDays', interval: 1 },
+		});
+		const parsed = parseQuickAdd('08/20 Fast *d', today);
+		expect(parsed && editedEventDate(series, parsed)).toBe('2026-08-20');
+	});
+
+	it('moves a dateless one-off to today, as before', () => {
+		const oneOff = makeEvent({ date: '2026-08-18' });
+		const parsed = parseQuickAdd('Lavaseca', today);
+		expect(parsed && editedEventDate(oneOff, parsed)).toBe(today);
 	});
 });
 

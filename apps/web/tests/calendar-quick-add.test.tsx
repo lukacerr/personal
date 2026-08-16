@@ -20,6 +20,7 @@ describe('CalendarQuickAdd', () => {
 			title: 'Regalo',
 			done: false,
 			date: '2026-08-16',
+			dateExplicit: true,
 			timeMinutes: 720,
 			tag: null,
 			recurrence: null,
