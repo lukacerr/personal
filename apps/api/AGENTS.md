@@ -47,7 +47,10 @@ Lee este archivo antes de modificar:
 - Deliberadamente sin cache: `GET /files/unreferenced` (cara pero acción manual
   rara, y su invalidación cruzaría Notes y Storage), los GET de una sola fila y
   los routers públicos (una ida barata, y despublicar debe cortar al instante),
-  y los presigned links (la firma debe ser fresca). La cotización y los
+  y los presigned links (la firma debe ser fresca). Los routers públicos además
+  **escriben**: cada hit servido incrementa `view_count`, así que también
+  invalidan el index tag de su system, con su propia instancia de
+  `createIndexCache` sobre la misma key. La cotización y los
   settings ya tienen sus stores manuales (`dolar.ts`, `finance-settings.ts`,
   `calendar-settings.ts`).
 
@@ -161,7 +164,7 @@ Lee este archivo antes de modificar:
 - La lógica de diff y reconstrucción vive en `apps/api/src/note-versions.ts` y es pura, para poder testearla sin base de datos. Su `objectHash` debe devolver siempre un string, igual que el del cliente: devolver `undefined` hace que jsondiffpatch reporte cada item como borrado y re-agregado.
 - Si una cadena de deltas no se puede reconstruir, responde un error explícito y nunca un documento parcial o vacío.
 - `note.isPublic` es metadata, no contenido: solo el PATCH de metadata puede cambiarlo. `saveNoteBody` no lo acepta, para que un cliente desactualizado no despublique una nota al escribirla.
-- El acceso público a notas vive en `apps/api/src/public-notes.ts`, un router sin `authPlugin` que filtra por `isPublic` y devuelve únicamente `id`, `title` y `content`. La carpeta contenedora es estructura privada y no viaja con una nota compartida.
+- El acceso público a notas vive en `apps/api/src/public-notes.ts`, un router sin `authPlugin` que filtra por `isPublic` y devuelve únicamente `id`, `title` y `content`. La carpeta contenedora es estructura privada y no viaja con una nota compartida. Cada lectura servida incrementa `note.view_count` en el mismo `UPDATE … RETURNING` que la lee: servir y contar son una sola sentencia, así que una lectura nunca queda sin contar entre un select y un write. El contador es solo del índice privado; el payload público no lo lleva.
 - Una nota privada y una inexistente responden idénticamente en el router público. Distinguirlas convierte al endpoint en un oráculo de qué ids existen.
 
 ## Storage
@@ -182,4 +185,4 @@ Lee este archivo antes de modificar:
 - `file.uploadedFromNotes` distingue lo que subió el editor de Notes de lo que subió el explorador. Notes nunca borra un archivo cuando se va su bloque, así que esa columna es lo único que después permite preguntar cuáles ya no referencia nadie.
 - `GET /files/unreferenced` responde esa pregunta con una consulta jsonb: `not exists (select 1 from note, jsonb_path_query(note.content, '$.**.props.fileId') as ref where ref #>> '{}' = file.id::text)`. Va declarado **antes** de `/:id`, que parsea su parámetro como uuid y respondería 422. La extracción corre en Postgres y no en la API: una nota puede pesar 2 MiB y traerlas todas para recorrerlas en JavaScript es justo lo que hay que evitar. En modo lax, `$.**` reporta cada match más de una vez; a `not exists` no le importa, pero cualquier cosa que arme una lista de ids tiene que deduplicar.
 - Solo cuentan los documentos actuales. El historial guarda la mayoría de las versiones como deltas de jsondiffpatch, donde el id de un archivo eliminado queda en una ruta que depende del diff y no del schema. La consecuencia es aceptada: restaurar una versión vieja puede devolver un bloque cuyo archivo ya no está, y el bloque lo dice.
-- El acceso público a archivos vive en `apps/api/src/public-files.ts`, sin `authPlugin`: redirige a un presigned GET si `isPublic`, y responde 404 idéntico para privado e inexistente. Fuerza `Content-Disposition: attachment` para tipos que el browser ejecutaría (`text/html`, `image/svg+xml`, `*/*+xml`).
+- El acceso público a archivos vive en `apps/api/src/public-files.ts`, sin `authPlugin`: redirige a un presigned GET si `isPublic`, y responde 404 idéntico para privado e inexistente. Fuerza `Content-Disposition: attachment` para tipos que el browser ejecutaría (`text/html`, `image/svg+xml`, `*/*+xml`). Cada lectura servida incrementa `file.view_count` en el mismo `UPDATE … RETURNING` que resuelve la fila, **fijando `updatedAt` a sí mismo**: una vista no es una edición y sin ese pin el `$onUpdate` de la columna movería el reloj de la fila en cada hit anónimo.

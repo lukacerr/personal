@@ -51,6 +51,16 @@ async function publish(
 	});
 }
 
+/** Reads the counter the way the app does: from the private index. */
+async function viewCount(id: string) {
+	const response = await request('/notes');
+	const index = (await response.json()) as Array<{
+		id: string;
+		viewCount: number;
+	}>;
+	return index.find((row) => row.id === id)?.viewCount;
+}
+
 afterEach(async () => {
 	if (createdNoteIds.size > 0)
 		await db.delete(note).where(inArray(note.id, [...createdNoteIds]));
@@ -91,6 +101,40 @@ describe('Public notes', () => {
 		expect(denied.status).toBe(404);
 		expect(absent.status).toBe(404);
 		expect(await denied.json()).toEqual(await absent.json());
+	});
+
+	it('counts every public read', async () => {
+		const published = await createNote({ isPublic: true });
+
+		await request(`/public/notes/${published.id}`);
+		await request(`/public/notes/${published.id}`);
+
+		expect(await viewCount(published.id)).toBe(2);
+	});
+
+	it('does not count a read it refused', async () => {
+		const privateNote = await createNote({ isPublic: false });
+
+		await request(`/public/notes/${privateNote.id}`);
+
+		expect(await viewCount(privateNote.id)).toBe(0);
+	});
+
+	it('serves a fresh index after a public read', async () => {
+		const published = await createNote({ isPublic: true });
+		const first = await request('/notes');
+		const tag = first.headers.get('etag') ?? '';
+		const unchanged = await request('/notes', {
+			headers: { 'if-none-match': tag },
+		});
+		expect(unchanged.status).toBe(304);
+
+		await request(`/public/notes/${published.id}`);
+
+		const after = await request('/notes', {
+			headers: { 'if-none-match': tag },
+		});
+		expect(after.status).toBe(200);
 	});
 
 	it('stops serving a note as soon as it is unpublished', async () => {

@@ -66,7 +66,6 @@ export function CalendarSchedule({
 								item={item}
 								today={today}
 								showDate
-								actionsInMenu
 								selected={selectedKey === itemKey(item)}
 								editing={editingKey === itemKey(item)}
 								{...handlers}

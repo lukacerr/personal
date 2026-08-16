@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
 	bigint,
 	boolean,
+	integer,
 	pgTable,
 	timestamp,
 	uniqueIndex,
@@ -36,6 +37,8 @@ export const file = pgTable(
 		size: bigint({ mode: 'number' }).notNull(),
 		/** Readable by anyone holding the link, through the public router only. */
 		isPublic: boolean().notNull().default(false),
+		/** Times the public router served this file. Every hit counts once. */
+		viewCount: integer().notNull().default(0),
 		/**
 		 * Uploaded from the Notes editor rather than the Storage explorer. Notes
 		 * never deletes a file when its block goes away, so this is what makes it

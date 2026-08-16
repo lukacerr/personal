@@ -118,105 +118,48 @@ function InlineEditor({
 	);
 }
 
+/**
+ * The menu is the only form the actions take, at every width: the screen is
+ * keyboard-first (`e`, `c`, Delete), so inline buttons bought nothing on
+ * desktop and cost horizontal room the titles read better with.
+ */
 function RowActions({
 	item,
-	always,
 	onEdit,
 	onClone,
 	onDelete,
 }: {
 	item: AgendaItem;
-	/** In tight columns the menu is the only form the actions take. */
-	always: boolean;
 	onEdit: () => void;
 	onClone: () => void;
 	onDelete: () => void;
 }) {
-	const inline = (
-		<div
-			className={cn(
-				'items-center justify-end gap-0.5',
-				always ? 'hidden' : 'hidden sm:flex',
-			)}
-		>
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={`Edit: ${item.event.title}`}
-							onClick={onEdit}
-						>
-							<PencilIcon />
-						</Button>
-					}
-				/>
-				<TooltipContent>Edit</TooltipContent>
-			</Tooltip>
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={`Clone: ${item.event.title}`}
-							onClick={onClone}
-						>
-							<CopyIcon />
-						</Button>
-					}
-				/>
-				<TooltipContent>Clone</TooltipContent>
-			</Tooltip>
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={`Delete: ${item.event.title}`}
-							onClick={onDelete}
-							className="hover:text-destructive"
-						>
-							<Trash2Icon />
-						</Button>
-					}
-				/>
-				<TooltipContent>Delete</TooltipContent>
-			</Tooltip>
-		</div>
-	);
-
 	return (
-		<>
-			{inline}
-			<DropdownMenu>
-				<DropdownMenuTrigger
-					render={
-						<Button
-							variant="ghost"
-							size={always ? 'icon-sm' : 'icon'}
-							className={always ? undefined : 'size-11 sm:hidden'}
-							aria-label={`Actions for ${item.event.title}`}
-						>
-							<MoreHorizontalIcon />
-						</Button>
-					}
-				/>
-				<DropdownMenuContent align="end">
-					<DropdownMenuItem onClick={onEdit}>
-						<PencilIcon /> Edit
-					</DropdownMenuItem>
-					<DropdownMenuItem onClick={onClone}>
-						<CopyIcon /> Clone
-					</DropdownMenuItem>
-					<DropdownMenuItem variant="destructive" onClick={onDelete}>
-						<Trash2Icon /> Delete
-					</DropdownMenuItem>
-				</DropdownMenuContent>
-			</DropdownMenu>
-		</>
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						className="max-sm:size-11"
+						aria-label={`Actions for ${item.event.title}`}
+					>
+						<MoreHorizontalIcon />
+					</Button>
+				}
+			/>
+			<DropdownMenuContent align="end">
+				<DropdownMenuItem onClick={onEdit}>
+					<PencilIcon /> Edit
+				</DropdownMenuItem>
+				<DropdownMenuItem onClick={onClone}>
+					<CopyIcon /> Clone
+				</DropdownMenuItem>
+				<DropdownMenuItem variant="destructive" onClick={onDelete}>
+					<Trash2Icon /> Delete
+				</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }
 
@@ -230,7 +173,6 @@ function CalendarItemRowBase({
 	today,
 	showDate = false,
 	showTime = true,
-	actionsInMenu = false,
 	/** The backlog carries no checkbox: what is finished simply gets deleted. */
 	checkable = true,
 	selected = false,
@@ -241,7 +183,6 @@ function CalendarItemRowBase({
 	today: string;
 	showDate?: boolean;
 	showTime?: boolean;
-	actionsInMenu?: boolean;
 	checkable?: boolean;
 	selected?: boolean;
 	editing?: boolean;
@@ -400,7 +341,6 @@ function CalendarItemRowBase({
 			</div>
 			<RowActions
 				item={item}
-				always={actionsInMenu}
 				onEdit={() => handlers.onEdit(item)}
 				onClone={() => handlers.onClone(item)}
 				onDelete={() => handlers.onDelete(event)}
@@ -424,7 +364,6 @@ export const CalendarItemRow = memo(
 		previous.today === next.today &&
 		previous.showDate === next.showDate &&
 		previous.showTime === next.showTime &&
-		previous.actionsInMenu === next.actionsInMenu &&
 		previous.checkable === next.checkable &&
 		previous.selected === next.selected &&
 		previous.editing === next.editing,

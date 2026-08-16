@@ -161,6 +161,7 @@ export async function createLocalNote(
 			title,
 			path,
 			isPublic: false,
+			viewCount: 0,
 			createdAt: now,
 			updatedAt: now,
 			dirty: true,

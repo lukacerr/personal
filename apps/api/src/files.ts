@@ -132,6 +132,7 @@ const fileColumns = {
 	contentType: file.contentType,
 	size: file.size,
 	isPublic: file.isPublic,
+	viewCount: file.viewCount,
 	uploadedFromNotes: file.uploadedFromNotes,
 	createdAt: file.createdAt,
 	updatedAt: file.updatedAt,
@@ -144,6 +145,7 @@ type FileRow = {
 	contentType: string;
 	size: number;
 	isPublic: boolean;
+	viewCount: number;
 	uploadedFromNotes: boolean;
 	createdAt: Date;
 	updatedAt: Date;

@@ -15,6 +15,7 @@ function file(overrides: Partial<StoredFile> = {}) {
 		contentType: 'application/pdf',
 		size: 2048,
 		isPublic: false,
+		viewCount: 0,
 		createdAt: Date.UTC(2026, 0, 15),
 		updatedAt: Date.UTC(2026, 0, 15),
 		...overrides,
@@ -251,6 +252,24 @@ describe('Storage list', () => {
 			);
 		},
 	);
+
+	/**
+	 * The count sits beside the access badge because it only means something
+	 * while the file is reachable through its public link.
+	 */
+	it('shows how many times a public file was read beside its badge', () => {
+		renderList({ files: [file({ isPublic: true, viewCount: 12 })] });
+
+		expect(screen.getByText('12')).toBeTruthy();
+		expect(screen.getByText('views')).toBeTruthy();
+	});
+
+	it('shows no read count for a private file', () => {
+		renderList({ files: [file({ isPublic: false, viewCount: 12 })] });
+
+		expect(screen.queryByText('12')).toBeNull();
+		expect(screen.queryByText('views')).toBeNull();
+	});
 
 	it('offers a drag handle for folders as well as for files', () => {
 		renderList({ folders: ['reports'], files: [] });

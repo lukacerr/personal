@@ -75,9 +75,7 @@ Lee este archivo antes de modificar `apps/web/app/components/calendar/**`,
   hojeando: la pregunta que responde ("qué viene") no se mueve con las
   flechas. Cada serie aporta **una sola** próxima ocurrencia, marcada con el
   ícono de repetición — sin eso una serie rala (cada 30 días) sería
-  inencontrable, y con más de una el Schedule se inunda. Sus filas llevan las
-  acciones **en el menú a todo tamaño** (`actionsInMenu`): la columna es
-  angosta y cuatro botones inline rompían cada fila compleja. Sin separadores
+  inencontrable, y con más de una el Schedule se inunda. Sin separadores
   de mes: las fechas ya lo dicen.
 - La ventana actual abre en **hoy**, cubre **al menos catorce días** y se
   estira hasta cerrar en domingo, así el próximo finde completo siempre está a
@@ -115,6 +113,11 @@ Lee este archivo antes de modificar `apps/web/app/components/calendar/**`,
   debajo del Schedule: es lo menos urgente que hay en la pantalla.
 - Los items sin hora van después de los con hora, en orden de escritura
   (`createdAt`), que es como se leía la checklist de la nota.
+- **Las acciones de fila (Edit/Clone/Delete) viven solo en el menú `…`, en
+  todos los anchos.** Hubo botones inline desde `sm` y se sacaron a pedido: la
+  pantalla es keyboard-first (`e`, `c`, Delete cubren lo mismo) y el espacio
+  horizontal se prefiere para leer títulos. No los reintroduzcas; el trigger
+  conserva `max-sm:size-11` como target táctil.
 - **El modal de evento murió a propósito** (los date pickers de WebKitGTK y
   la edición por texto lo dejaron sin trabajo): crear es la línea de add y
   editar es **inline** — la fila se convierte en su propio texto vía

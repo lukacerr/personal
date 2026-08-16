@@ -1,9 +1,13 @@
 import { db, presigner } from '@api/env';
 import { contentDisposition, objectKey } from '@api/files-storage';
+import { createIndexCache } from '@api/http-cache';
 import { file } from '@api/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import Elysia, { redirect, status } from 'elysia';
 import { z } from 'zod';
+
+/** Same key as the private router's instance: a public read is a write too. */
+const indexCache = createIndexCache('storage');
 
 const LINK_TTL_SECONDS = 5 * 60;
 
@@ -40,11 +44,18 @@ export const publicFilesRouter = new Elysia({
 }).get(
 	'/:id',
 	async ({ params }) => {
+		// Serving and counting are one statement, so a served read is never lost
+		// between a select and a write.
 		const [result] = await db
-			.select({ name: file.name, contentType: file.contentType })
-			.from(file)
+			.update(file)
+			.set({
+				viewCount: sql`${file.viewCount} + 1`,
+				// A view is not an edit: pin the clock that `$onUpdate` would move.
+				updatedAt: sql`${file.updatedAt}`,
+			})
 			.where(and(eq(file.id, params.id), eq(file.isPublic, true)))
-			.limit(1);
+			.returning({ name: file.name, contentType: file.contentType });
+		await indexCache.invalidate();
 
 		// A private file and one that never existed answer identically, or this
 		// endpoint becomes an oracle for which ids exist.

@@ -20,7 +20,6 @@ describe('app navigation', () => {
 			{ label: 'Calendar', path: '/calendar' },
 			{ label: 'Notes', path: '/notes' },
 			{ label: 'Finance', path: '/finance' },
-			{ label: 'Nutrition', path: '/nutrition' },
 			{ label: 'Storage', path: '/storage' },
 			{ label: 'Credentials', path: '/credentials' },
 		]);

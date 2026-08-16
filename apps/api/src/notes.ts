@@ -148,6 +148,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 						title: note.title,
 						path: note.path,
 						isPublic: note.isPublic,
+						viewCount: note.viewCount,
 						createdAt: note.createdAt,
 						updatedAt: note.updatedAt,
 					})
@@ -232,6 +233,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 					title: note.title,
 					path: note.path,
 					isPublic: note.isPublic,
+					viewCount: note.viewCount,
 					createdAt: note.createdAt,
 					updatedAt: note.updatedAt,
 					content: note.content,
@@ -380,6 +382,7 @@ export const notesRouter = new Elysia({ prefix: '/notes', tags: ['Notes'] })
 				title: note.title,
 				path: note.path,
 				isPublic: note.isPublic,
+				viewCount: note.viewCount,
 				createdAt: note.createdAt,
 				updatedAt: note.updatedAt,
 				content: note.content,

@@ -38,6 +38,17 @@ async function storeFile({
 	return { id, name, path, contentType, body };
 }
 
+/** Reads the counter the way the app does: from the private index. */
+async function indexRow(id: string) {
+	const response = await request('/files');
+	const index = (await response.json()) as Array<{
+		id: string;
+		viewCount: number;
+		updatedAt: number;
+	}>;
+	return index.find((row) => row.id === id);
+}
+
 afterEach(async () => {
 	const ids = [...createdIds];
 	createdIds.clear();
@@ -66,6 +77,44 @@ describe('Public files', () => {
 		expect(response.status).toBe(302);
 		if (!location) throw new Error('Expected a redirect to storage');
 		expect(await (await fetch(location)).text()).toBe(stored.body);
+	});
+
+	it('counts every public read without touching the edit clock', async () => {
+		const stored = await storeFile({ isPublic: true });
+		const before = await indexRow(stored.id);
+
+		await request(`/public/files/${stored.id}`, { redirect: 'manual' });
+		await request(`/public/files/${stored.id}`, { redirect: 'manual' });
+
+		const after = await indexRow(stored.id);
+		expect(after?.viewCount).toBe(2);
+		// A view is not an edit: the row's own clock must not move.
+		expect(after?.updatedAt).toBe(before?.updatedAt ?? Number.NaN);
+	});
+
+	it('does not count a read it refused', async () => {
+		const stored = await storeFile({ isPublic: false });
+
+		await request(`/public/files/${stored.id}`);
+
+		expect((await indexRow(stored.id))?.viewCount).toBe(0);
+	});
+
+	it('serves a fresh index after a public read', async () => {
+		const stored = await storeFile({ isPublic: true });
+		const first = await request('/files');
+		const tag = first.headers.get('etag') ?? '';
+		const unchanged = await request('/files', {
+			headers: { 'if-none-match': tag },
+		});
+		expect(unchanged.status).toBe(304);
+
+		await request(`/public/files/${stored.id}`, { redirect: 'manual' });
+
+		const after = await request('/files', {
+			headers: { 'if-none-match': tag },
+		});
+		expect(after.status).toBe(200);
 	});
 
 	/**

@@ -12,6 +12,7 @@ import {
 	CheckIcon,
 	ChevronLeftIcon,
 	DownloadIcon,
+	EyeIcon,
 	FolderIcon,
 	Globe2Icon,
 	GripVerticalIcon,
@@ -444,6 +445,15 @@ export function FileDesktopRow({
 					{file.isPublic ? <Globe2Icon /> : <LockIcon />}
 					{file.isPublic ? 'Public' : 'Private'}
 				</Badge>
+				{/* Only while public: the count describes the link, and next to a
+				    Private badge it would read as views nobody can be having. */}
+				{file.isPublic ? (
+					<span className="ml-2 inline-flex items-center gap-1 text-muted-foreground text-xs">
+						<EyeIcon className="size-3.5" aria-hidden="true" />
+						{file.viewCount}
+						<span className="sr-only">views</span>
+					</span>
+				) : null}
 			</TableCell>
 			<TableCell className="text-right">
 				<Button

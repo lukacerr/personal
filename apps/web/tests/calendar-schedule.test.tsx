@@ -46,17 +46,13 @@ function renderSchedule(events: CalendarEvent[]) {
 
 describe('CalendarSchedule', () => {
 	/**
-	 * The column is narrow, so the actions live in the menu at every width —
-	 * three inline buttons wrapped every complex row (`actionsInMenu`). The day
-	 * buckets are the ones that show them inline from `sm`.
+	 * Every row on the screen keeps its actions in the menu; the Schedule's
+	 * narrow column was merely the first place that needed it.
 	 */
 	it('keeps the row actions in the menu at every width', () => {
 		renderSchedule([makeEvent({ date: '2026-09-01' })]);
 
-		const inline = screen
-			.getByRole('button', { name: 'Edit: Exam' })
-			.closest('div');
-		expect(inline?.className).not.toContain('sm:flex');
+		expect(screen.queryByRole('button', { name: 'Edit: Exam' })).toBeNull();
 
 		const menu = screen.getByRole('button', { name: 'Actions for Exam' });
 		expect(menu.className ?? '').not.toContain('sm:hidden');

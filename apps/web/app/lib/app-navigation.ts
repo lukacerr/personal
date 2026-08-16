@@ -7,7 +7,6 @@ import {
 	KeyRoundIcon,
 	type LucideIcon,
 	NotebookPenIcon,
-	SaladIcon,
 } from 'lucide-react';
 
 export const appNavigation = [
@@ -34,12 +33,6 @@ export const appNavigation = [
 		path: '/finance',
 		description: 'Log spending and track savings.',
 		icon: ChartNoAxesCombinedIcon,
-	},
-	{
-		label: 'Nutrition',
-		path: '/nutrition',
-		description: 'Track diet, calories and weight.',
-		icon: SaladIcon,
 	},
 	{
 		label: 'Storage',

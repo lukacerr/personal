@@ -111,6 +111,7 @@ const note: LoadedNote = {
 	title: 'Saved note',
 	path: null,
 	isPublic: false,
+	viewCount: 0,
 	createdAt: 1,
 	updatedAt: 1,
 	content: editor.document,

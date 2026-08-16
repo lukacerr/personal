@@ -33,6 +33,7 @@ function entry(name: string, path: string | null, contentType = 'text/plain') {
 		contentType,
 		size: 10,
 		isPublic: false,
+		viewCount: 0,
 		uploadedFromNotes: false,
 		createdAt: 0,
 		updatedAt: 0,

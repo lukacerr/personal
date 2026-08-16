@@ -2,6 +2,7 @@ import type { Block } from '@blocknote/core';
 import { sql } from 'drizzle-orm';
 import {
 	boolean,
+	integer,
 	jsonb,
 	pgTable,
 	timestamp,
@@ -26,6 +27,8 @@ export const note = pgTable(
 		content: jsonb().$type<Block[]>().notNull(),
 		/** Readable by anyone holding the link, through the public router only. */
 		isPublic: boolean().notNull().default(false),
+		/** Times the public router served this note. Every hit counts once. */
+		viewCount: integer().notNull().default(0),
 		createdAt: timestamp().defaultNow().notNull(),
 		/** Timestamp of the current version; the newest entry of the note's history. */
 		updatedAt: timestamp().defaultNow().notNull(),

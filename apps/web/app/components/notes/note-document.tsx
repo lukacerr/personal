@@ -624,6 +624,8 @@ export function NoteDocument({
 						// undefined `pressed` would silently make the toggle uncontrolled.
 						isPublic={Boolean(note.isPublic)}
 						canPublish={note.serverUpdatedAt !== undefined}
+						// Rows cached before the counter existed carry none yet.
+						viewCount={note.viewCount ?? 0}
 						onChange={(isPublic) =>
 							updateAndSyncNoteMetadata(note.id, { isPublic })
 						}
@@ -674,6 +676,7 @@ export function NoteDocument({
 									noteId={note.id}
 									isPublic={Boolean(note.isPublic)}
 									canPublish={note.serverUpdatedAt !== undefined}
+									viewCount={note.viewCount ?? 0}
 									onChange={(isPublic) =>
 										updateAndSyncNoteMetadata(note.id, { isPublic })
 									}

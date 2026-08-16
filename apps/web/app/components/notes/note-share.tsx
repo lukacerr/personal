@@ -9,7 +9,7 @@ import {
 	PopoverTrigger,
 } from '@web/components/ui/popover';
 import { Toggle } from '@web/components/ui/toggle';
-import { CopyIcon, Globe2Icon, LockIcon } from 'lucide-react';
+import { CopyIcon, EyeIcon, Globe2Icon, LockIcon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -26,6 +26,7 @@ export function NoteShare({
 	isPublic,
 	/** A note the server has never seen would publish a link to a 404. */
 	canPublish,
+	viewCount,
 	onChange,
 	className,
 	variant = 'icon',
@@ -33,6 +34,8 @@ export function NoteShare({
 	noteId: string;
 	isPublic: boolean;
 	canPublish: boolean;
+	/** Times the public router served this note, one per hit. */
+	viewCount: number;
 	onChange: (isPublic: boolean) => Promise<boolean>;
 	className?: string;
 	variant?: 'icon' | 'menu';
@@ -133,6 +136,10 @@ export function NoteShare({
 							<CopyIcon data-icon="inline-start" aria-hidden="true" />
 							Copy public link
 						</Button>
+						<p className="flex items-center gap-1.5 text-muted-foreground text-xs">
+							<EyeIcon className="size-3.5" aria-hidden="true" />
+							{viewCount === 1 ? '1 view' : `${viewCount} views`}
+						</p>
 					</div>
 				)}
 			</PopoverContent>
