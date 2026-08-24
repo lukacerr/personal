@@ -4,13 +4,21 @@ import { useAuthStore } from '@web/lib/auth-store';
 import { createAuthenticatedFetch } from '@web/lib/authenticated-fetch';
 import { env } from '@web/lib/env';
 
+/**
+ * The one authenticated fetch of the app, exported for the requests that
+ * cannot travel through Eden — the Agent chat stream hands it to `useChat`'s
+ * transport. Treaty wraps this same instance, so the refresh dedupe stays
+ * single: two 401s racing still share one token rotation.
+ */
+export const authenticatedFetch = createAuthenticatedFetch({
+	fetcher: globalThis.fetch,
+	getAccessToken: () => useAuthStore.getState().accessToken,
+	refreshAccessToken: () => useAuthStore.getState().refreshSession(),
+	onUnauthorized: () => useAuthStore.getState().clearSession(),
+});
+
 export const authenticatedApi = treaty<App>(env.VITE_API_URL, {
-	fetcher: createAuthenticatedFetch({
-		fetcher: globalThis.fetch,
-		getAccessToken: () => useAuthStore.getState().accessToken,
-		refreshAccessToken: () => useAuthStore.getState().refreshSession(),
-		onUnauthorized: () => useAuthStore.getState().clearSession(),
-	}) as typeof fetch,
+	fetcher: authenticatedFetch as typeof fetch,
 	/**
 	 * Eden's reviver runs over every string in every response and would turn
 	 * anything date-shaped into a `Date` the contract never declared: Calendar's

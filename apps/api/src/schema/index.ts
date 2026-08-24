@@ -1,3 +1,5 @@
+export * from '@api/schema/agent-message';
+export * from '@api/schema/agent-thread';
 export * from '@api/schema/credential';
 export * from '@api/schema/event';
 export * from '@api/schema/event-completion';

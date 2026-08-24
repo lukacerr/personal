@@ -8,6 +8,7 @@ Lee este archivo antes de modificar:
 
 | System | Archivos |
 | --- | --- |
+| Agent | `src/agent.ts`, `src/agent-models.ts`, `src/agent-tools.ts`, `src/agent-cache.ts`, `src/schema/agent-thread.ts`, `src/schema/agent-message.ts` |
 | Auth | `src/auth.ts` |
 | Calendar | `src/events.ts`, `src/schema/event.ts`, `src/schema/event-completion.ts` |
 | Credentials | `src/credentials.ts`, `src/credentials-crypto.ts`, `src/schema/credential.ts` |
@@ -53,6 +54,312 @@ Lee este archivo antes de modificar:
   `createIndexCache` sobre la misma key. La cotización y los
   settings ya tienen sus stores manuales (`dolar.ts`, `finance-settings.ts`,
   `calendar-settings.ts`).
+- **La excepción de payload cacheado es el historial del Agent**
+  (`agent-cache.ts`, keys `agent:thread:<id>:messages:v1`): un follow-up de
+  chat lo lee en cada request y la alternativa es traer todas las filas de
+  mensajes de Neon, no una query de una ida. El valor lleva `incarnation` y
+  `revision`, y solo se acepta si ambos coinciden con Postgres: `id` viene del
+  cliente y puede repetirse tras delete/recreate, pero cada INSERT genera una
+  incarnation UUID nueva. Así un SET o DEL fallido puede dejar un prefijo viejo
+  en Redis, pero nunca volverlo autoridad de la fila nueva ni truncar historia
+  más reciente. Rewrite completo en cada exchange, DEL best-effort al borrar,
+  TTL 24 h, cap de 512 KiB (un thread más grande deja de cachearse en vez de
+  fallar cada write), e ilegible/Redis caído = miss.
+
+## Agent
+
+- El chat streamea con el AI SDK (v7): `POST /agent/chat` devuelve directamente
+  la `Response` SSE de `createUIMessageStreamResponse`. **No agregues
+  `afterHandle`/`mapResponse` que reconstruyan la Response en este router** —
+  rompen el stream. El default de 10 s de Bun corta un SSE callado mientras un
+  modelo razona o una tool corre, así que **el handler de `/chat` lo levanta
+  solo para su propio request** con `server.timeout(request, 0)`, después de
+  todos los early returns (comprobado con Elysia 1.4.29 y Bun 1.3.8: el resto
+  de los requests conserva el corte). Apagarlo en `serve.idleTimeout` de
+  `index.ts` lo apagaría también para `/health`, los routers públicos y los
+  callbacks OAuth, que es justo donde una conexión colgada es lo que el timeout
+  existe para cortar. `server` es `null` in-process, donde no hay socket.
+- Se persisten **UIMessages** (`parts` jsonb opaco, su shape es de la AI SDK),
+  nunca ModelMessages: el formato del provider se deriva por request con
+  `convertToModelMessages`. El orden del thread es `position` (1-based, unique
+  por thread), no `created_at` — el user y el assistant de un exchange se
+  escriben en la misma transacción con el mismo reloj, así que un timestamp no
+  da orden total.
+- Chat, compactación y retitulado explícito reclaman **antes del provider** un lease persistido en
+  `agent_thread` (`mutation_owner`, `mutation_expires_at`). Un solo UPDATE
+  condicionado por `clock_timestamp()` toma tanto un thread libre como un
+  lease vencido; si no matchea, la ruta responde `409 AGENT_THREAD_BUSY` sin
+  llamar al modelo. Así se excluyen mutuamente entre instancias stateless, sin
+  mutex de proceso. El owner es un UUID por request y toda liberación/commit lo
+  exige, por lo que un request viejo no puede soltar ni completar el lease que
+  otro recuperó. El lease dura 10 min y el timeout total del provider 9:30: un
+  proceso muerto se recupera con cota, pero uno vivo no pierde su claim.
+- La persistencia del chat corre en el `onEnd` del stream. El commit incrementa
+  `revision`, escribe/reemplaza/recorta mensajes y limpia el lease en **un solo
+  statement**, condicionado por revision y owner. Compact hace lo mismo al
+  insertar el marker. Setup, error del provider, validación y cualquier salida
+  sin commit intentan liberar por owner. Un abort persiste user + assistant
+  parcial en ese mismo commit, marca `metadata.interrupted = true` y conserva
+  incluso un assistant sin parts, para que reload coincida con la UI.
+  `consumeSseStream: consumeStream`
+  hace que `onEnd` corra aunque el cliente corte la conexión. Un fallo posterior
+  al inicio del SSE solo puede loguearse, porque ya no queda status que cambiar.
+  **`consumeSseStream: consumeStream` no es opcional**: consume una copia tee
+  del SSE para que un abort o una desconexión del cliente no saltee `onEnd` —
+  sin eso el exchange no se persiste.
+- Un regenerate llega como el mismo `message.id` de user ya guardado: el
+  handler trunca el historial justo antes de ese mensaje y `persistExchange`
+  borra la cola vieja (`position > base`) antes de insertar, en el mismo batch.
+- **El thread no persiste model/reasoning/tools**: la selección viaja por
+  request (un thread puede mezclar modelos) y el modelo que produjo cada
+  respuesta queda en la `metadata` del mensaje. Los registries viven en
+  `agent-models.ts` — 16 modelos con niveles de reasoning **nativos por
+  modelo**, sin escala genérica ni clamps: nivel fuera de la lista es 422, y
+  **todos declaran al menos un nivel** (un modelo cuyo reasoning no se pueda
+  dirigir no entra al registry) — y
+  `agent-tools.ts` (`tavily` vía `@tavily/core`). Agregar un modelo o una tool
+  es una entrada en su registry y nada más: catálogo, validación y web derivan
+  de ahí. El body `tools: string[]` expone solo esas tools a `streamText`;
+  un nombre desconocido es 422, nunca un grant menor silencioso.
+- El body de chat lleva `maxSteps` entero positivo acotado por
+  `AGENT_MAX_STEPS` (250, en `agent-settings.ts`; default 5) y pasado sin
+  reinterpretar a `isStepCount`. **La cota vive en `agentSelectionSchema`, no en
+  los routers**: de ahí salen tanto el body de `/chat` como el de
+  `PUT /settings`, así que un solo número cubre los dos boundaries y ninguno
+  puede quedarse atrás. Cada step es una llamada paga al provider, y un
+  presupuesto sin techo deja que un request gaste sin límite. La web tiene su
+  propio espejo del número (no puede importar valores de la API) y su schema de
+  storage lo **pinea** en vez de rechazar: leer una elección recordada no es lo
+  mismo que aceptar un request. `temperature` es opcional y
+  cada modelo publica su capacidad como `null` o como
+  `{ min, max, step, default, reasoning }`, y el router rechaza con
+  `AGENT_TEMPERATURE_UNSUPPORTED` todo valor o combinación fuera del descriptor.
+  El boundary también exige alineación a `step` desde `min`, con tolerancia solo
+  para el error binario de punto flotante: `0.3` alinea con step `0.1`, `0.05`
+  no. El rango por sí solo no valida un valor que la UI no puede representar.
+  La matriz conservadora no infiere por provider: Claude 5, GPT-5.6, Gemini 3.x,
+  Kimi K3 y Qwen3.7 Max no exponen; Haiku 4.5 y DeepSeek V4 solo con `off`; GLM
+  5.2 y MiniMax M3 en sus niveles declarados. Ausente se omite de `streamText`;
+  ambos controles quedan auditados en metadata.
+- **Novita es un endpoint con seis vendors detrás, así que el knob es por
+  modelo y no por provider.** `@ai-sdk/openai-compatible` hace *spread* de
+  `providerOptions.novita` directo al body, conservando todo lo que su propio
+  schema no reclama (`user`, `reasoningEffort`, `textVerbosity`,
+  `strictJsonSchema`): por eso el resto de los parámetros va en **snake_case**,
+  el vocabulario del wire, y un parámetro que el modelo upstream no conoce lo
+  ignora el provider en vez de rechazarlo. **El effort es la excepción y no es
+  cosmética**: `reasoningEffort` sí lo reclama ese schema y la SDK escribe su
+  propio `reasoning_effort` **después** del spread, así que un
+  `reasoning_effort` en snake_case queda sobreescrito con `undefined` y
+  desaparece del JSON sin warning (comprobado contra v3.0.35). Va camelCase y
+  la SDK lo renombra. `off` manda `thinking: { type: 'disabled' }` **y**
+  `enable_thinking: false` juntos: el primero es lo que hablan DeepSeek, GLM y
+  MiniMax, el segundo es lo que documenta Novita, y mandar solo uno deja el
+  thinking prendido en la mitad de los modelos.
+- Los niveles Novita son por modelo y cada rareza está comentada en el
+  registry: DeepSeek colapsa `medium`/`xhigh` sobre `high` (no se declaran),
+  Kimi K3 no se puede apagar (sin `off`), GLM 5.2 solo tiene `high`/`max`
+  confirmados, MiniMax M3 no acepta `reasoning_effort` (su nivel "on" es
+  `adaptive`) y Qwen3.7 Max lleva el toggle pelado — su `thinking_budget`
+  existe pero no está verificado que Novita lo reenvíe, así que **no se expone:
+  un knob que no hace nada es peor que ninguno**. Lo verificado empíricamente
+  es solo el transporte (qué keys sobreviven al body); el probe contra
+  `api.novita.ai` sigue pendiente y el TODO del registry dice qué tiene que
+  confirmar.
+- **Google AI Studio usa `thinkingConfig.thinkingLevel`**, nunca el legacy
+  `thinkingBudget`, y `includeThoughts: true` conserva los resúmenes de
+  razonamiento para el renderer. Gemini 3.7 Flash acepta `low`/`medium`/`high`
+  (default `medium`); Gemini 3.5 Flash-Lite agrega `minimal` (default), y
+  Gemini 3.1 Pro Preview no acepta `minimal` (default `high`). No existe un
+  `off` real para Gemini 3: `minimal` sigue pudiendo razonar.
+- La `metadata` del mensaje es lo que alimenta la barra de stats de la web, y
+  se arma en dos mitades que la SDK **mergea**: en `start` van `model`,
+  `reasoning` y `tools` (la selección del request), en `finish` van
+  `totalTokens`, `outputTokens`, `durationMs` y `firstTokenMs`. La mitad de
+  `finish` no puede repetir ni pisar la de `start`. `startedAt` se toma
+  **antes** de `streamText`, así que `durationMs` mide lo que el usuario
+  esperó, conversión del prompt incluida. El TTFT sale del `onChunk`, que ve
+  *todas* las parts: solo cuentan los deltas con contenido
+  (`text-delta`/`reasoning-delta`/`tool-input-delta`) y solo el primero — un
+  chunk posterior no debe sobreescribir la medición. Todos los campos son
+  opcionales: un turno persistido por un build viejo no los tiene.
+- Prompt caching: el system prompt es **byte-estable** — nada por-request, o se
+  invalida cada turno cacheado de cada thread — y viaja como primer mensaje
+  system (`allowSystemInMessages: true`) con el `cacheControl` de Anthropic,
+  más un breakpoint en el último mensaje de cada request para prefijos
+  incrementales. El contexto temporal (`currentContextPrompt`, hora local de
+  Luka en `America/Argentina/Buenos_Aires`) va en un **segundo** mensaje system
+  después del prefijo cacheable. OpenAI cachea implícito con `promptCacheKey =
+  threadId`; Google AI Studio y Novita solo automático. `buildProviderOptions`
+  y `cacheBreakpoint` son funciones puras con tests table-driven: el mapping
+  por modelo se cambia ahí, no en el router.
+- **Nada del Agent devuelve una lista completa.** Los tres reads paginan y su
+  contrato es el que consume la web:
+  - `GET /agent/threads` → `{ threads, nextCursor }`. `limit` 1..100 (default
+    30), orden `updated_at DESC, id DESC`, keyset por **tupla**
+    `(updated_at, id) < (cursorUpdatedAt, cursorId)`. Los dos parámetros del
+    cursor van juntos: medio cursor es `422 AGENT_CURSOR_INCOMPLETE`, nunca una
+    primera página — responderla reiniciaría en silencio un recorrido que el
+    cliente creía continuar. `nextCursor` es el cursor de la **última fila
+    devuelta** y es `null` cuando la página no se llenó; eso se sabe pidiendo
+    `limit + 1` filas, no contando la tabla. `query` (≤120, trim) es substring
+    case-insensitive sobre `title`; solo espacios no es filtro.
+  - `GET /agent/threads/:id/messages` → `{ messages, oldest, newest, hasOlder,
+    hasNewer }`. Sin cursor devuelve la página **más nueva**; `before=P` los
+    más nuevos de los anteriores a `P` (cargar viejos) y `after=P` los
+    posteriores (cargar nuevos). **La ventana siempre sale ascendente**,
+    cualquiera sea la dirección en que se pidió. `before` y `after` juntos son
+    `422 AGENT_CURSOR_CONFLICT`. Un lado de `has*` sale de la fila extra y el
+    otro de un EXISTS acotado al índice; jamás de un count. **Ese EXISTS lo
+    contesta el cursor, no la página**: con `before=B` la ventana termina en la
+    mayor posición bajo `B`, así que "hay algo más nuevo" y "hay algo desde `B`
+    en adelante" son la misma pregunta (simétrico para `after`). Por eso corre
+    en el mismo `Promise.all` que la página y que el `readThread` del 404, y por
+    eso con la página vacía el borde sigue siendo el cursor con que se pidió.
+  - `GET /agent/threads/:id/search` → `{ matches, nextCursor }` con `position
+    DESC`. `before=P` continúa estrictamente antes de esa posición y el cursor
+    de la próxima página es la última posición devuelta, o `null` si no hay más.
+    Matchea **solo partes de texto**
+    (`jsonb_array_elements(parts) ... part->>'type' = 'text'`): buscar el jsonb
+    como texto devolvería el thread entero por las keys de cada part, más los
+    argumentos de tools y los razonamientos. El `snippet` se arma en TypeScript
+    con `buildSnippet` (pura y exportada, testeable sin base), no en SQL.
+- **El ETag del índice es solo de la primera página canónica.**
+  `indexCache.conditional` se usa únicamente con el límite default, sin cursor
+  ni query — el poll común de la web. Un
+  tag por query-string afirmaría frescura de un recorte que ningún writer sabe
+  invalidar, así que con cursor o query se responde sin ETag. El tag sigue
+  saliendo del cuerpo, así que un `If-None-Match` que matchea implica el mismo
+  payload; un `limit` variable es otro payload y por eso no recibe ETag.
+- `agent_thread.created_at` y `updated_at` son `timestamp(3)`: el contrato de
+  cursor usa epoch ms y la base no puede guardar microsegundos que ese cursor
+  perdería al volver por JSON.
+- El índice `agent_thread_recency_idx` es `(updated_at DESC, id DESC)` con
+  **NULLS FIRST explícito**: `ORDER BY x DESC` en Postgres significa NULLS
+  FIRST y el `.desc()` de Drizzle emite `DESC NULLS LAST`, que el planner no
+  matchea contra ese orden ni siendo las dos columnas `NOT NULL` — con el
+  índice generado por default EXPLAIN ordenaba la tabla entera. La tupla del
+  keyset se interpola como el mismo ISO UTC que escribe Drizzle, casteado
+  (`::timestamp`, `::uuid`), para no depender del timezone del servidor.
+- **La ventana de mensajes lee siempre de Postgres, nunca del cache Redis de
+  historial.** Ese key guarda el hilo completo: servir una ventana desde ahí
+  obliga a traer justo lo que la paginación evita, y sembrarlo desde una
+  ventana lo volvería una mentira. El índice `(thread_id, position)` ya hace de
+  cada ventana un range scan corto. `readThreadMessages` — la del `/chat`, que
+  sí necesita el historial entero — no cambió.
+- El escape de `LIKE`/`ILIKE` tiene una sola definición: `@api/like-patterns`
+  (`escapeLike`, `likeContaining`), de donde también sale el de
+  `folder-paths.ts`. Toda query nueva lo usa y declara `escape '\'`; un `_` o
+  un `%` del usuario sin escapar convierte una búsqueda puntual en una masiva.
+- **Un fork (`POST /threads/:id/fork`) copia filas, nunca las comparte, y
+  siempre con ids nuevos**: el id de un mensaje es el cursor de regenerate,
+  así que ids compartidos harían que editar un turno en una rama nombre un
+  mensaje de la otra. Solo una respuesta del assistant es punto de fork —
+  forkear en un user message copiaría una pregunta sin respuesta, y eso ya lo
+  cubre el regenerate. El título **y `title_auto`** se copian: una rama de un
+  título manual conserva esa propiedad y regenerar su primer turno no lo
+  reemplaza. La incarnation, en cambio, siempre es nueva; las `positions` se
+  preservan.
+- **Los settings del Agent (`agent-settings.ts`, key `agent:settings:v1`)
+  siguen el patrón de `finance-settings`**: Redis sin TTL, lectura tolerante
+  (ilegible = null) y PUT de reemplazo completo. Guardan juntos `selection`
+  (`model`, `reasoning`, `tools`, `maxSteps`, `temperature`), `titleModel` y
+  `compactionModel`; los tres grupos son opcionales para que objetos viejos
+  sigan siendo legibles. El schema del store valida estructura — `maxSteps`
+  entero positivo hasta `AGENT_MAX_STEPS`, `temperature` finita y objetos
+  estrictos sin keys desconocidas — pero **no** ids contra los
+  registries: retirar un modelo, nivel o tool no vuelve ilegible el objeto. El
+  boundary HTTP reutiliza exactamente la validación de selección del chat;
+  elegir una combinación que hoy no existe es bug del caller, conservar una
+  retirada no. Como Redis es su única persistencia, un SET fallido responde
+  `503 AGENT_SETTINGS_UNAVAILABLE`; nunca confirma un cambio que no guardó.
+- **El título no sostiene abierto el stream**: la generación se inicia después
+  de tomar el lease del
+  primer exchange, pero `onEnd` solo persiste el fallback derivado y desacopla
+  la aplicación del resultado. El UPDATE tardío exige la incarnation original,
+  la revision resultante, ningún lease activo, el mismo título derivado y
+  `title_auto = true`; un regenerate rederiva el auto-title al commit, mientras
+  el PATCH pone ese flag en false incluso si el texto elegido coincide. Así
+  nunca pisa un rename, aterriza en medio de otra mutación ni cruza un
+  delete/recreate del mismo id. Orden de
+  candidatos: el `titleModel` cacheado primero, el modelo del propio exchange
+  segundo; cualquier fallo deja el título derivado y **no loguea** — el
+  fallback ya es correcto y presente, no hay nada que reportar. No bumpea
+  `updatedAt`: renombrar no es actividad.
+- `POST /threads/:id/title` retitula manualmente: usa `titleModel` con fallback
+  al modelo del body, toma el mismo lease antes del provider, y deriva el prompt
+  de un transcript acotado compuesto solo por parts de texto. Persiste el título
+  con `title_auto = false`, por lo que una generación automática tardía no lo
+  pisa. Responde 422 sin modelo o texto, 409 ocupado, 404 inexistente y 502 ante
+  fallo del provider o título vacío.
+- El PATCH manual de título participa del mismo protocolo: su UPDATE atómico
+  solo matchea un thread libre o con lease vencido. Un lease vigente responde
+  `409 AGENT_THREAD_BUSY`; uno vencido se limpia en el mismo UPDATE que renombra,
+  y un id ausente sigue siendo 404. Así nunca confirma un rename que un retitle
+  en vuelo pueda sobreescribir después.
+- `POST /threads/bulk/delete` se declara antes de `/:id`, acepta 1..100 UUIDs
+  únicos y ejecuta un solo `DELETE ... RETURNING`: devuelve solo ids existentes,
+  deja ausentes como no-op, usa el cascade para mensajes, elimina cada cache de
+  historial best-effort e invalida el índice una sola vez.
+- **La compactación es manual por diseño.** Un thread que desborda la context
+  window del modelo elegido falla ese turno con el error del provider; decidir
+  entre compactar o cambiar de modelo es del usuario, nunca un fallback
+  automático. `POST /threads/:id/compact` genera el resumen con el
+  `compactionModel` cacheado (fallback: el modelo que mandó la UI, que es la
+  selección del composer), lo inserta como mensaje `assistant` con
+  `metadata.kind = 'compaction'` y dropea el cache Redis del hilo.
+- **Dos ventanas, y la asimetría es el punto.** Las dos recortan solo lo que ve
+  el provider: la persistencia y la pantalla siguen usando el hilo completo y
+  las `positions` no se tocan.
+  - `promptWindow` es lo que manda `/chat`: el último marker **más** todos los
+    intercambios enteros anteriores que entren en `CARRIED_CONTEXT_BUDGET_CHARS`
+    (65.536 chars ≈ 16k tokens), del más nuevo al más viejo. Un follow-up casi
+    nunca le habla al resumen, le habla a lo último que se dijo ("¿y la segunda
+    opción?", "aplicalo a ese archivo"), y con cero contexto crudo esas
+    referencias no resolvían. **Intercambios enteros, nunca parte de uno**: un
+    corte en medio puede dejarle al provider un tool result cuya call quedó
+    afuera, así que solo un mensaje `user` puede ser el borde.
+  - `compactionWindow` es lo que resume una **re**-compactación: estrictamente el
+    marker en adelante, nada antes. Eso es lo que evita que cada resumen vuelva a
+    leer la cola que el anterior ya reemplazó, y lo que mantiene el prefijo
+    acotado por más que crezca el hilo. Si las dos usaran la misma ventana, la
+    cola que `promptWindow` arrastra se re-resumiría en cada compactación.
+  - El presupuesto se mide en **caracteres, no tokens**, a propósito: tokenizar
+    sería una dependencia por provider para acotar algo que ya es una
+    heurística. Se mide sobre `JSON.stringify(parts)`, o sea sobre lo que
+    realmente viaja — contar solo el texto trataba como gratis una tool output de
+    50 KB.
+- **El resumen lee un transcript de texto plano (`transcriptOf`), no mensajes
+  convertidos**: tool parts y reasoning convierten por-provider y pueden fallar
+  en un modelo que nunca los vio. Pero **sí incluye el trabajo de tools**,
+  renderizado como texto (`[tool <name>] input: … output: …`) vía `isToolUIPart`
+  de la SDK: antes solo sobrevivían los parts `text`, así que un hilo cuya
+  sustancia fueron búsquedas o lecturas de archivos se resumía desde la prosa del
+  assistant *sobre* eso y perdía los resultados. El transcript está acotado a
+  `COMPACTION_TRANSCRIPT_MAX_CHARS` y, al pasarse, **conserva sus dos puntas**
+  con un `[…]` en el medio: las secciones "How it started" y "Where things left
+  off" son justo las que se pierden truncando de un solo lado.
+- **El prompt de compactación está escrito para otro assistant, no para un
+  lector, y pide secciones fijas** (cómo empezó, qué se decidió y qué se
+  descartó, restricciones, hechos y artefactos a copiar textual, preguntas
+  abiertas, dónde quedó todo). No tiene tope de palabras: perder un detalle sale
+  más caro que un brief largo, y compactar existe para acotar un prefijo sin
+  límite, no para ser chico.
+- El body de `/chat` es estricto y descarta cualquier `metadata` del mensaje de
+  usuario. Además las dos ventanas solo confían en `kind = 'compaction'` sobre un
+  mensaje `assistant`; el cliente no puede forjar un corte de contexto.
+- Un regenerate/edit anterior al marker de compactación borra también el
+  marker (`persistExchange` borra `position > base`), y es lo correcto:
+  editar el pasado invalida su resumen.
+- **Los tests jamás llegan a un provider ni a Tavily.** Los seams son
+  `modelOverride.resolve` (se setea un `MockLanguageModelV4` de `ai/test` y se
+  restaura en `afterEach`) y `tavilyOverride.execute`; el endpoint SSE se
+  testea in-process leyendo el body como texto. `AgentMessageMetadata` se
+  exporta como tipo desde `index.ts`: el jsonb de parts es opaco para Eden y
+  la web necesita la metadata tipada sin duplicar el contrato. Los flujos que
+  llaman `generateText` (título, compactación) usan el mismo seam con
+  `doGenerate`; ojo con `useMockModel`, que pisa el override — en un test,
+  sembrá primero y overrideá después.
 
 ## Auth
 

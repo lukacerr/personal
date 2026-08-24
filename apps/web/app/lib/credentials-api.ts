@@ -1,10 +1,6 @@
 import { authenticatedApi } from '@web/lib/authenticated-api';
-
-type TreatyData<T> = T extends (...args: infer _Args) => infer Result
-	? Awaited<Result> extends { data: infer Data }
-		? NonNullable<Data>
-		: never
-	: never;
+import { conditionalGet } from '@web/lib/http-conditional';
+import type { TreatyData } from '@web/lib/treaty-data';
 
 type Credentials = Extract<
 	TreatyData<typeof authenticatedApi.credentials.get>,
@@ -40,21 +36,18 @@ function asCredential(data: unknown, status: number) {
  * Values arrive encrypted and stay that way until something on screen asks for
  * one, so this list is safe to hold in memory and cheap to revalidate.
  */
-export async function listCredentials(
+export function listCredentials(
 	knownTag?: string,
 ): Promise<{ credentials: Credential[]; tag?: string } | 'unchanged'> {
-	// Through `fetch` rather than `headers`: Eden types the latter as the one
-	// header its own contract knows about, and this one is the browser's.
-	const response = await authenticatedApi.credentials.get(
-		knownTag ? { fetch: { headers: { 'if-none-match': knownTag } } } : {},
+	return conditionalGet(
+		knownTag,
+		(conditional) => authenticatedApi.credentials.get(conditional),
+		(response) => {
+			if (response.status !== 200 || !Array.isArray(response.data))
+				throw new CredentialsApiError(response.status);
+			return { credentials: response.data };
+		},
 	);
-	if (response.status === 304) return 'unchanged';
-	if (response.status !== 200 || !Array.isArray(response.data))
-		throw new CredentialsApiError(response.status);
-	return {
-		credentials: response.data,
-		tag: response.response.headers.get('etag') ?? undefined,
-	};
 }
 
 export async function createCredential(title: string, value: string) {

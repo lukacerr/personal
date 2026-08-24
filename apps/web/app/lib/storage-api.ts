@@ -1,5 +1,6 @@
 import { authenticatedApi } from '@web/lib/authenticated-api';
 import { env } from '@web/lib/env';
+import { conditionalGet } from '@web/lib/http-conditional';
 import type {
 	PutOptions,
 	UploadedPart,
@@ -38,21 +39,18 @@ export class StorageApiError extends Error {
  * repeat with a 304 is the common path rather than an optimisation for a rare
  * one.
  */
-export async function listFiles(
+export function listFiles(
 	knownTag?: string,
 ): Promise<{ files: StoredFile[]; tag?: string } | 'unchanged'> {
-	// Through `fetch` rather than `headers`: Eden types the latter as the one
-	// header its own contract knows about, and this one is the browser's.
-	const response = await authenticatedApi.files.get(
-		knownTag ? { fetch: { headers: { 'if-none-match': knownTag } } } : {},
+	return conditionalGet(
+		knownTag,
+		(conditional) => authenticatedApi.files.get(conditional),
+		(response) => {
+			if (response.status !== 200 || !Array.isArray(response.data))
+				throw new StorageApiError(response.status);
+			return { files: response.data };
+		},
 	);
-	if (response.status === 304) return 'unchanged';
-	if (response.status !== 200 || !Array.isArray(response.data))
-		throw new StorageApiError(response.status);
-	return {
-		files: response.data,
-		tag: response.response.headers.get('etag') ?? undefined,
-	};
 }
 
 /** Notes uploads no note references anymore; only the server can tell. */

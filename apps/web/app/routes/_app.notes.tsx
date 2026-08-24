@@ -184,7 +184,7 @@ export default function Notes() {
 		setRefreshing(true);
 		const result = await refreshNotes(selectedId ?? undefined);
 		setRefreshing(false);
-		if (result.status !== 'refreshed')
+		if (result.status === 'offline' || result.status === 'failed')
 			toast.error(describeNotesFailure(result));
 	};
 

@@ -1,17 +1,18 @@
 export type NotesRefreshResult =
 	| { status: 'refreshed' }
+	| { status: 'cancelled' }
 	| { status: 'offline' }
 	| { status: 'failed'; error: unknown };
 
 export type NotesRefreshFailure = Exclude<
 	NotesRefreshResult,
-	{ status: 'refreshed' }
+	{ status: 'refreshed' | 'cancelled' }
 >;
 
 type NotesRefreshOptions = {
-	syncOutbox: () => Promise<unknown>;
-	refreshIndex: () => Promise<unknown>;
-	fetchNote: (id: string) => Promise<unknown>;
+	syncOutbox: (isCurrent: () => boolean) => Promise<unknown>;
+	refreshIndex: (isCurrent: () => boolean) => Promise<unknown>;
+	fetchNote: (id: string, isCurrent: () => boolean) => Promise<unknown>;
 	/** Local work must survive a refresh, so the note state decides the fetch. */
 	getNoteState: (id: string) => Promise<
 		| {
@@ -37,20 +38,27 @@ export function createNotesRefresh({
 }: NotesRefreshOptions) {
 	let active: Promise<NotesRefreshResult> | undefined;
 
-	return function refresh(noteId?: string): Promise<NotesRefreshResult> {
+	return function refresh(
+		noteId?: string,
+		isCurrent: () => boolean = () => true,
+	): Promise<NotesRefreshResult> {
 		if (active) return active;
+		if (!isCurrent()) return Promise.resolve({ status: 'cancelled' as const });
 		if (!isOnline()) return Promise.resolve({ status: 'offline' as const });
 
 		active = (async (): Promise<NotesRefreshResult> => {
 			try {
 				// Local work ships first, so the index cannot report the note as
 				// outdated against a version this device has not sent yet.
-				await syncOutbox();
-				await refreshIndex();
+				await syncOutbox(isCurrent);
+				if (!isCurrent()) return { status: 'cancelled' };
+				await refreshIndex(isCurrent);
+				if (!isCurrent()) return { status: 'cancelled' };
 				if (noteId) {
 					const state = await getNoteState(noteId);
 					if (state && !state.dirty && state.pendingCount === 0)
-						await fetchNote(noteId);
+						await fetchNote(noteId, isCurrent);
+					if (!isCurrent()) return { status: 'cancelled' };
 				}
 				return { status: 'refreshed' };
 			} catch (error) {

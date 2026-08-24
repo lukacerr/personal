@@ -1,11 +1,19 @@
+import { agentSystem } from '@web/lib/agent-system';
 import { type AppBreadcrumbItem, appNavigation } from '@web/lib/app-navigation';
 import { calendarSystem } from '@web/lib/calendar-system';
 import { credentialsSystem } from '@web/lib/credentials-system';
 import { financeSystem } from '@web/lib/finance-system';
+import {
+	type IndexLoadOutcome,
+	indexLoadSucceeded,
+} from '@web/lib/index-store';
 import { notesSystem } from '@web/lib/notes-system';
+import {
+	type SessionWorkGuard,
+	suspendSessionWork,
+} from '@web/lib/session-work';
 import { storageSystem } from '@web/lib/storage-system';
 import type { LucideIcon } from 'lucide-react';
-import type { ComponentType } from 'react';
 
 export type SystemCommand = {
 	/** Unique within the system; the shell namespaces it with the system key. */
@@ -58,16 +66,38 @@ export type AppSystem = {
 	 */
 	subscribe?: (onChange: () => void) => () => void;
 	/**
-	 * Mounted once by the private shell, for systems that need background work
-	 * — refreshes on focus, sync on reconnect — while the app is open.
+	 * Pulls this system's state from the server, for the shell's shared refresh
+	 * on returning to the machine.
+	 *
+	 * Receives the route's search string because what is on screen can be part of
+	 * what needs pulling — Notes reloads the open note. Resolves `false` when the
+	 * pull failed, so the shell knows not to count it and can retry; a system
+	 * reports the failure itself, where its own screen can show it.
 	 */
-	Bootstrap?: ComponentType;
+	refresh?: (search: string, isCurrent: SessionWorkGuard) => Promise<boolean>;
+	/**
+	 * Refresh this system from any screen, not only its own route.
+	 *
+	 * For the two reasons that survive scrutiny: its index is read from
+	 * everywhere — the command palette queries Notes and Agent whatever is on
+	 * screen — or it holds a queue that must ship as soon as there is a
+	 * connection, as Calendar's outbox does. It replaced a `Bootstrap` component
+	 * per system, each of which had hand-rolled its own mount pull and `online`
+	 * listener without the staleness gate, the failure backoff or the session
+	 * guard the coordinator already owns.
+	 *
+	 * Off by default on purpose: a system whose data nobody reads from elsewhere
+	 * would be spending requests nobody looks at, which is what the no-polling
+	 * rule exists to prevent. It still ages on its own clock, so declaring it
+	 * costs one conditional request per stale window, not one per signal.
+	 */
+	refreshEverywhere?: boolean;
 	/**
 	 * Erases this system's local footprint (databases, queues). The shell runs
 	 * every one on sign-out; a system the shell does not know by name still gets
 	 * its data cleared.
 	 */
-	clearLocalData?: () => Promise<void>;
+	clearLocalData?: () => Promise<void> | void;
 };
 
 /** A deep link into a system: its path plus the state carried in the query. */
@@ -76,10 +106,38 @@ export function systemPath(base: string, params: Record<string, string>) {
 }
 
 /**
+ * The `refresh` of a system whose index is one of the Zustand stores.
+ *
+ * `force` is what gets past the guard that skips a load once the store is
+ * `ready` — without it, returning to the screen after an hour re-reads the copy
+ * already in memory. The store still sends `If-None-Match`, so an unchanged
+ * index is a 304.
+ *
+ * The outcome comes from the call, never from reading `status` back afterwards:
+ * `status` is shared, so an interleaved search or a second caller flipping it
+ * between the await and the read would decide this pull's verdict — crediting a
+ * failed refresh as fresh, or backing off a system that had just succeeded.
+ */
+export function refreshIndexStore(store: {
+	getState: () => {
+		load: (
+			force?: boolean,
+			isCurrent?: SessionWorkGuard,
+		) => Promise<IndexLoadOutcome>;
+	};
+}) {
+	return async (_search: string, isCurrent: SessionWorkGuard) => {
+		const outcome = await store.getState().load(true, isCurrent);
+		return isCurrent() && indexLoadSucceeded(outcome);
+	};
+}
+
+/**
  * Sign-out's local wipe. Every system is attempted even if one fails, and the
  * first failure is rethrown so the caller can say something went wrong.
  */
 export async function clearLocalSystemData() {
+	suspendSessionWork();
 	const results = await Promise.allSettled(
 		appSystems.map((system) => system.clearLocalData?.()),
 	);
@@ -90,6 +148,7 @@ export async function clearLocalSystemData() {
 }
 
 export const appSystems: AppSystem[] = [
+	agentSystem,
 	calendarSystem,
 	credentialsSystem,
 	financeSystem,
@@ -152,6 +211,20 @@ const navigationRank = (system: AppSystem) => {
 	);
 	return index === -1 ? Number.MAX_SAFE_INTEGER : index;
 };
+
+/**
+ * The system a route belongs to, or none for a screen that is not one.
+ *
+ * Reads the path off the key, the same convention `navigationRank` already
+ * depends on. Nested paths belong to their system so a future `/notes/:id`
+ * needs nothing here, while `/notesomething` stays unclaimed.
+ */
+export function activeSystem(pathname: string) {
+	return appSystems.find(({ key }) => {
+		const base = `/${key}`;
+		return pathname === base || pathname.startsWith(`${base}/`);
+	});
+}
 
 /** The registry as the sidebar reads it, whatever order it was declared in. */
 export const systemsInSidebarOrder = () =>

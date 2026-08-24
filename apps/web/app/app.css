@@ -8,6 +8,10 @@
 @import "katex/dist/katex.min.css";
 
 @source "../node_modules/@blocknote/shadcn";
+@source "../node_modules/streamdown/dist";
+@source "../node_modules/@streamdown/code/dist";
+@source "../node_modules/@streamdown/math/dist";
+@source "../node_modules/@streamdown/mermaid/dist";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -221,6 +225,66 @@ body {
 
 .find-and-replace-result-current {
 	background-color: color-mix(in oklab, var(--primary) 50%, transparent);
+}
+
+/* Agent view preferences: the equivalent of the `.notes-editor[data-*]` block
+   above, for a conversation instead of a document. The composer carries the
+   same class as the message column so both are measured by the same rule and
+   the input stays flush with the turns above it — a preference that moved the
+   conversation without moving the composer would misalign them at every step.
+
+   `font-size` sits on the root class and the chat sizes itself in `rem`/`em`
+   from there. More margin means a *narrower* column, so `max-width` shrinks as
+   the value grows; that is the dominant effect, and `padding-inline` only
+   trims the gutter. These are totals, not additions: the markup already sets
+   `px-4 sm:px-6` on the same column, and a class+attribute selector outranks a
+   utility, so each value has to stand on its own as a usable gutter. That is
+   why even `small` is 1rem rather than 0. */
+.agent-conversation {
+	width: 100%;
+	margin-inline: auto;
+}
+
+.agent-conversation[data-font-size="small"] {
+	font-size: 0.9375rem;
+}
+
+.agent-conversation[data-font-size="medium"] {
+	font-size: 1rem;
+}
+
+.agent-conversation[data-font-size="large"] {
+	font-size: 1.125rem;
+}
+
+.agent-conversation[data-margins="small"] {
+	max-width: 64rem;
+	padding-inline: 1rem;
+}
+
+.agent-conversation[data-margins="medium"] {
+	max-width: 48rem;
+	padding-inline: 1.25rem;
+}
+
+/*
+ * `==highlight==`, which arrives as a `mark` from remark-flexible-markers.
+ * The browser default is a yellow that belongs to no theme, and this theme has
+ * no accent to borrow: the whole `--chart-*` ramp is zero-chroma on purpose.
+ * So the band is the bright end of that ramp at low alpha — brighter than the
+ * `--muted` used by bubbles and rows, which is what makes it read as a
+ * highlight rather than as another surface.
+ */
+.agent-conversation mark {
+	background-color: color-mix(in oklab, var(--chart-1) 22%, transparent);
+	color: inherit;
+	border-radius: 0.25rem;
+	padding-inline: 0.2em;
+}
+
+.agent-conversation[data-margins="large"] {
+	max-width: 40rem;
+	padding-inline: 1.5rem;
 }
 
 :root {

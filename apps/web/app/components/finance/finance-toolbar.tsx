@@ -14,6 +14,7 @@ import {
 	PopoverTitle,
 	PopoverTrigger,
 } from '@web/components/ui/popover';
+import { Spinner } from '@web/components/ui/spinner';
 import { Toggle } from '@web/components/ui/toggle';
 import {
 	type DateRange,
@@ -26,6 +27,7 @@ import {
 	CalendarOffIcon,
 	CalendarRangeIcon,
 	PlusIcon,
+	RefreshCwIcon,
 	RepeatIcon,
 	SearchIcon,
 	TagIcon,
@@ -49,21 +51,25 @@ export function FinanceToolbar({
 	range,
 	selectedTags,
 	subscriptions,
+	refreshing,
 	onQueryChange,
 	onRangeChange,
 	onClearTags,
 	onSubscriptionsChange,
 	onCreate,
+	onRefresh,
 }: {
 	query: string;
 	range: DateRange;
 	selectedTags: string[];
 	subscriptions: boolean;
+	refreshing: boolean;
 	onQueryChange: (value: string) => void;
 	onRangeChange: (range: DateRange) => void;
 	onClearTags: () => void;
 	onSubscriptionsChange: (on: boolean) => void;
 	onCreate: () => void;
+	onRefresh: () => void;
 }) {
 	// Explicit ids rather than wrapping the input: `Input` is a component, so a
 	// wrapping label associates with nothing that a screen reader can follow.
@@ -230,6 +236,23 @@ export function FinanceToolbar({
 							<XIcon data-icon="inline-end" />
 						</Button>
 					) : null}
+
+					{/*
+					 * Icon only at every width, like Storage's: the ledger refreshes
+					 * itself on arrival and whenever someone returns to the machine, so
+					 * this is for the moment a payment was just recorded elsewhere and
+					 * waiting even a little is the wrong answer.
+					 */}
+					<Button
+						size="icon"
+						variant="outline"
+						onClick={onRefresh}
+						disabled={refreshing}
+						aria-label="Refresh payments from server"
+						className="size-11 shrink-0 md:size-9"
+					>
+						{refreshing ? <Spinner /> : <RefreshCwIcon />}
+					</Button>
 
 					{/*
 					 * The label appears only once there is room for it, and the key with

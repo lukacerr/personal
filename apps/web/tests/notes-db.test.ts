@@ -74,6 +74,83 @@ describe('NotesDatabase', () => {
 		expect(await db.outbox.count()).toBe(0);
 	});
 
+	it('does not commit an in-flight save response after sign-out invalidates it', async () => {
+		await seed(db, {
+			id: 'note-1',
+			title: 'Private note',
+			path: null,
+			isPublic: false,
+			viewCount: 0,
+			createdAt: 1,
+			updatedAt: 1,
+			content: content('Local'),
+			dirty: false,
+			serverUpdatedAt: 1,
+		});
+		await enqueueNoteSave(db, 'note-1', 2);
+		let guardChecks = 0;
+
+		await flushNoteOutbox(
+			db,
+			async () => ({
+				id: 'note-1',
+				title: 'Server copy',
+				path: null,
+				isPublic: false,
+				viewCount: 0,
+				createdAt: 1,
+				updatedAt: 2,
+				content: content('Server'),
+			}),
+			() => guardChecks++ === 0,
+		);
+
+		expect(await db.notes.get('note-1')).toMatchObject({
+			title: 'Private note',
+		});
+		expect(await db.outbox.count()).toBe(1);
+	});
+
+	it('does not repopulate summaries for an invalidated session', async () => {
+		await reconcileNoteSummaries(
+			db,
+			[
+				{
+					id: 'remote',
+					title: 'Remote note',
+					path: null,
+					isPublic: false,
+					viewCount: 0,
+					createdAt: 1,
+					updatedAt: 1,
+				},
+			],
+			() => false,
+		);
+
+		expect(await db.notes.count()).toBe(0);
+	});
+
+	it('does not cache a remote document for an invalidated session', async () => {
+		await cacheRemoteNote(
+			db,
+			{
+				id: 'remote',
+				title: 'Remote note',
+				path: null,
+				isPublic: false,
+				viewCount: 0,
+				createdAt: 1,
+				updatedAt: 1,
+				content: content('Remote'),
+			},
+			() => false,
+		);
+
+		expect(await db.notes.count()).toBe(0);
+		expect(await db.noteContent.count()).toBe(0);
+	});
+
 	it('creates an unsynced Untitled note in the requested folder', async () => {
 		await seed(db, {
 			id: 'existing',

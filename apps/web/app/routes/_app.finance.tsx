@@ -39,6 +39,7 @@ import {
 	saveFinanceSettings,
 } from '@web/lib/finance-settings';
 import { useFinanceStore } from '@web/lib/finance-store';
+import { indexUnavailable } from '@web/lib/index-store';
 import {
 	type SharedSettingsAdapter,
 	useSharedSettings,
@@ -250,6 +251,11 @@ export default function Finance() {
 				range={view}
 				selectedTags={view.tags}
 				subscriptions={view.subscriptions}
+				refreshing={status === 'loading'}
+				onRefresh={() => {
+					void load(true);
+					void loadQuote(true);
+				}}
 				onQueryChange={setQueryInput}
 				onRangeChange={setRange}
 				onClearTags={() => setTags([])}
@@ -270,7 +276,7 @@ export default function Finance() {
 				<div className="flex flex-1 items-center justify-center gap-3 py-16 text-muted-foreground text-sm">
 					<Spinner /> Loading payments…
 				</div>
-			) : status === 'failed' ? (
+			) : indexUnavailable(status) && payments.length === 0 ? (
 				<div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
 					<p className="font-medium">{error}</p>
 					<Button variant="outline" onClick={() => void load(true)}>
@@ -279,6 +285,21 @@ export default function Finance() {
 				</div>
 			) : (
 				<>
+					{indexUnavailable(status) && error ? (
+						<div
+							role="alert"
+							className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm"
+						>
+							<p>{error}</p>
+							<Button
+								size="sm"
+								variant="outline"
+								onClick={() => void load(true)}
+							>
+								Try again
+							</Button>
+						</div>
+					) : null}
 					<FinanceSummary
 						totals={totals}
 						budget={settings.budget}

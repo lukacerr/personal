@@ -2,6 +2,7 @@ import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
 import {
 	type AppSystem,
 	matchesCommandQuery,
+	refreshIndexStore,
 	systemPath,
 } from '@web/lib/app-systems';
 import { financeSnapshot, useFinanceStore } from '@web/lib/finance-store';
@@ -13,6 +14,7 @@ export const financeSystem: AppSystem = {
 	key: 'finance',
 	heading: 'Finance',
 	icon: ChartNoAxesCombinedIcon,
+	clearLocalData: () => useFinanceStore.getState().reset(),
 
 	/**
 	 * Finance keeps no local database, so nothing the shell watches would ever
@@ -24,6 +26,12 @@ export const financeSystem: AppSystem = {
 		useFinanceStore.subscribe((state, previous) => {
 			if (state.payments !== previous.payments) onChange();
 		}),
+
+	/**
+	 * The ledger only. The quote is loaded separately and deliberately — it is a
+	 * third party on nobody's critical path, and it has its own control.
+	 */
+	refresh: refreshIndexStore(useFinanceStore),
 
 	/**
 	 * Only the action, deliberately: individual payments are not things you go

@@ -18,11 +18,13 @@ function renderToolbar(
 		range: { from: day(2026, 2, 15), toExclusive: day(2026, 3, 15) },
 		selectedTags: [],
 		subscriptions: true,
+		refreshing: false,
 		onQueryChange: vi.fn(),
 		onRangeChange: vi.fn(),
 		onClearTags: vi.fn(),
 		onSubscriptionsChange: vi.fn(),
 		onCreate: vi.fn(),
+		onRefresh: vi.fn(),
 		...overrides,
 	};
 	render(<FinanceToolbar {...props} />);
@@ -64,5 +66,31 @@ describe('the period popover', () => {
 			toExclusive: day(2026, 3, 15),
 		});
 		expect(screen.queryByRole('alert')).toBeNull();
+	});
+});
+
+/**
+ * Finance was the one system with no way to re-read the ledger at all: its only
+ * refresh re-quoted the dollar. The shell now pulls it on arrival and on
+ * returning to the machine, and this covers the payment recorded elsewhere a
+ * moment ago, where waiting at all is the wrong answer.
+ */
+describe('refreshing the ledger', () => {
+	it('asks for the payments again', async () => {
+		const props = renderToolbar();
+
+		await userEvent.click(
+			screen.getByRole('button', { name: 'Refresh payments from server' }),
+		);
+
+		expect(props.onRefresh).toHaveBeenCalledOnce();
+	});
+
+	it('cannot be asked twice while it is already running', () => {
+		renderToolbar({ refreshing: true });
+
+		expect(
+			screen.getByRole('button', { name: 'Refresh payments from server' }),
+		).toHaveProperty('disabled', true);
 	});
 });

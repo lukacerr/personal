@@ -1,12 +1,14 @@
+import { escapeLike } from '@api/like-patterns';
 import { or, sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 
 /**
- * Escapes the `LIKE` metacharacters so a folder named `plan_a` or `%` matches
- * itself instead of acting as a pattern. Pairs with `escape '\'` in the query.
+ * Everything under a folder: its path escaped — so a folder named `plan_a` or
+ * `%` matches itself instead of acting as a pattern — plus the separator and a
+ * single trailing wildcard. Pairs with `escape '\'` in the query.
  */
 export function likeDescendantsOf(path: string) {
-	return `${path.replace(/[\\%_]/g, (character) => `\\${character}`)}/%`;
+	return `${escapeLike(path)}/%`;
 }
 
 /**

@@ -33,7 +33,6 @@ import {
 	matchesEventSearch,
 	type QuickAddParse,
 	scheduleItems,
-	todayLocalDate,
 	toggleDetailLine,
 	weekBuckets,
 	weekWindow,
@@ -64,6 +63,7 @@ import {
 	refreshCalendar,
 	syncCalendarOutbox,
 } from '@web/lib/calendar-sync';
+import { useTodayLocalDate } from '@web/lib/calendar-today';
 import { useConsumeCreateParam } from '@web/lib/create-param';
 import { isEditableTarget } from '@web/lib/keyboard';
 import {
@@ -126,7 +126,7 @@ export default function Calendar() {
 	// One date per render — a fresh read in three places could straddle
 	// midnight — and refreshed on returning to the foreground, so a PWA
 	// reopened the next morning does not keep planning yesterday.
-	const [today, setToday] = useState(() => todayLocalDate());
+	const today = useTodayLocalDate();
 	const [offset, setOffset] = useState(0);
 	const [deleting, setDeleting] = useState<CalendarEvent>();
 	const [refreshing, setRefreshing] = useState(false);
@@ -172,29 +172,6 @@ export default function Calendar() {
 			calendarDb.completions.toArray(),
 		]);
 		return { events, completions };
-	}, []);
-
-	// On mount, on reconnect and on returning to the foreground; an app left
-	// open and focused also gets the manual button in the toolbar.
-	useEffect(() => {
-		const refresh = () => {
-			// The date refreshes with the data: a same-value set bails out, so
-			// this only re-renders when midnight actually went by.
-			setToday(todayLocalDate());
-			if (!navigator.onLine) return;
-			void refreshCalendar().then(reportRefresh);
-		};
-		const handleVisibility = () => {
-			if (document.visibilityState === 'visible') refresh();
-		};
-
-		refresh();
-		window.addEventListener('online', refresh);
-		document.addEventListener('visibilitychange', handleVisibility);
-		return () => {
-			window.removeEventListener('online', refresh);
-			document.removeEventListener('visibilitychange', handleVisibility);
-		};
 	}, []);
 
 	// "Add event" from the palette arrives as `?new=1` and lands the caret on

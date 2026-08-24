@@ -1,0 +1,1 @@
+ALTER TABLE "agent_thread" ADD COLUMN "title_auto" boolean DEFAULT true NOT NULL;

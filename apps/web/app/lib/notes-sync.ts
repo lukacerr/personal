@@ -13,6 +13,10 @@ import {
 	reconcileNoteSummaries,
 } from '@web/lib/notes-db';
 import { createNotesRefresh } from '@web/lib/notes-refresh';
+import {
+	createSessionWorkGuard,
+	type SessionWorkGuard,
+} from '@web/lib/session-work';
 
 const terminalMessages: Record<number, string> = {
 	404: 'This note no longer exists on the server.',
@@ -92,8 +96,9 @@ const synchronizeOutbox = createNoteOutboxSynchronizer(
 	sendNoteOperation,
 );
 
-export function syncNoteOutbox() {
-	return synchronizeOutbox();
+export function syncNoteOutbox(isCurrent?: SessionWorkGuard) {
+	const guard = isCurrent ?? createSessionWorkGuard();
+	return guard ? synchronizeOutbox(guard) : Promise.resolve([]);
 }
 
 export async function updateAndSyncNoteMetadata(
@@ -117,8 +122,14 @@ export async function updateAndSyncNoteMetadata(
  */
 let noteIndexTag: string | undefined;
 
-export async function refreshNoteIndex() {
-	await syncNoteOutbox();
+export async function refreshNoteIndex(isCurrent = createSessionWorkGuard()) {
+	if (!isCurrent) return;
+	await syncNoteOutbox(isCurrent);
+	if (!isCurrent()) return;
+	// Hand-rolled rather than through `conditionalGet`: the tag is only adopted
+	// after the async reconcile lands, with a session guard checked either side
+	// of it, so the exchange cannot end where the shared helper's does.
+	//
 	// Through `fetch` rather than `headers`: Eden types the latter as the one
 	// header its own contract knows about, and this one is the browser's.
 	const response = await authenticatedApi.notes.get(
@@ -126,6 +137,7 @@ export async function refreshNoteIndex() {
 			? { fetch: { headers: { 'if-none-match': noteIndexTag } } }
 			: {},
 	);
+	if (!isCurrent()) return;
 	if (response.status === 304) return;
 	if (
 		response.status !== 200 ||
@@ -134,15 +146,16 @@ export async function refreshNoteIndex() {
 	)
 		throw new NotesApiError(response.status);
 
+	await reconcileNoteSummaries(notesDb, response.data, isCurrent);
+	if (!isCurrent()) return;
 	noteIndexTag = response.response.headers.get('etag') ?? undefined;
-	await reconcileNoteSummaries(notesDb, response.data);
 }
 
 /**
  * The only manual entry point: the automatic triggers never fire while the app
  * stays open and focused, so edits made from another device need this.
  */
-export const refreshNotes = createNotesRefresh({
+const runNotesRefresh = createNotesRefresh({
 	syncOutbox: syncNoteOutbox,
 	refreshIndex: refreshNoteIndex,
 	fetchNote: fetchRemoteNote,
@@ -156,8 +169,22 @@ export const refreshNotes = createNotesRefresh({
 	isOnline: () => navigator.onLine,
 });
 
-export async function fetchRemoteNote(id: string) {
+export function refreshNotes(
+	noteId?: string,
+	isCurrent = createSessionWorkGuard(),
+) {
+	return isCurrent
+		? runNotesRefresh(noteId, isCurrent)
+		: Promise.resolve({ status: 'cancelled' as const });
+}
+
+export async function fetchRemoteNote(
+	id: string,
+	isCurrent = createSessionWorkGuard(),
+) {
+	if (!isCurrent) return;
 	const response = await authenticatedApi.notes({ id }).get();
+	if (!isCurrent()) return;
 	if (
 		response.status !== 200 ||
 		!response.data ||
@@ -165,6 +192,6 @@ export async function fetchRemoteNote(id: string) {
 	)
 		throw new NotesApiError(response.status);
 
-	await cacheRemoteNote(notesDb, response.data);
+	await cacheRemoteNote(notesDb, response.data, isCurrent);
 	return response.data;
 }

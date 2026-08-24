@@ -53,6 +53,16 @@ export const env = createEnv({
 		S3_SECRET_ACCESS_KEY: z.string().min(1),
 		GOOGLE_CLIENT_ID: z.string().min(1),
 		GOOGLE_CLIENT_SECRET: z.string().min(1),
+		/**
+		 * LLM providers and web search for the Agent system. The local `.env`
+		 * and `.env.test` carry dummy values: tests never call a provider, and
+		 * in development a provider 401 is expected and surfaces inline.
+		 */
+		ANTHROPIC_API_KEY: z.string().min(1),
+		GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1),
+		OPENAI_API_KEY: z.string().min(1),
+		NOVITA_API_KEY: z.string().min(1),
+		TAVILY_API_KEY: z.string().min(1),
 	},
 	runtimeEnv: process.env,
 	emptyStringAsUndefined: true,

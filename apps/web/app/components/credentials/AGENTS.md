@@ -15,6 +15,9 @@ Lee este archivo antes de modificar `apps/web/app/components/credentials/**`,
 - Lo único que se memoiza es el `importKey` del secreto, que depende del secreto y no de la fila. La clave derivada depende del salt de cada registro y HKDF cuesta microsegundos, así que no hace falta cachearla: no agregues un caché de claves derivadas.
 - El secreto vive en `localStorage` bajo `personal-credentials-secret:v1` (clave versionada, validada con Zod, cualquier fallo de parseo deja la app **bloqueada**). Nunca va a la API, ni a la URL, ni a un prop de bloque de BlockNote.
 - `credentials-secret.ts` es un store de Zustand y no un hook porque la pantalla y el bloque de credencial dentro de una nota viven en árboles distintos y tienen que ver el mismo valor cambiar al mismo tiempo.
+- **Tres cosas sostienen el secreto y se sueltan juntas**: `localStorage`, el store, y el `importKey` memoizado de `credentials-crypto.ts` (`forgetCredentialSecretMaterial`). `useCredentialsSecretStore.forget` es el **único** lugar que las suelta, y toda vía que olvide el secreto pasa por ahí — el botón de la pantalla y el wipe de sign-out. Soltar dos de las tres deja la bóveda abierta: el material importado abre cualquier sobre sin volver a leer nada.
+- **Sign-out se lleva el secreto.** `credentialsSystem.clearLocalData` llama a `forget` además de resetear el índice: el índice es solo ciphertext y el secreto es lo que lo abre, así que dejarlo persistido en un dispositivo que se devuelve deja legible todo lo que la API vuelva a servir. La consecuencia es aceptada: la próxima sesión arranca **bloqueada** y hay que reingresar el secreto, que es un estado normal de la pantalla y no un error.
+- `clearSession` de `auth-store` (el `401` irrecuperable) **no** borra nada local, y es deliberado: es la misma persona en el mismo dispositivo, hay trabajo sin sincronizar en otros systems y el único wipe es el del sign-out explícito.
 
 ## Bloqueado, legible, ilegible
 
@@ -42,6 +45,7 @@ Lee este archivo antes de modificar `apps/web/app/components/credentials/**`,
 ## Arquitectura
 
 - `credentials-store.ts` (Zustand) es dueño del índice; `credentials-vault.ts` es la capa de operaciones encima, el mismo corte que usa Storage. No es local-first: sin Dexie, sin outbox, sin drafts. El índice lo comparten la pantalla, el bloque de Notes y la command palette, y se pide recién cuando alguien lo necesita.
+- Sign-out resetea el índice cifrado, tag, error y request en vuelo del store. La carga comprueba la generación de sesión antes de cada `set` posterior a red: una respuesta de la sesión anterior nunca puede devolver ciphertext privado al store ya vacío.
 - Todo lo que está en el índice sigue cifrado, así que tenerlo en memoria no cuesta exposición. El descifrado ocurre en `credentials-vault.ts` y se hace de una vez para todas las filas cuando aparece el secreto, que es lo que permite que el ojito sea instantáneo y que copiar no tenga que esperar nada.
 - Las mutaciones devuelven un mensaje en lugar de lanzar: todos los llamadores son diálogos con un lugar donde ponerlo. `create` y `update` están separadas porque crear necesita el secreto y actualizar sin `plaintext` es justamente lo que no.
 - `lib` nunca importa de `components`. El bloque de Notes sí importa `credential-value.tsx` y `credential-unlock.tsx` de acá: componente a componente está bien, y compartir la celda es lo que impide que la nota y la pantalla no coincidan sobre cómo se ve un valor bloqueado.

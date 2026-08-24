@@ -1,7 +1,7 @@
-import { NotesBootstrap } from '@web/components/notes-bootstrap';
 import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
 import { type AppSystem, matchesCommandQuery } from '@web/lib/app-systems';
 import { clearLocalNotes, notesDb } from '@web/lib/notes-db';
+import { refreshNotes } from '@web/lib/notes-sync';
 import { FileTextIcon, FolderIcon } from 'lucide-react';
 
 const NOTES_PATH = '/notes';
@@ -27,8 +27,20 @@ export const notesSystem: AppSystem = {
 	heading: 'Notes',
 	icon: FileTextIcon,
 
-	/** Refreshes the index on mount, reconnect and return to the foreground. */
-	Bootstrap: NotesBootstrap,
+	/** Pulls the index at startup, so the palette can offer notes from anywhere. */
+	// The palette queries note titles from every screen.
+	refreshEverywhere: true,
+
+	/**
+	 * The open note comes along, and `refreshNotes` decides whether it may be
+	 * replaced: a note with an unsaved draft or queued operations is left alone,
+	 * so this can never overwrite what is being typed.
+	 */
+	async refresh(search, isCurrent) {
+		const selected = new URLSearchParams(search).get('note') ?? undefined;
+		const result = await refreshNotes(selected, isCurrent);
+		return result.status === 'refreshed';
+	},
 
 	/** Notes are private; sign-out leaves none of them on the device. */
 	clearLocalData: clearLocalNotes,

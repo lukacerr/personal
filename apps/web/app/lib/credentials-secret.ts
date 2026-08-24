@@ -1,3 +1,4 @@
+import { forgetCredentialSecretMaterial } from '@web/lib/credentials-crypto';
 import { z } from 'zod';
 import { create } from 'zustand';
 
@@ -77,8 +78,15 @@ export const useCredentialsSecretStore = create<CredentialsSecretState>()(
 			set({ secret });
 		},
 
+		/**
+		 * The one way to forget the secret, whoever asks — the screen's lock
+		 * button or sign-out's wipe. Three things hold it and all three have to
+		 * go together: storage, this store, and the key material imported from
+		 * it. Dropping two of the three leaves the vault openable.
+		 */
 		forget: () => {
 			clearCredentialsSecret(window.localStorage);
+			forgetCredentialSecretMaterial();
 			set({ secret: undefined });
 		},
 	}),

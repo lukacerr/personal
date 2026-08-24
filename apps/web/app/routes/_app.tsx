@@ -12,11 +12,11 @@ import {
 import { Toaster } from '@web/components/ui/sonner';
 import { TooltipProvider } from '@web/components/ui/tooltip';
 import { rememberAppLocation, useStartupRedirect } from '@web/lib/app-location';
-import { appSystems } from '@web/lib/app-systems';
 import { useAuthStore } from '@web/lib/auth-store';
 import { useApiHealth, usePwaAvailability } from '@web/lib/availability';
 import { env } from '@web/lib/env';
 import { createLoginPath } from '@web/lib/session';
+import { useSystemRefresh } from '@web/lib/system-refresh';
 import { domAnimation, LazyMotion, m } from 'motion/react';
 import { useEffect } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router';
@@ -30,6 +30,14 @@ export default function AuthenticatedLayout() {
 	const startupRedirect = useStartupRedirect(
 		`${location.pathname}${location.search}`,
 		window.localStorage,
+	);
+
+	// Coming back to a machine left open re-pulls whatever screen is on it. No
+	// timer and no poll: with nobody touching the app it makes no requests at all.
+	useSystemRefresh(
+		location.pathname,
+		location.search,
+		status === 'authenticated',
 	);
 
 	useEffect(() => {
@@ -53,11 +61,6 @@ export default function AuthenticatedLayout() {
 	return (
 		<TooltipProvider>
 			<SidebarProvider>
-				{/* Each system's background work, mounted from the registry: the
-				    shell does not know which systems need it, or that any do. */}
-				{appSystems.map(({ Bootstrap, key }) =>
-					Bootstrap ? <Bootstrap key={key} /> : null,
-				)}
 				<Toaster position="bottom-right" />
 				<a
 					href="#main-content"

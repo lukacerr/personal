@@ -299,7 +299,12 @@ export function useStorageFiles({
 
 	return {
 		files,
-		loading: status === 'idle' || status === 'loading',
+		// Only when there is nothing to show yet, the same rule Credentials and
+		// Finance already follow. A reload keeps `status` at `loading` for its
+		// whole round trip, so without the guard every refresh — the button, and
+		// now the shell's own on returning to the machine — would replace a list
+		// the user can still act on with a spinner.
+		loading: (status === 'idle' || status === 'loading') && files.length === 0,
 		refreshing,
 		reconciling,
 		loadError: failedWithNothingToShow ? loadError : undefined,

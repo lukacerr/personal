@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CredentialUnlockDialog } from '@web/components/credentials/credential-unlock';
 import type { Credential } from '@web/lib/credentials-api';
@@ -41,7 +41,13 @@ describe('the unlock dialog', () => {
 		);
 		await userEvent.click(screen.getByRole('button', { name: 'Unlock' }));
 
-		expect(props.onUnlock).toHaveBeenCalledWith(SECRET);
+		/*
+		 * Verifying the secret is asynchronous — it derives a key and decrypts a
+		 * sample — so the assert waits for it. Asserting straight after the click
+		 * passed on an idle machine and failed under load, which is the worst
+		 * kind of test: green until the suite runs in parallel.
+		 */
+		await waitFor(() => expect(props.onUnlock).toHaveBeenCalledWith(SECRET));
 		expect(props.onClose).toHaveBeenCalledTimes(1);
 	});
 

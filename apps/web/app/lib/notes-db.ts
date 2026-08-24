@@ -1,6 +1,7 @@
 import type { authenticatedApi } from '@web/lib/authenticated-api';
 import { nextAvailableNoteTitle } from '@web/lib/notes';
 import type { NoteBlock } from '@web/lib/notes-schema';
+import type { SessionWorkGuard } from '@web/lib/session-work';
 import type { TreatyData } from '@web/lib/treaty-data';
 import Dexie, { type Table } from 'dexie';
 
@@ -280,8 +281,13 @@ export async function enqueueNoteSave(
 	});
 }
 
-export async function cacheRemoteNote(db: NotesDatabase, remote: NoteDetail) {
+export async function cacheRemoteNote(
+	db: NotesDatabase,
+	remote: NoteDetail,
+	isCurrent: SessionWorkGuard = () => true,
+) {
 	await db.transaction('rw', db.notes, db.noteContent, db.outbox, async () => {
+		if (!isCurrent()) return;
 		const [local, localContent, pending] = await Promise.all([
 			db.notes.get(remote.id),
 			db.noteContent.get(remote.id),
@@ -409,8 +415,10 @@ export async function deleteLocalNote(db: NotesDatabase, id: string) {
 export async function reconcileNoteSummaries(
 	db: NotesDatabase,
 	summaries: NoteSummary[],
+	isCurrent: SessionWorkGuard = () => true,
 ) {
 	await db.transaction('rw', db.notes, db.noteContent, db.outbox, async () => {
+		if (!isCurrent()) return;
 		const [locals, pending] = await Promise.all([
 			db.notes.toArray(),
 			db.outbox.toArray(),
@@ -496,6 +504,7 @@ async function discardOperation(
 export async function flushNoteOutbox(
 	db: NotesDatabase,
 	send: (operation: NoteOutboxOperation) => Promise<NoteDetail | NoteMetadata>,
+	isCurrent: SessionWorkGuard = () => true,
 ) {
 	const operations = await db.outbox.orderBy('createdAt').toArray();
 	const discarded: NoteSyncFailure[] = [];
@@ -503,13 +512,25 @@ export async function flushNoteOutbox(
 	for (const operation of operations) {
 		try {
 			const remote = await send(operation);
+			if (!isCurrent())
+				return { failed: undefined, discarded, cancelled: true };
 			if (operation.type === 'save') {
 				if (!('content' in remote))
 					throw new Error('Save response did not include note content');
-				await db.outbox.delete(operation.key);
-				await cacheRemoteNote(db, remote);
+				await db.transaction(
+					'rw',
+					db.notes,
+					db.noteContent,
+					db.outbox,
+					async () => {
+						if (!isCurrent()) return;
+						await db.outbox.delete(operation.key);
+						await cacheRemoteNote(db, remote, isCurrent);
+					},
+				);
 			} else {
 				await db.transaction('rw', db.outbox, async () => {
+					if (!isCurrent()) return;
 					const current = await db.outbox.get(operation.key);
 					if (
 						current?.type === 'metadata' &&
@@ -526,7 +547,7 @@ export async function flushNoteOutbox(
 		}
 	}
 
-	return { failed: undefined, discarded };
+	return { failed: undefined, discarded, cancelled: false };
 }
 
 export function createNoteOutboxSynchronizer(
@@ -534,13 +555,14 @@ export function createNoteOutboxSynchronizer(
 	send: (operation: NoteOutboxOperation) => Promise<NoteDetail | NoteMetadata>,
 ) {
 	let activeSync: Promise<NoteSyncFailure[]> | undefined;
-	return function synchronize() {
+	return function synchronize(isCurrent: SessionWorkGuard = () => true) {
 		if (activeSync) return activeSync;
 		activeSync = (async () => {
 			const discarded: NoteSyncFailure[] = [];
 			while ((await db.outbox.count()) > 0) {
-				const result = await flushNoteOutbox(db, send);
+				const result = await flushNoteOutbox(db, send, isCurrent);
 				discarded.push(...result.discarded);
+				if (result.cancelled) return discarded;
 				if (result.failed) throw result.failed.error;
 			}
 			return discarded;

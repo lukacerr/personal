@@ -1,0 +1,1 @@
+CREATE INDEX "agent_thread_recency_idx" ON "agent_thread" USING btree ("updated_at" DESC NULLS FIRST,"id" DESC NULLS FIRST);

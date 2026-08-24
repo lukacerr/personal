@@ -14,6 +14,10 @@ import {
 	createCalendarOutboxSynchronizer,
 	reconcileCalendarIndex,
 } from '@web/lib/calendar-db';
+import {
+	createSessionWorkGuard,
+	type SessionWorkGuard,
+} from '@web/lib/session-work';
 
 /**
  * The transport under the outbox: one queued operation, one request. All the
@@ -49,8 +53,9 @@ const synchronizeOutbox = createCalendarOutboxSynchronizer(
 	sendCalendarOperation,
 );
 
-export function syncCalendarOutbox() {
-	return synchronizeOutbox();
+export function syncCalendarOutbox(isCurrent?: SessionWorkGuard) {
+	const guard = isCurrent ?? createSessionWorkGuard();
+	return guard ? synchronizeOutbox(guard) : Promise.resolve([]);
 }
 
 /**
@@ -62,12 +67,13 @@ let eventsIndexTag: string | undefined;
 
 export type CalendarRefreshResult =
 	| { status: 'refreshed'; discarded: CalendarSyncFailure[] }
+	| { status: 'cancelled' }
 	| { status: 'offline' }
 	| { status: 'failed'; error: unknown };
 
 export type CalendarRefreshFailure = Exclude<
 	CalendarRefreshResult,
-	{ status: 'refreshed' }
+	{ status: 'refreshed' | 'cancelled' }
 >;
 
 let activeRefresh: Promise<CalendarRefreshResult> | undefined;
@@ -77,19 +83,25 @@ let activeRefresh: Promise<CalendarRefreshResult> | undefined;
  * one run. The automatic triggers only fire on mount, on reconnect and when
  * the tab becomes visible, so the screen also exposes this manually.
  */
-export function refreshCalendar(): Promise<CalendarRefreshResult> {
+export function refreshCalendar(
+	isCurrent = createSessionWorkGuard(),
+): Promise<CalendarRefreshResult> {
 	if (activeRefresh) return activeRefresh;
+	if (!isCurrent?.()) return Promise.resolve({ status: 'cancelled' as const });
 	if (!navigator.onLine) return Promise.resolve({ status: 'offline' as const });
 
 	activeRefresh = (async (): Promise<CalendarRefreshResult> => {
 		try {
 			// Local work ships first, so the index cannot answer with rows this
 			// device is about to overwrite anyway.
-			const discarded = await syncCalendarOutbox();
+			const discarded = await syncCalendarOutbox(isCurrent);
+			if (!isCurrent()) return { status: 'cancelled' };
 			const result = await listEvents(eventsIndexTag);
+			if (!isCurrent()) return { status: 'cancelled' };
 			if (result !== 'unchanged') {
+				await reconcileCalendarIndex(calendarDb, result, isCurrent);
+				if (!isCurrent()) return { status: 'cancelled' };
 				eventsIndexTag = result.tag;
-				await reconcileCalendarIndex(calendarDb, result);
 			}
 			return { status: 'refreshed', discarded };
 		} catch (error) {

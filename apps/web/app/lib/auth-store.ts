@@ -1,6 +1,7 @@
 import { api, isTransientApiFailure } from '@web/lib/api';
 import { env } from '@web/lib/env';
 import type { SessionTokens } from '@web/lib/session';
+import { resumeSessionWork, suspendSessionWork } from '@web/lib/session-work';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
@@ -52,18 +53,22 @@ export const useAuthStore = create<AuthState>()(
 			accessToken: null,
 			refreshToken: null,
 			status: 'booting',
-			setSession: ({ at, rt }) =>
+			setSession: ({ at, rt }) => {
+				resumeSessionWork();
 				set({
 					accessToken: at,
 					refreshToken: rt,
 					status: 'authenticated',
-				}),
-			clearSession: () =>
+				});
+			},
+			clearSession: () => {
+				suspendSessionWork();
 				set({
 					accessToken: null,
 					refreshToken: null,
 					status: 'unauthenticated',
-				}),
+				});
+			},
 			refreshSession: async () => {
 				// Prefer the persisted token: a twin tab that refreshed after this
 				// one loaded already rotated it, and sending the stale copy would
@@ -97,6 +102,7 @@ export const useAuthStore = create<AuthState>()(
 			},
 			bootstrap: async () => {
 				if (env.VITE_ENV === 'development') {
+					resumeSessionWork();
 					set({ accessToken: 'dev', status: 'authenticated' });
 					return;
 				}

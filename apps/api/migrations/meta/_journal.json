@@ -78,6 +78,48 @@
       "when": 1786837284570,
       "tag": "20260815234124_known_gamma_corps",
       "breakpoints": false
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787444230502,
+      "tag": "20260823001710_fearless_giant_girl",
+      "breakpoints": false
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787491172966,
+      "tag": "20260823131932_strong_snowbird",
+      "breakpoints": false
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787526432616,
+      "tag": "20260823230712_same_colonel_america",
+      "breakpoints": false
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787526886940,
+      "tag": "20260823231446_minor_katie_power",
+      "breakpoints": false
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1787527622882,
+      "tag": "20260823232702_left_agent_zero",
+      "breakpoints": false
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1787530212652,
+      "tag": "20260824001012_shallow_johnny_blaze",
+      "breakpoints": false
     }
   ]
 }

@@ -5,6 +5,7 @@ import Elysia from 'elysia';
 import { helmet } from 'elysia-helmet';
 import { logger } from 'elysia-logger';
 import { z } from 'zod';
+import { agentRouter } from './agent';
 import { authRouter } from './auth';
 import { credentialsRouter } from './credentials';
 import { eventsRouter } from './events';
@@ -38,6 +39,13 @@ let lastHealth:
 	  }
 	| undefined;
 
+/**
+ * Bun's 10 s idle cut stays on for every connection here. The one request that
+ * legitimately goes silent for minutes — the agent's SSE chat stream — lifts it
+ * for itself with `server.timeout(request, 0)`; see `agent.ts`. Disabling it
+ * app-wide would also lift it for the anonymous surface, where a stalled
+ * connection is exactly what the timeout is for.
+ */
 export const app = new Elysia()
 	.onError(({ code, error, status }) => {
 		if (code === 'VALIDATION')
@@ -102,6 +110,7 @@ export const app = new Elysia()
 			logDetails: false,
 		}),
 	)
+	.use(agentRouter)
 	.use(authRouter)
 	.use(credentialsRouter)
 	.use(eventsRouter)
@@ -149,5 +158,12 @@ export const app = new Elysia()
 	);
 
 export type App = typeof app;
+
+/**
+ * The one shared type Eden cannot infer: message `parts` travel as opaque
+ * jsonb, so the web narrows them to the AI SDK's `UIMessage` at its API
+ * boundary and needs the metadata shape the server persists.
+ */
+export type { AgentMessageMetadata } from './schema/agent-message';
 
 if (import.meta.main) app.listen(env.PORT);

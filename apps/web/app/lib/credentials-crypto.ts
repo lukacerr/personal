@@ -65,6 +65,18 @@ function fromBase64Url(
  */
 let importedSecret: { secret: string; material: CryptoKey } | undefined;
 
+/**
+ * Drops that memo, so forgetting the secret actually forgets it.
+ *
+ * Removing the stored copy is not enough on its own: the imported material left
+ * here still opens every envelope, and it is the whole vault. Everything that
+ * forgets the secret goes through `useCredentialsSecretStore.forget`, which is
+ * the single caller of this.
+ */
+export function forgetCredentialSecretMaterial() {
+	importedSecret = undefined;
+}
+
 async function secretMaterial(secret: string) {
 	if (importedSecret?.secret === secret) return importedSecret.material;
 	const material = await crypto.subtle.importKey(

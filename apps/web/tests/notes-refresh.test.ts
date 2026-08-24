@@ -40,7 +40,10 @@ describe('Notes refresh', () => {
 		const refresh = createNotesRefresh(options);
 
 		expect(await refresh('note-1')).toEqual({ status: 'refreshed' });
-		expect(options.fetchNote).toHaveBeenCalledWith('note-1');
+		expect(options.fetchNote).toHaveBeenCalledWith(
+			'note-1',
+			expect.any(Function),
+		);
 	});
 
 	it('keeps an unsaved draft instead of overwriting it', async () => {
@@ -93,6 +96,21 @@ describe('Notes refresh', () => {
 		expect(first).toEqual({ status: 'refreshed' });
 		expect(second).toEqual({ status: 'refreshed' });
 		expect(options.refreshIndex).toHaveBeenCalledOnce();
+	});
+
+	it('stops before the next phase when its session is invalidated', async () => {
+		let current = true;
+		const options = deps({
+			refreshIndex: vi.fn(async () => {
+				current = false;
+			}),
+		});
+		const refresh = createNotesRefresh(options);
+
+		expect(await refresh('note-1', () => current)).toEqual({
+			status: 'cancelled',
+		});
+		expect(options.fetchNote).not.toHaveBeenCalled();
 	});
 
 	it('describes each failure cause distinctly', () => {

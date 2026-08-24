@@ -1,12 +1,8 @@
 import { isTransientApiFailure } from '@web/lib/api';
 import { authenticatedApi } from '@web/lib/authenticated-api';
 import type { CalendarSettings } from '@web/lib/calendar-settings';
-
-type TreatyData<T> = T extends (...args: infer _Args) => infer Result
-	? Awaited<Result> extends { data: infer Data }
-		? NonNullable<Data>
-		: never
-	: never;
+import { conditionalGet } from '@web/lib/http-conditional';
+import type { TreatyData } from '@web/lib/treaty-data';
 
 type EventsIndex = Extract<
 	TreatyData<typeof authenticatedApi.events.get>,
@@ -67,25 +63,28 @@ function asEvent(data: unknown, status: number) {
 }
 
 /** The index, or word that the copy already held is still current. */
-export async function listEvents(
+export function listEvents(
 	knownTag?: string,
 ): Promise<
 	| { events: CalendarEvent[]; completions: CalendarCompletion[]; tag?: string }
 	| 'unchanged'
 > {
-	// Through `fetch` rather than `headers`: Eden types the latter as the one
-	// header its own contract knows about, and this one is the browser's.
-	const response = await authenticatedApi.events.get(
-		knownTag ? { fetch: { headers: { 'if-none-match': knownTag } } } : {},
+	return conditionalGet(
+		knownTag,
+		(conditional) => authenticatedApi.events.get(conditional),
+		(response) => {
+			if (
+				response.status !== 200 ||
+				!response.data ||
+				!('events' in response.data)
+			)
+				throw new CalendarApiError(response.status);
+			return {
+				events: response.data.events,
+				completions: response.data.completions,
+			};
+		},
 	);
-	if (response.status === 304) return 'unchanged';
-	if (response.status !== 200 || !response.data || !('events' in response.data))
-		throw new CalendarApiError(response.status);
-	return {
-		events: response.data.events,
-		completions: response.data.completions,
-		tag: response.response.headers.get('etag') ?? undefined,
-	};
 }
 
 /**

@@ -2,6 +2,7 @@ import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
 import {
 	type AppSystem,
 	matchesCommandQuery,
+	refreshIndexStore,
 	systemPath,
 } from '@web/lib/app-systems';
 import { collectFolderPaths, storageBreadcrumb } from '@web/lib/storage';
@@ -38,6 +39,7 @@ export const storageSystem: AppSystem = {
 	key: 'storage',
 	heading: 'Storage',
 	icon: FolderOpenIcon,
+	clearLocalData: () => useStorageStore.getState().reset(),
 
 	/**
 	 * Storage keeps no local database, so nothing the shell watches would ever
@@ -49,6 +51,8 @@ export const storageSystem: AppSystem = {
 		useStorageStore.subscribe((state, previous) => {
 			if (state.files !== previous.files) onChange();
 		}),
+
+	refresh: refreshIndexStore(useStorageStore),
 
 	/**
 	 * The index is fetched the first time somebody actually searches, not when

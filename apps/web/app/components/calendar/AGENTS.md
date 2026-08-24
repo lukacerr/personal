@@ -56,6 +56,18 @@ Lee este archivo antes de modificar `apps/web/app/components/calendar/**`,
 - Terminal vs transitorio, como en Notes: un `4xx` (≠408/429) se descarta, se
   anota en `syncFailure` de la fila y se avisa con toast; el resto queda en
   cola. Offline no es un fallo: es el diseño.
+- **La reconexión drena la cola sin esperar la ventana de frescura.** La única
+  vía a un flush desde una señal es `calendarSystem.refresh`, y el coordinador
+  descartaba el `online` mientras el pull anterior tuviera menos de
+  `SYSTEM_REFRESH_STALE_MS`: ediciones hechas sin conexión se quedaban locales
+  hasta un refresh manual. Volver a tener conexión no dice que el dato esté
+  viejo, dice que lo encolado ya puede salir, así que `signal('reconnect')`
+  (`return-signals.ts` → `system-refresh.ts`) se saltea la edad. Con dos cotas
+  que no se relajan: solo si alguna señal fue bloqueada por estar offline — una
+  ventana que nadie toca no pide nada aunque el Wi-Fi parpadee, y el bypass se
+  gasta una vez por caída — y nunca el backoff de un pull fallido. Es del
+  coordinador y vale para cualquier system con cola; no lo reimplementes con un
+  listener propio de Calendar, que es de donde se sacó.
 
 ## Pantalla
 
@@ -82,6 +94,10 @@ Lee este archivo antes de modificar `apps/web/app/components/calendar/**`,
   la vista (viernes 14 → domingo 30). Los días ya pasados son historia, no
   agenda. Las flechas hojean semanas completas lunes-domingo, que es como se
   visita el pasado. Nada se purga.
+- El día local se vuelve a leer con las mismas señales de retorno/actividad del
+  refresh compartido, no solo con `visibilitychange`: una ventana que quedó
+  visible y enfocada durante la medianoche debe avanzar al primer movimiento o
+  tecla sin hacer polling al servidor.
 - **Grupos, tags ocultos y nada más viven en los settings compartidos**
   (`calendar-settings.ts` + `GET/PUT /events/settings`), el mismo patrón
   key-value de Finance: la copia compartida decide cuando existe, la local

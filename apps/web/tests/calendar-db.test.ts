@@ -156,6 +156,26 @@ describe('local writes', () => {
 });
 
 describe('reconcileCalendarIndex', () => {
+	it('does not repopulate a cleared database for an invalidated session', async () => {
+		const db = newDb();
+
+		await reconcileCalendarIndex(
+			db,
+			{
+				events: [
+					{
+						...makeDraft({ id: 'remote' }),
+						updatedAt: 1_000,
+					},
+				],
+				completions: [],
+			},
+			() => false,
+		);
+
+		expect(await db.events.count()).toBe(0);
+	});
+
 	it('adopts the server, keeps pending intent, drops what was deleted elsewhere', async () => {
 		const db = newDb();
 		const stale = await seedSynced(db, {
@@ -233,6 +253,22 @@ describe('reconcileCalendarIndex', () => {
 });
 
 describe('flushCalendarOutbox', () => {
+	it('does not commit an in-flight response after its session is invalidated', async () => {
+		const db = newDb();
+		const draft = makeDraft();
+		await createLocalEvent(db, draft);
+		let guardChecks = 0;
+
+		await flushCalendarOutbox(
+			db,
+			async () => ({ ...draft, title: 'Server copy', updatedAt: 2_000 }),
+			() => guardChecks++ === 0,
+		);
+
+		expect(await db.events.get(draft.id)).toMatchObject({ title: 'Rosita' });
+		expect(await db.outbox.count()).toBe(1);
+	});
+
 	it('sends in queue order and adopts the returned rows', async () => {
 		const db = newDb();
 		const draft = makeDraft();

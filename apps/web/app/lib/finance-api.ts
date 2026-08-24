@@ -1,11 +1,7 @@
 import { authenticatedApi } from '@web/lib/authenticated-api';
 import type { FinanceSettings } from '@web/lib/finance-settings';
-
-type TreatyData<T> = T extends (...args: infer _Args) => infer Result
-	? Awaited<Result> extends { data: infer Data }
-		? NonNullable<Data>
-		: never
-	: never;
+import { conditionalGet } from '@web/lib/http-conditional';
+import type { TreatyData } from '@web/lib/treaty-data';
 
 type Payments = Extract<
 	TreatyData<typeof authenticatedApi.payments.get>,
@@ -38,21 +34,18 @@ function asPayment(data: unknown, status: number) {
 }
 
 /** The index, or word that the copy already held is still current. */
-export async function listPayments(
+export function listPayments(
 	knownTag?: string,
 ): Promise<{ payments: Payment[]; tag?: string } | 'unchanged'> {
-	// Through `fetch` rather than `headers`: Eden types the latter as the one
-	// header its own contract knows about, and this one is the browser's.
-	const response = await authenticatedApi.payments.get(
-		knownTag ? { fetch: { headers: { 'if-none-match': knownTag } } } : {},
+	return conditionalGet(
+		knownTag,
+		(conditional) => authenticatedApi.payments.get(conditional),
+		(response) => {
+			if (response.status !== 200 || !Array.isArray(response.data))
+				throw new FinanceApiError(response.status);
+			return { payments: response.data };
+		},
 	);
-	if (response.status === 304) return 'unchanged';
-	if (response.status !== 200 || !Array.isArray(response.data))
-		throw new FinanceApiError(response.status);
-	return {
-		payments: response.data,
-		tag: response.response.headers.get('etag') ?? undefined,
-	};
 }
 
 /**

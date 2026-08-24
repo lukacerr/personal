@@ -5,6 +5,7 @@ import type {
 	EventDraft,
 	EventPatch,
 } from '@web/lib/calendar-api';
+import type { SessionWorkGuard } from '@web/lib/session-work';
 import Dexie, { type Table } from 'dexie';
 
 /**
@@ -219,8 +220,10 @@ async function adoptServerEvent(db: CalendarDatabase, remote: CalendarEvent) {
 export async function reconcileCalendarIndex(
 	db: CalendarDatabase,
 	remote: { events: CalendarEvent[]; completions: CalendarCompletion[] },
+	isCurrent: SessionWorkGuard = () => true,
 ) {
 	await db.transaction('rw', db.events, db.completions, db.outbox, async () => {
+		if (!isCurrent()) return;
 		const pending = await db.outbox.toArray();
 		const pendingEventIds = new Set(
 			pending.map((operation) => operation.eventId),
@@ -305,6 +308,7 @@ export async function flushCalendarOutbox(
 	send: (
 		operation: CalendarOutboxOperation,
 	) => Promise<CalendarEvent | undefined>,
+	isCurrent: SessionWorkGuard = () => true,
 ) {
 	const operations = await db.outbox.orderBy('createdAt').toArray();
 	const discarded: CalendarSyncFailure[] = [];
@@ -312,7 +316,10 @@ export async function flushCalendarOutbox(
 	for (const operation of operations) {
 		try {
 			const remote = await send(operation);
+			if (!isCurrent())
+				return { failed: undefined, discarded, cancelled: true };
 			await db.transaction('rw', db.events, db.outbox, async () => {
+				if (!isCurrent()) return;
 				// A patch coalesced while this one was in flight has a newer clock
 				// and must stay queued; deleting by key alone would drop that edit.
 				const current = await db.outbox.get(operation.key);
@@ -333,7 +340,7 @@ export async function flushCalendarOutbox(
 		}
 	}
 
-	return { failed: undefined, discarded };
+	return { failed: undefined, discarded, cancelled: false };
 }
 
 export function createCalendarOutboxSynchronizer(
@@ -343,13 +350,14 @@ export function createCalendarOutboxSynchronizer(
 	) => Promise<CalendarEvent | undefined>,
 ) {
 	let activeSync: Promise<CalendarSyncFailure[]> | undefined;
-	return function synchronize() {
+	return function synchronize(isCurrent: SessionWorkGuard = () => true) {
 		if (activeSync) return activeSync;
 		activeSync = (async () => {
 			const discarded: CalendarSyncFailure[] = [];
 			while ((await db.outbox.count()) > 0) {
-				const result = await flushCalendarOutbox(db, send);
+				const result = await flushCalendarOutbox(db, send, isCurrent);
 				discarded.push(...result.discarded);
+				if (result.cancelled) return discarded;
 				if (result.failed) throw result.failed.error;
 			}
 			return discarded;

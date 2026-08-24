@@ -1,0 +1,1 @@
+ALTER TABLE "agent_thread" ADD COLUMN "incarnation" uuid DEFAULT gen_random_uuid() NOT NULL;

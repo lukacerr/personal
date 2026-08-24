@@ -11,6 +11,7 @@ Lee este archivo antes de modificar `apps/web/app/components/storage/**`,
 ## Índice y rendimiento
 
 - El índice de archivos se carga una sola vez para toda la app en `storage-store.ts` (Zustand) y lo comparten el explorador, el picker de Notes y la command palette. `useStorageFiles` dejó de ser dueño del estado y es la capa de operaciones sobre el store. Se pide recién cuando alguien lo necesita — abrir Storage o buscar en la palette —, nunca al montar el shell: la mayoría de las visitas no abren Storage y pagar el índice completo en cada carga es un costo sin lector.
+- Sign-out resetea el índice, tag, error y request en vuelo del store. La carga comprueba la generación de sesión antes de cada `set` posterior a red, para que una respuesta de la sesión anterior no vuelva a llenar el índice después del wipe.
 - La tabla de Storage se virtualiza recién pasadas las 120 filas: por debajo, la maquinaria de medición cuesta más de lo que ahorra. Las filas espaciadoras son filas de verdad con su celda; marcarlas `aria-hidden` o `role="presentation"` es lo que le rompe la estructura de la tabla a un lector de pantalla, y dos filas vacías es el costo menor.
 
 ## Arquitectura

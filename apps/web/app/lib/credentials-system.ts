@@ -2,8 +2,10 @@ import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
 import {
 	type AppSystem,
 	matchesCommandQuery,
+	refreshIndexStore,
 	systemPath,
 } from '@web/lib/app-systems';
+import { useCredentialsSecretStore } from '@web/lib/credentials-secret';
 import {
 	credentialsSnapshot,
 	useCredentialsStore,
@@ -16,6 +18,16 @@ export const credentialsSystem: AppSystem = {
 	key: 'credentials',
 	heading: 'Credentials',
 	icon: KeyRoundIcon,
+	/**
+	 * The index is only ciphertext; the master secret is what opens it, and it
+	 * outlives a reload in `localStorage`. Sign-out on a device being handed back
+	 * has to take it — and the key material imported from it — with the rows,
+	 * otherwise anything the API will serve next is still readable.
+	 */
+	clearLocalData: () => {
+		useCredentialsSecretStore.getState().forget();
+		useCredentialsStore.getState().reset();
+	},
 
 	/**
 	 * Credentials keep no local database, so nothing the shell watches would ever
@@ -27,6 +39,9 @@ export const credentialsSystem: AppSystem = {
 		useCredentialsStore.subscribe((state, previous) => {
 			if (state.credentials !== previous.credentials) onChange();
 		}),
+
+	/** Still ciphertext: refreshing the index decrypts nothing. */
+	refresh: refreshIndexStore(useCredentialsStore),
 
 	/**
 	 * The index is fetched the first time somebody actually searches, not when the

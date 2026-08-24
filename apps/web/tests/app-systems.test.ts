@@ -1,4 +1,6 @@
+// @vitest-environment happy-dom
 import 'fake-indexeddb/auto';
+import { useAgentStore } from '@web/lib/agent-store';
 import { appNavigation } from '@web/lib/app-navigation';
 import {
 	appSystems,
@@ -13,14 +15,20 @@ import type { Credential } from '@web/lib/credentials-api';
 import { useCredentialsStore } from '@web/lib/credentials-store';
 import { useFinanceStore } from '@web/lib/finance-store';
 import { type LocalNote, notesDb } from '@web/lib/notes-db';
+import {
+	createSessionWorkGuard,
+	resumeSessionWork,
+} from '@web/lib/session-work';
 import type { StoredFile } from '@web/lib/storage-api';
 import { useStorageStore } from '@web/lib/storage-store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 afterEach(() => {
-	useFinanceStore.setState({ payments: [], status: 'idle' });
-	useCredentialsStore.setState({ credentials: [], status: 'idle' });
-	useStorageStore.setState({ files: [], status: 'idle' });
+	resumeSessionWork();
+	useAgentStore.getState().reset();
+	useFinanceStore.getState().reset();
+	useCredentialsStore.getState().reset();
+	useStorageStore.getState().reset();
 });
 
 describe('the system registry', () => {
@@ -61,6 +69,7 @@ describe('the system registry', () => {
 			notifications.push(getSystemDataRevision()),
 		);
 
+		useAgentStore.setState({ status: 'loading' });
 		useFinanceStore.setState({ status: 'loading' });
 		useCredentialsStore.setState({ status: 'loading' });
 		useStorageStore.setState({ status: 'loading' });
@@ -106,13 +115,14 @@ describe('the system registry', () => {
 
 		expect(total).toBe(25);
 		expect(groups.map((group) => group.system.key)).toEqual([
+			'agent',
 			'calendar',
 			'finance',
 			'storage',
 			'credentials',
 		]);
 		// The overflow comes out of the last group, never the earlier ones.
-		expect(groups.at(-1)?.commands).toHaveLength(13);
+		expect(groups.at(-1)?.commands).toHaveLength(12);
 	});
 
 	/**
@@ -121,8 +131,8 @@ describe('the system registry', () => {
 	 * sign-out while Notes' did not.
 	 */
 	it('clears every system’s local data on sign-out', async () => {
+		const activeWork = createSessionWorkGuard();
 		expect(appSystems.some((system) => system.clearLocalData)).toBe(true);
-		expect(appSystems.some((system) => system.Bootstrap)).toBe(true);
 
 		await notesDb.notes.put({
 			id: 'n1',
@@ -138,10 +148,44 @@ describe('the system registry', () => {
 			title: 'Private event',
 			updatedAt: 1,
 		} as LocalEvent);
+		useFinanceStore.setState({
+			payments: [{ id: 'p1', title: 'Private payment' } as never],
+			status: 'ready',
+			tag: 'finance-tag',
+		});
+		useStorageStore.setState({
+			files: [{ id: 'f1', name: 'private.txt' } as StoredFile],
+			status: 'ready',
+			tag: 'storage-tag',
+		});
+		useCredentialsStore.setState({
+			credentials: [
+				{
+					id: 'c1',
+					title: 'Private credential',
+					value: 'ciphertext',
+				} as Credential,
+			],
+			status: 'ready',
+			tag: 'credentials-tag',
+		});
 
 		await clearLocalSystemData();
 
+		expect(activeWork?.()).toBe(false);
 		expect(await notesDb.notes.count()).toBe(0);
 		expect(await calendarDb.events.count()).toBe(0);
+		expect(useFinanceStore.getState()).toMatchObject({
+			payments: [],
+			status: 'idle',
+		});
+		expect(useStorageStore.getState()).toMatchObject({
+			files: [],
+			status: 'idle',
+		});
+		expect(useCredentialsStore.getState()).toMatchObject({
+			credentials: [],
+			status: 'idle',
+		});
 	});
 });

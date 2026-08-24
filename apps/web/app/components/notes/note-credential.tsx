@@ -6,6 +6,7 @@ import { readCredentialValue } from '@web/lib/credentials';
 import type { Credential } from '@web/lib/credentials-api';
 import { useCredentialsSecretStore } from '@web/lib/credentials-secret';
 import { useCredentialsStore } from '@web/lib/credentials-store';
+import { indexUnavailable } from '@web/lib/index-store';
 import {
 	CREDENTIAL_BLOCK_TYPE,
 	type CredentialBlockState,
@@ -108,7 +109,7 @@ function useNoteCredential(credentialId: string) {
 			setState('unavailable');
 			return;
 		}
-		if (status === 'failed') {
+		if (indexUnavailable(status)) {
 			setState('failed');
 			return;
 		}

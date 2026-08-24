@@ -8,23 +8,34 @@ import {
 	readUsdQuote,
 	updatePayment,
 } from '@web/lib/finance-api';
+import {
+	createCoalescedRequest,
+	createIndexCore,
+	type IndexCore,
+	type IndexLoadOutcome,
+	offlineMessage,
+} from '@web/lib/index-store';
+import {
+	createSessionWorkGuard,
+	type SessionWorkGuard,
+} from '@web/lib/session-work';
 import { create } from 'zustand';
-
-type FinanceStatus = 'idle' | 'loading' | 'ready' | 'failed';
 
 export type LiveQuote = UsdQuote & { fetchedAt: number; stale: boolean };
 
-type FinanceState = {
+type FinanceState = IndexCore & {
 	payments: Payment[];
-	status: FinanceStatus;
-	error?: string;
-	/** What the server called the copy held here, so a refresh can ask for less. */
-	tag?: string;
 	quote?: LiveQuote;
 	/** Distinct from `error`: the ledger can load fine with no quote behind it. */
 	quoteFailed: boolean;
-	load: (force?: boolean) => Promise<void>;
-	loadQuote: (force?: boolean) => Promise<void>;
+	load: (
+		force?: boolean,
+		isCurrent?: SessionWorkGuard,
+	) => Promise<IndexLoadOutcome>;
+	loadQuote: (force?: boolean, isCurrent?: SessionWorkGuard) => Promise<void>;
+	reset: () => void;
+	upsert: (payments: Payment[]) => void;
+	remove: (ids: string[]) => void;
 	record: (draft: PaymentDraft) => Promise<string | undefined>;
 	revise: (
 		id: string,
@@ -32,11 +43,6 @@ type FinanceState = {
 	) => Promise<string | undefined>;
 	discard: (id: string) => Promise<string | undefined>;
 };
-
-const offline = (subject: string) =>
-	navigator.onLine
-		? `${subject} could not reach the server. Try again in a moment.`
-		: `No connection. ${subject} needs to reach the server.`;
 
 /**
  * The one copy of the payment index the app keeps.
@@ -52,55 +58,51 @@ const offline = (subject: string) =>
  * hour over a body that did not change.
  */
 export const useFinanceStore = create<FinanceState>()((set, get) => {
-	let inFlight: Promise<void> | undefined;
-	let quoteInFlight: Promise<void> | undefined;
+	const index = createIndexCore<FinanceState, Payment>({
+		get,
+		patch: ({ items, ...core }) =>
+			set(items ? { ...core, payments: items } : core),
+		read: async (knownTag) => {
+			const answer = await listPayments(knownTag);
+			return answer === 'unchanged'
+				? answer
+				: { items: answer.payments, tag: answer.tag };
+		},
+		select: (state) => state.payments,
+		failure: {
+			unreachable:
+				'Your payments could not reach the server. Try again in a moment.',
+			offline: 'No connection. Finance needs to reach the server.',
+		},
+	});
+	const quoteRequest = createCoalescedRequest<void>();
 
 	return {
 		payments: [],
-		status: 'idle',
 		quoteFailed: false,
+		...index,
 
-		async load(force = false) {
-			if (inFlight) return inFlight;
-			if (!force && get().status === 'ready') return;
-
-			set({ status: 'loading' });
-			inFlight = (async () => {
-				try {
-					const answer = await listPayments(get().tag);
-					if (answer === 'unchanged')
-						set({ status: 'ready', error: undefined });
-					else
-						set({
-							payments: answer.payments,
-							tag: answer.tag,
-							status: 'ready',
-							error: undefined,
-						});
-				} catch {
-					set({ status: 'failed', error: offline('Your payments') });
-				} finally {
-					inFlight = undefined;
-				}
-			})();
-			return inFlight;
-		},
-
-		async loadQuote(force = false) {
-			if (quoteInFlight) return quoteInFlight;
+		async loadQuote(force = false, isCurrent = createSessionWorkGuard()) {
+			if (quoteRequest.pending) return quoteRequest.pending;
 			if (!force && get().quote) return;
+			if (!isCurrent?.()) return;
 
-			quoteInFlight = (async () => {
+			return quoteRequest.run(async () => {
 				try {
 					const quote = await readUsdQuote();
+					if (!isCurrent()) return;
 					set({ quote, quoteFailed: quote === undefined });
 				} catch {
+					if (!isCurrent()) return;
 					set({ quoteFailed: true });
-				} finally {
-					quoteInFlight = undefined;
 				}
-			})();
-			return quoteInFlight;
+			});
+		},
+
+		reset() {
+			quoteRequest.clear();
+			index.reset();
+			set({ quote: undefined, quoteFailed: false });
 		},
 
 		async record(draft) {
@@ -112,7 +114,7 @@ export const useFinanceStore = create<FinanceState>()((set, get) => {
 					payments: [created, ...payments],
 				}));
 			} catch {
-				return offline('This payment');
+				return offlineMessage('This payment');
 			}
 		},
 
@@ -124,7 +126,7 @@ export const useFinanceStore = create<FinanceState>()((set, get) => {
 					payments: payments.map((row) => (row.id === id ? updated : row)),
 				}));
 			} catch {
-				return offline('This change');
+				return offlineMessage('This change');
 			}
 		},
 
@@ -136,7 +138,7 @@ export const useFinanceStore = create<FinanceState>()((set, get) => {
 					payments: payments.filter((row) => row.id !== id),
 				}));
 			} catch {
-				return offline('This deletion');
+				return offlineMessage('This deletion');
 			}
 		},
 	};
