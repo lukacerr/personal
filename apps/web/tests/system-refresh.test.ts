@@ -322,6 +322,24 @@ describe('What counts as coming back', () => {
 		stop();
 	});
 
+	/**
+	 * The invariant the whole design exists for: an app left open with nobody in
+	 * the room emits nothing, so the serverless container gets to stay asleep.
+	 * Time passing is not a sign of life. This is the test that fails the day
+	 * someone reaches for a `setInterval`.
+	 */
+	it('never pulls on time alone, however long nobody touches it', () => {
+		const { coordinator, refresh, advance } = setup();
+		const stop = coordinator.listen();
+		coordinator.signal();
+		expect(refresh).toHaveBeenCalledOnce();
+
+		for (let hour = 0; hour < 8; hour += 1) advance(60 * 60 * 1000);
+
+		expect(refresh).toHaveBeenCalledOnce();
+		stop();
+	});
+
 	it('goes quiet once detached', () => {
 		const { coordinator, refresh, advance } = setup();
 		const stop = coordinator.listen();

@@ -86,6 +86,7 @@ export default function AuthenticatedLayout() {
 							<AppAvailabilityBadges
 								pwaAvailability={pwaAvailability}
 								apiHealth={apiHealth}
+								onRecheck={apiHealth.recheck}
 							/>
 						</div>
 						<AppCommandPalette />

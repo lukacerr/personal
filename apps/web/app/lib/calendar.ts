@@ -233,6 +233,19 @@ export function formatTime(timeMinutes: number) {
 	return `${pad(Math.floor(timeMinutes / 60))}:${pad(timeMinutes % 60)}`;
 }
 
+/**
+ * When an upcoming occurrence lands, for somewhere with room for three glyphs.
+ *
+ * The weekday kanji, which is what the day headings already say, so the sidebar
+ * and the screen read as one notation. It needs no reference day, which is the
+ * point: "今日/明日" would have to be recomputed as the day turns over, and a
+ * weekday is true whenever it is read.
+ */
+export function formatUpcomingWhen(date: string, timeMinutes: number | null) {
+	const day = weekdayKanji(date);
+	return timeMinutes === null ? day : `${day} ${formatTime(timeMinutes)}`;
+}
+
 /** What the native time input yields, or `null` when it holds nothing usable. */
 export function parseTimeInput(value: string): number | null {
 	const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
@@ -645,6 +658,59 @@ export function dayAgenda(
 		.filter((event) => occurrencesInRange(event, date, date).length > 0)
 		.map((event) => toItem(event, date, resolved))
 		.sort(byTimeThenEntry);
+}
+
+/**
+ * How far forward `upcomingAgenda` is willing to look for a pending occurrence.
+ *
+ * An `everyDays` stride lands within one interval of any day and a weekly one
+ * within seven, so a year covers every series shape with room while keeping the
+ * walk finite — the same bound `scheduleItems` uses for the same reason.
+ */
+const UPCOMING_HORIZON_DAYS = 366;
+
+/**
+ * The next `limit` things still to happen, in the order they will.
+ *
+ * Chronological where `scheduleItems` is deliberately not: it answers "what is
+ * next", so a daily series occupies consecutive slots, because that genuinely
+ * is what the next three things are. `scheduleItems` caps a series at one
+ * occurrence because it lists what the days on screen already cover; nothing
+ * covers this, so nothing has to be thinned out.
+ *
+ * Today counts whole, past hours included. A caller reading this knows the
+ * local date and not the clock, and an 8am event is still what today was about
+ * when read at 9am.
+ *
+ * Resolved occurrences drop out: a habit ticked off this morning is not what
+ * comes next, and leaving it in would spend the whole list on things already
+ * done. That makes the walk necessarily day-by-day — how many days it takes to
+ * find `limit` pending items depends on the completions, which no range
+ * expansion can tell in advance.
+ */
+export function upcomingAgenda(
+	events: CalendarEvent[],
+	completions: CalendarCompletion[],
+	today: string,
+	limit: number,
+): AgendaItem[] {
+	if (limit < 1) return [];
+	const resolved = completionsByKey(completions);
+	const dated = events.filter((event) => event.date !== null);
+	const items: AgendaItem[] = [];
+
+	for (const date of datesInRange(
+		today,
+		addDays(today, UPCOMING_HORIZON_DAYS),
+	)) {
+		for (const item of dayAgenda(dated, resolved, date)) {
+			if (item.status !== 'pending') continue;
+			items.push(item);
+			if (items.length >= limit) return items;
+		}
+	}
+
+	return items;
 }
 
 /**

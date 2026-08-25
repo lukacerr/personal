@@ -10,6 +10,9 @@ import {
 } from '@web/lib/app-systems';
 import { BotIcon } from 'lucide-react';
 
+/** As asked for: the five most recently touched conversations. */
+const RECENT_THREADS_LIMIT = 5;
+
 export const agentSystem: AppSystem = {
 	key: 'agent',
 	heading: 'Agent',
@@ -29,6 +32,24 @@ export const agentSystem: AppSystem = {
 
 	// The palette queries conversation titles from every screen.
 	refreshEverywhere: true,
+
+	/**
+	 * The conversations touched most recently. No timestamp on the rows: the
+	 * index already arrives ordered by `updatedAt`, so the order *is* the
+	 * recency, and saying it again would need a relative-time formatter this app
+	 * has no other use for.
+	 */
+	async loadSummary() {
+		return {
+			rows: agentSnapshot()
+				.threads.slice(0, RECENT_THREADS_LIMIT)
+				.map((thread) => ({
+					key: thread.id,
+					label: thread.title,
+					to: systemPath(AGENT_PATH, { thread: thread.id }),
+				})),
+		};
+	},
 
 	/**
 	 * "New chat" first — the palette's action deep link — then recent

@@ -1,5 +1,5 @@
 import { api } from '@web/lib/api';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type PwaAvailability = 'online' | 'offline';
 export type ApiHealthStatus = 'loading' | 'healthy' | 'partial' | 'down';
@@ -81,43 +81,53 @@ export function usePwaAvailability(): PwaAvailability {
 	return availability;
 }
 
-export function useApiHealth(): ApiHealth {
+/**
+ * Whether the API is up, asked once when the app opens and then only when
+ * somebody asks again.
+ *
+ * There is no listener here at all, and that is the whole design. It used to
+ * re-check on `online` and on every `visibilitychange`, which is not a poll but
+ * behaves like one in ordinary use: each switch back to the tab spent a
+ * request, so a window someone alt-tabs past all afternoon kept the serverless
+ * container from ever falling asleep — the exact cost the no-polling rule
+ * exists to avoid, arriving through the one hook that sat outside it.
+ *
+ * Nothing is lost by dropping them, because the answer was never trustworthy
+ * between checks anyway: the API can go down one second after any of them. So
+ * this reports when it last looked, and `recheck` is a button. Connectivity —
+ * the thing that actually changes on its own — is `usePwaAvailability`, which
+ * reads `navigator.onLine` and costs nothing.
+ */
+export function useApiHealth(): ApiHealth & { recheck: () => void } {
 	const [health, setHealth] = useState<ApiHealth>({ status: 'loading' });
+	// Survives re-renders so mashing the badge cannot open a request per click,
+	// and so the mount check and a fast first click collapse into one.
+	const inFlight = useRef(false);
+	const isCurrent = useRef(true);
 
-	// One check at mount goes stale the moment the laptop sleeps or the tab is
-	// backgrounded. Coming back online or to the foreground re-asks — the two
-	// moments the answer can have changed — with no continuous polling.
-	useEffect(() => {
-		let isCurrent = true;
-		let inFlight = false;
-		const check = () => {
-			if (inFlight) return;
-			inFlight = true;
-			void api.health
-				.get()
-				.then((result) => {
-					if (isCurrent) setHealth(getApiHealth(result));
-				})
-				.catch(() => {
-					if (isCurrent) setHealth({ status: 'down' });
-				})
-				.finally(() => {
-					inFlight = false;
-				});
-		};
-		const handleVisibility = () => {
-			if (document.visibilityState === 'visible') check();
-		};
-
-		check();
-		window.addEventListener('online', check);
-		document.addEventListener('visibilitychange', handleVisibility);
-		return () => {
-			isCurrent = false;
-			window.removeEventListener('online', check);
-			document.removeEventListener('visibilitychange', handleVisibility);
-		};
+	const recheck = useCallback(() => {
+		if (inFlight.current) return;
+		inFlight.current = true;
+		void api.health
+			.get()
+			.then((result) => {
+				if (isCurrent.current) setHealth(getApiHealth(result));
+			})
+			.catch(() => {
+				if (isCurrent.current) setHealth({ status: 'down' });
+			})
+			.finally(() => {
+				inFlight.current = false;
+			});
 	}, []);
 
-	return health;
+	useEffect(() => {
+		isCurrent.current = true;
+		recheck();
+		return () => {
+			isCurrent.current = false;
+		};
+	}, [recheck]);
+
+	return { ...health, recheck };
 }

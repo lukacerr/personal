@@ -80,6 +80,29 @@ Lee este archivo antes de modificar `apps/web/app/components/calendar/**`,
   tiene nada visible **no se renderiza** — un heading vacío es espacio diciendo
   nada, y ocultar el hoy vacío es justo lo que lleva el ojo al próximo día con
   contenido; si nada tiene nada, una sola línea lo dice.
+- **`upcomingAgenda` es cronológico donde `scheduleItems` a propósito no lo
+  es**, y son dos preguntas distintas: el Schedule lista lo que las pantallas
+  de días **no** cubren, así que capa cada serie en una ocurrencia; el resumen
+  de sidebar contesta "qué sigue", así que una serie diaria ocupa slots
+  consecutivos porque eso es literalmente lo que sigue. No unifiques las dos
+  con un flag. Hoy cuenta **entero**, con horas ya pasadas incluidas: quien lo
+  llama conoce la fecha local y no el reloj, y un evento de las 8 sigue siendo
+  de qué se trató hoy leído a las 9. Las ocurrencias ya resueltas se saltean,
+  y por eso el recorrido es día por día: cuántos días hay que caminar para
+  juntar `limit` pendientes depende de las completions, que ninguna expansión
+  de rango sabe de antemano.
+- El resumen **saltea los tags de rutina** (`SUMMARY_HIDDEN_TAGS`: `タップ`,
+  `回`) y esa lista vive en `calendar-system.ts`, no en el filtro de la
+  pantalla: el filtro de tags es un control de vista que alguien togglea, esto
+  es una regla fija sobre para qué sirve el sidebar. Sin eso, un hábito diario
+  se lleva los tres slots todos los días y el resumen nunca dice nada que una
+  mirada a la pantalla no supiera. En la pantalla siguen estando, que es donde
+  la rutina sí es el punto.
+- **El sidebar dice el kanji del día (`formatUpcomingWhen`), no "hoy"**, y por
+  eso no toma día de referencia: `今日/明日` habría que recalcularlo cuando el
+  día cambia, mientras que un día de la semana es cierto cuando se lo lee. El
+  badge de la pantalla sí es `今日`, porque ahí el heading de al lado ya dice
+  `火 08/25` y el badge marca cuál de esos días es el de hoy.
 - El heading de un bucket lleva `aria-label` con la etiqueta completa y spans
   `aria-hidden` adentro: la parte numérica va en mono y la kanji no, y un solo
   nombre accesible evita que el lector de pantalla los junte mal.

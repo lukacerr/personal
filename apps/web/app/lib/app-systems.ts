@@ -26,11 +26,32 @@ export type SystemCommand = {
 };
 
 /**
+ * One line of a system's summary: what it is, and what it currently says.
+ *
+ * Deliberately one shape for readings and for records alike — `label: 'Left
+ * over'` with `detail: '$ 123.456'` is the same row as `label: 'Dentista'` with
+ * `detail: 'mañana 15:00'`. A per-system shape would mean the shell rendering
+ * finance differently from calendar, which is the one thing it must not know.
+ */
+export type SystemSummaryRow = {
+	/** Unique within this system's summary; the shell namespaces it by key. */
+	key: string;
+	label: string;
+	/** The value, aligned to the right: a time, an amount, a count. */
+	detail?: string;
+	/** Where the row leads. A reading — a total — has nowhere to go. */
+	to?: string;
+};
+
+/** What a system currently has to say in the sidebar. */
+export type SystemSummary = { rows: SystemSummaryRow[] };
+
+/**
  * How a solution contributes to the shared app shell.
  *
- * The shell renders the palette and the breadcrumb without knowing which
- * solutions exist or where they keep their data. Adding a system means adding an
- * entry to `appSystems`, not editing the shell.
+ * The shell renders the palette, the breadcrumb and the sidebar summary without
+ * knowing which solutions exist or where they keep their data. Adding a system
+ * means adding an entry to `appSystems`, not editing the shell.
  *
  * Both loaders are plain async functions rather than hooks, so the shell can
  * resolve the whole registry from one effect no matter how it grows. A system
@@ -51,6 +72,18 @@ export type AppSystem = {
 	 * An empty query means "what would you show first".
 	 */
 	searchCommands: (query: string, limit: number) => Promise<SystemCommand[]>;
+	/**
+	 * The handful of lines this system shows in the sidebar, from any screen.
+	 *
+	 * Takes no arguments on purpose: it renders next to the navigation, where
+	 * there is no route and no selection to speak of — a system that wants to
+	 * say something here has to be able to say it from anywhere.
+	 *
+	 * Returning no rows means the group is not rendered at all. That is the
+	 * ordinary case, not an error: Notes has nothing to report when everything
+	 * is synced, and an empty box saying so permanently is worse than no box.
+	 */
+	loadSummary?: () => Promise<SystemSummary | undefined>;
 	/**
 	 * Trailing breadcrumb items for the record this route has open, or an empty
 	 * array when the route belongs to another system or has none.
@@ -267,6 +300,29 @@ export function matchesCommandQuery(
 	const needle = query.trim().toLocaleLowerCase();
 	if (!needle) return true;
 	return fields.some((field) => field?.toLocaleLowerCase().includes(needle));
+}
+
+export type SystemSummaryGroup = { system: AppSystem; summary: SystemSummary };
+
+/**
+ * Every system's summary, in sidebar order, skipping the ones with nothing to
+ * say.
+ *
+ * The emptiness check lives here rather than in the sidebar so that "a system
+ * with no rows contributes no group" is one rule in one place, and the
+ * component stays a `map` over what it was handed.
+ */
+export async function loadSystemSummaries(): Promise<SystemSummaryGroup[]> {
+	const groups = await Promise.all(
+		systemsInSidebarOrder().map(async (system) => ({
+			system,
+			summary: await system.loadSummary?.(),
+		})),
+	);
+	return groups.filter(
+		(group): group is SystemSummaryGroup =>
+			(group.summary?.rows.length ?? 0) > 0,
+	);
 }
 
 export async function loadSystemBreadcrumbTrail(

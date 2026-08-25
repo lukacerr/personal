@@ -8,6 +8,7 @@ import {
 	editedEventDate,
 	formatQuickAdd,
 	formatTime,
+	formatUpcomingWhen,
 	isoWeekday,
 	isTagHidden,
 	isToggleCalendarPanelShortcut,
@@ -19,6 +20,7 @@ import {
 	scheduleItems,
 	todayLocalDate,
 	toggleDetailLine,
+	upcomingAgenda,
 	weekBuckets,
 	weekWindow,
 } from '@web/lib/calendar';
@@ -701,5 +703,127 @@ describe('isToggleCalendarPanelShortcut', () => {
 		expect(isToggleCalendarPanelShortcut({ ...base, ctrlKey: false })).toBe(
 			false,
 		);
+	});
+});
+
+describe('upcomingAgenda', () => {
+	it('reads forward from today and stops at the limit', () => {
+		const hoy = makeEvent({ date: '2026-08-18', title: 'Rosita' });
+		const manana = makeEvent({ date: '2026-08-19', title: 'Lavaseca' });
+		const pasado = makeEvent({ date: '2026-08-20', title: 'Pipeta' });
+		const cuarto = makeEvent({ date: '2026-08-21', title: 'Innovación' });
+
+		const items = upcomingAgenda(
+			[cuarto, pasado, manana, hoy],
+			[],
+			'2026-08-18',
+			3,
+		);
+		expect(items.map((item) => item.event.title)).toEqual([
+			'Rosita',
+			'Lavaseca',
+			'Pipeta',
+		]);
+	});
+
+	/**
+	 * Today counts whole, past hours included: the sidebar knows the day, not
+	 * the clock, and an 8am event is still what today was about at 9am.
+	 */
+	it('keeps today and drops yesterday', () => {
+		const ayer = makeEvent({ date: '2026-08-17', title: 'Ayer' });
+		const temprano = makeEvent({
+			date: '2026-08-18',
+			timeMinutes: 8 * 60,
+			title: 'Temprano',
+		});
+
+		const items = upcomingAgenda([ayer, temprano], [], '2026-08-18', 3);
+		expect(items.map((item) => item.event.title)).toEqual(['Temprano']);
+	});
+
+	it('skips occurrences already ticked off and takes the next ones instead', () => {
+		const daily = makeEvent({
+			date: '2026-08-01',
+			recurrence: { kind: 'everyDays', interval: 1 },
+			title: 'Pastilla',
+		});
+		const completions: CalendarCompletion[] = [
+			{ eventId: daily.id, date: '2026-08-18', status: 'done' },
+			{ eventId: daily.id, date: '2026-08-19', status: 'done' },
+		];
+
+		const items = upcomingAgenda([daily], completions, '2026-08-18', 2);
+		expect(items.map((item) => item.date)).toEqual([
+			'2026-08-20',
+			'2026-08-21',
+		]);
+	});
+
+	it('drops a one-off already marked done on its own row', () => {
+		const hecho = makeEvent({
+			date: '2026-08-18',
+			completedAt: 123,
+			title: 'Hecho',
+		});
+		const pendiente = makeEvent({ date: '2026-08-19', title: 'Pendiente' });
+
+		const items = upcomingAgenda([hecho, pendiente], [], '2026-08-18', 3);
+		expect(items.map((item) => item.event.title)).toEqual(['Pendiente']);
+	});
+
+	it('orders a shared day by time before entry, as the day itself reads', () => {
+		const tarde = makeEvent({
+			date: '2026-08-19',
+			timeMinutes: 18 * 60,
+			title: 'Tarde',
+		});
+		const manana = makeEvent({
+			date: '2026-08-19',
+			timeMinutes: 9 * 60,
+			title: 'Mañana',
+		});
+		const sinHora = makeEvent({ date: '2026-08-19', title: 'Sin hora' });
+
+		const items = upcomingAgenda([sinHora, tarde, manana], [], '2026-08-19', 3);
+		expect(items.map((item) => item.event.title)).toEqual([
+			'Mañana',
+			'Tarde',
+			'Sin hora',
+		]);
+	});
+
+	it('ignores a dateless event and a series that already ended', () => {
+		const backlog = makeEvent({ title: 'Algún día' });
+		const vencida = makeEvent({
+			date: '2026-08-01',
+			recurrence: {
+				kind: 'everyDays',
+				interval: 1,
+				until: '2026-08-10',
+			},
+			title: 'Terminada',
+		});
+
+		expect(upcomingAgenda([backlog, vencida], [], '2026-08-18', 3)).toEqual([]);
+	});
+
+	it('returns nothing for a limit of zero rather than scanning', () => {
+		const hoy = makeEvent({ date: '2026-08-18' });
+		expect(upcomingAgenda([hoy], [], '2026-08-18', 0)).toEqual([]);
+	});
+});
+
+describe('formatUpcomingWhen', () => {
+	/** The same weekday notation the day headings use, so both read alike. */
+	it('says which weekday it falls on', () => {
+		expect(formatUpcomingWhen('2026-08-24', null)).toBe('月');
+		expect(formatUpcomingWhen('2026-08-25', null)).toBe('火');
+		expect(formatUpcomingWhen('2026-08-30', null)).toBe('日');
+	});
+
+	it('appends the time when the event has one', () => {
+		expect(formatUpcomingWhen('2026-08-24', 15 * 60)).toBe('月 15:00');
+		expect(formatUpcomingWhen('2026-12-16', 9 * 60 + 5)).toBe('水 09:05');
 	});
 });

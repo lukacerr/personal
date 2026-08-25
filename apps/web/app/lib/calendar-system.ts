@@ -1,8 +1,30 @@
 import { type AppSystem, matchesCommandQuery } from '@web/lib/app-systems';
-import { clearLocalCalendar } from '@web/lib/calendar-db';
+import {
+	formatUpcomingWhen,
+	isTagHidden,
+	todayLocalDate,
+	upcomingAgenda,
+} from '@web/lib/calendar';
+import { calendarDb, clearLocalCalendar } from '@web/lib/calendar-db';
 import { describeDiscardedSync, refreshCalendar } from '@web/lib/calendar-sync';
 import { CalendarDaysIcon } from 'lucide-react';
 import { toast } from 'sonner';
+
+/** Three lines is what fits beside the navigation without crowding it out. */
+const UPCOMING_LIMIT = 3;
+
+/**
+ * Tags whose events never earn one of those three lines.
+ *
+ * They mark the routine that fills most days — the taps and the repeats — and
+ * with them in, a habit that recurs daily would take every slot every day and
+ * the summary would never say anything a glance did not already know. They stay
+ * on the screen itself, which is where the routine is the point.
+ *
+ * Only here: the screen's own tag filter is a view control someone toggles,
+ * while this is a standing rule about what the sidebar is for.
+ */
+const SUMMARY_HIDDEN_TAGS = ['タップ', '回'];
 
 /**
  * Calendar in the shell. Only the action, deliberately — like Finance's: an
@@ -42,6 +64,41 @@ export const calendarSystem: AppSystem = {
 	 * anywhere else left it waiting for the next visit to `/calendar`.
 	 */
 	refreshEverywhere: true,
+
+	/**
+	 * What is next, which is the one thing about a calendar worth knowing from
+	 * a screen that is not the calendar.
+	 *
+	 * The rows are readings and not links, for the same reason
+	 * `loadBreadcrumbTrail` is empty: the url carries no selection, so there is
+	 * nowhere to point at an occurrence. The group's own label reaches the
+	 * screen, and inventing a `?date=` nothing consumes would be a dead link.
+	 *
+	 * Today counts whole — see `upcomingAgenda` — so the first row can be
+	 * something whose hour has already passed.
+	 */
+	async loadSummary() {
+		const [events, completions] = await Promise.all([
+			calendarDb.events.toArray(),
+			calendarDb.completions.toArray(),
+		]);
+		const worth = events.filter(
+			(event) => !isTagHidden(event, SUMMARY_HIDDEN_TAGS),
+		);
+		return {
+			rows: upcomingAgenda(
+				worth,
+				completions,
+				todayLocalDate(),
+				UPCOMING_LIMIT,
+			).map((item) => ({
+				// A series shows up on several days, so the day is part of the key.
+				key: `${item.event.id}:${item.date}`,
+				label: item.event.title,
+				detail: formatUpcomingWhen(item.date, item.event.timeMinutes),
+			})),
+		};
+	},
 
 	async searchCommands(query, limit) {
 		if (limit < 1) return [];

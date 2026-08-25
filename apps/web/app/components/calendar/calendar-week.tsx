@@ -116,7 +116,9 @@ export function CalendarWeek({
 									{bucket.range}
 								</span>
 							</h3>
-							{isToday ? <Badge variant="secondary">Today</Badge> : null}
+							{/* The heading beside it already reads 火 08/25; the badge
+							    speaks the same notation rather than switching language. */}
+							{isToday ? <Badge variant="secondary">今日</Badge> : null}
 							<span className="font-mono text-muted-foreground text-xs tabular-nums">
 								{done}/{bucket.items.length}
 							</span>

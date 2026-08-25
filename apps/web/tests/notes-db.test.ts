@@ -8,6 +8,7 @@ import {
 	enqueueNoteSave,
 	flushNoteOutbox,
 	type LocalNote,
+	listDraftNotes,
 	NotesDatabase,
 	reconcileNoteSummaries,
 	updateNoteContentDraft,
@@ -895,5 +896,130 @@ describe('NotesDatabase upgrade', () => {
 
 		expect(await upgraded.noteContent.count()).toBe(0);
 		await upgraded.delete();
+	});
+});
+
+describe('listDraftNotes', () => {
+	let db: NotesDatabase;
+
+	beforeEach(() => {
+		db = new NotesDatabase(`personal-notes-test-${crypto.randomUUID()}`);
+	});
+
+	afterEach(async () => {
+		await db.delete();
+	});
+
+	const row = (overrides: Partial<LocalNote> & { id: string }): LocalNote => ({
+		title: overrides.id,
+		path: null,
+		isPublic: false,
+		viewCount: 0,
+		createdAt: 1,
+		updatedAt: 1,
+		dirty: false,
+		...overrides,
+	});
+
+	it('reports a note with an unsaved draft and leaves synced ones out', async () => {
+		await seed(db, row({ id: 'draft', title: 'Sin guardar', dirty: true }));
+		await seed(db, row({ id: 'clean', title: 'Guardada' }));
+
+		const drafts = await listDraftNotes(db, 5);
+		expect(drafts.map((note) => note.id)).toEqual(['draft']);
+		expect(drafts[0]?.title).toBe('Sin guardar');
+		expect(drafts[0]?.pendingCount).toBe(0);
+	});
+
+	/**
+	 * Queued but not dirty is still unsynced: the edit left the editor and has
+	 * not reached the server. Counting only `dirty` would call it saved.
+	 */
+	it('reports a note whose only trace is a queued operation, with its count', async () => {
+		await seed(db, {
+			// Known to the server already: only then is a metadata change its own
+			// operation, instead of something the note's first save carries along.
+			...row({ id: 'note-1', title: 'En cola', serverUpdatedAt: 1 }),
+			content: content('Ya guardada'),
+		});
+		await enqueueNoteSave(db, 'note-1');
+		await enqueueNoteMetadata(db, 'note-1', { title: 'En cola' });
+
+		const drafts = await listDraftNotes(db, 5);
+		expect(drafts.map((note) => note.id)).toEqual(['note-1']);
+		expect(drafts[0]?.pendingCount).toBe(2);
+	});
+
+	it('counts a note once when it is both dirty and queued', async () => {
+		await seed(db, {
+			...row({ id: 'note-1', dirty: true }),
+			content: content('Borrador'),
+		});
+		await enqueueNoteSave(db, 'note-1');
+
+		const drafts = await listDraftNotes(db, 5);
+		expect(drafts).toHaveLength(1);
+		expect(drafts[0]?.pendingCount).toBe(1);
+	});
+
+	/**
+	 * A terminal rejection never retries on its own, so it outranks work that is
+	 * merely still in flight however recent that work is.
+	 */
+	it('puts a terminal sync failure first, then the most recent draft', async () => {
+		await seed(
+			db,
+			row({
+				id: 'stuck',
+				dirty: true,
+				draftUpdatedAt: 10,
+				syncFailure: 'Conflict',
+			}),
+		);
+		await seed(db, row({ id: 'reciente', dirty: true, draftUpdatedAt: 300 }));
+		await seed(db, row({ id: 'vieja', dirty: true, draftUpdatedAt: 200 }));
+
+		const drafts = await listDraftNotes(db, 5);
+		expect(drafts.map((note) => note.id)).toEqual([
+			'stuck',
+			'reciente',
+			'vieja',
+		]);
+		expect(drafts[0]?.syncFailure).toBe('Conflict');
+	});
+
+	it('falls back to the row clock when a draft never stamped one', async () => {
+		await seed(db, row({ id: 'sin-stamp', dirty: true, updatedAt: 900 }));
+		await seed(db, row({ id: 'con-stamp', dirty: true, draftUpdatedAt: 100 }));
+
+		const drafts = await listDraftNotes(db, 5);
+		expect(drafts.map((note) => note.id)).toEqual(['sin-stamp', 'con-stamp']);
+	});
+
+	it('caps the answer at the limit and asks for nothing below one', async () => {
+		await seed(db, row({ id: 'a', dirty: true, draftUpdatedAt: 3 }));
+		await seed(db, row({ id: 'b', dirty: true, draftUpdatedAt: 2 }));
+		await seed(db, row({ id: 'c', dirty: true, draftUpdatedAt: 1 }));
+
+		expect((await listDraftNotes(db, 2)).map((note) => note.id)).toEqual([
+			'a',
+			'b',
+		]);
+		expect(await listDraftNotes(db, 0)).toEqual([]);
+	});
+
+	/**
+	 * The outbox outlives the row a deletion removed. Reporting an id with no
+	 * title would put a blank line in whatever renders this.
+	 */
+	it('ignores a queued operation whose note row is gone', async () => {
+		await seed(db, {
+			...row({ id: 'note-1' }),
+			content: content('Borrada'),
+		});
+		await enqueueNoteSave(db, 'note-1');
+		await db.notes.delete('note-1');
+
+		expect(await listDraftNotes(db, 5)).toEqual([]);
 	});
 });

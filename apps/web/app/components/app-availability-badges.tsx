@@ -39,9 +39,16 @@ function formatCheckedAt(checkedAt: string | undefined) {
 export function AppAvailabilityBadges({
 	pwaAvailability,
 	apiHealth,
+	onRecheck,
 }: {
 	pwaAvailability: PwaAvailability;
 	apiHealth: ApiHealth;
+	/**
+	 * Asks the API again — the only thing that ever does. The app checks once at
+	 * startup and never on its own after that, so a window left open costs
+	 * nothing; see `useApiHealth` for why that beat re-checking on focus.
+	 */
+	onRecheck?: () => void;
 }) {
 	const unavailableServices = Object.entries(apiHealth.services ?? {})
 		.filter(([, isAvailable]) => !isAvailable)
@@ -85,10 +92,19 @@ export function AppAvailabilityBadges({
 						: 'Browser reports no network connection'}
 				</TooltipContent>
 			</Tooltip>
+			{/* A button, not a decorated span: since nothing re-checks on its own,
+			    this is the only way to ask, so it has to be reachable by keyboard
+			    and named for what it does rather than only for what it shows. */}
 			<Tooltip>
 				<TooltipTrigger
 					render={
-						<Badge variant="outline" aria-label={`API ${apiLabel}`}>
+						<Badge
+							aria-label={`API ${apiLabel} — check again`}
+							className="cursor-pointer transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none motion-reduce:transition-none"
+							onClick={onRecheck}
+							render={<button type="button" />}
+							variant="outline"
+						>
 							<ServerIcon data-icon="inline-start" aria-hidden="true" />
 							<span
 								aria-hidden="true"
@@ -103,6 +119,7 @@ export function AppAvailabilityBadges({
 					<span className="text-background/70">
 						{formatCheckedAt(apiHealth.checkedAt)}
 					</span>
+					<span className="text-background/70">Click to check again</span>
 				</TooltipContent>
 			</Tooltip>
 		</div>

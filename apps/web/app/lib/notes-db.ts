@@ -134,6 +134,73 @@ export async function getNoteContent(db: NotesDatabase, id: string) {
 	return (await db.noteContent.get(id))?.content;
 }
 
+/** A note whose local state has not reached the server yet. */
+export type DraftNote = {
+	id: string;
+	title: string;
+	path: string | null;
+	/** Queued operations still to ship. Zero for a draft never sent. */
+	pendingCount: number;
+	syncFailure?: string;
+};
+
+/**
+ * Every note carrying work the server has not seen: an unsaved draft, a queued
+ * operation, or both.
+ *
+ * Queued-but-clean counts too. `dirty` alone would call a note saved the moment
+ * its edit left the editor, which is exactly when it is in flight and worth
+ * naming.
+ *
+ * `dirty` cannot be indexed — IndexedDB has no boolean keys — so this scans the
+ * rows. Affordable for the same reason the palette's title scan is: the
+ * documents live in their own table, so a row is a title, a path and some
+ * numbers.
+ *
+ * A terminal `syncFailure` sorts first because it will never retry on its own,
+ * so it outranks work that is merely still in flight however recent that is.
+ */
+export async function listDraftNotes(
+	db: NotesDatabase,
+	limit: number,
+): Promise<DraftNote[]> {
+	if (limit < 1) return [];
+
+	const [dirty, queued] = await Promise.all([
+		db.notes.filter((note) => note.dirty).toArray(),
+		db.outbox.toArray(),
+	]);
+
+	const pending = new Map<string, number>();
+	for (const operation of queued)
+		pending.set(operation.noteId, (pending.get(operation.noteId) ?? 0) + 1);
+
+	const rows = new Map(dirty.map((note) => [note.id, note]));
+	// A deletion removes the row but its queued operations outlive it, and an id
+	// with no title would render as a blank line.
+	const missing = [...pending.keys()].filter((id) => !rows.has(id));
+	for (const note of await db.notes.bulkGet(missing))
+		if (note) rows.set(note.id, note);
+
+	return [...rows.values()]
+		.sort((a, b) => {
+			const stuck =
+				Number(Boolean(b.syncFailure)) - Number(Boolean(a.syncFailure));
+			if (stuck !== 0) return stuck;
+			return (
+				(b.draftUpdatedAt ?? b.updatedAt) - (a.draftUpdatedAt ?? a.updatedAt)
+			);
+		})
+		.slice(0, limit)
+		.map((note) => ({
+			id: note.id,
+			title: note.title,
+			path: note.path,
+			pendingCount: pending.get(note.id) ?? 0,
+			...(note.syncFailure ? { syncFailure: note.syncFailure } : {}),
+		}));
+}
+
 function emptyDocument(): NoteBlock[] {
 	return [
 		{

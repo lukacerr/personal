@@ -1,10 +1,13 @@
 import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
 import { type AppSystem, matchesCommandQuery } from '@web/lib/app-systems';
-import { clearLocalNotes, notesDb } from '@web/lib/notes-db';
+import { clearLocalNotes, listDraftNotes, notesDb } from '@web/lib/notes-db';
 import { refreshNotes } from '@web/lib/notes-sync';
 import { FileTextIcon, FolderIcon } from 'lucide-react';
 
 const NOTES_PATH = '/notes';
+
+/** Enough to show there is a pile, without the pile taking over the sidebar. */
+const DRAFTS_LIMIT = 4;
 
 /** Folder segments carry their cumulative path: a name can repeat at other depths. */
 export function noteBreadcrumbTrail(note: {
@@ -44,6 +47,32 @@ export const notesSystem: AppSystem = {
 
 	/** Notes are private; sign-out leaves none of them on the device. */
 	clearLocalData: clearLocalNotes,
+
+	/**
+	 * What has not reached the server yet — nothing, most of the time, and then
+	 * the group is not rendered at all. This exists for the times it is not
+	 * nothing: an edit made offline, or a note the server rejected for good, both
+	 * of which used to be visible only by opening the note they happened to.
+	 *
+	 * A row says how it is stuck rather than when: "Failed" never clears itself,
+	 * "Syncing" clears on the next connection, and a plain draft is waiting on
+	 * the editor. Which of the three it is decides what you would do about it.
+	 */
+	async loadSummary() {
+		const drafts = await listDraftNotes(notesDb, DRAFTS_LIMIT);
+		return {
+			rows: drafts.map((note) => ({
+				key: note.id,
+				label: note.title,
+				detail: note.syncFailure
+					? 'Failed'
+					: note.pendingCount > 0
+						? 'Syncing'
+						: 'Draft',
+				to: `${NOTES_PATH}?note=${note.id}`,
+			})),
+		};
+	},
 
 	/**
 	 * Scans the rows rather than an index because a person searching for a note

@@ -250,6 +250,24 @@ describe('the system prompt', () => {
 			expect(prompt).toContain(preference);
 	});
 
+	/**
+	 * These are criteria, not a list of banned words, and that is the point: the
+	 * default reply language is Spanish, so a vocabulary blocklist written in
+	 * English would never fire on the text it is meant to police.
+	 */
+	test('states the style rules that keep answers out of model register', () => {
+		const prompt = SYSTEM_PROMPT.replaceAll(/\s+/g, ' ');
+		for (const rule of [
+			'Name the mechanism, a number, or the step to take',
+			'not just X, but Y',
+			'Use the number of items you actually have, not three.',
+			'Repeat a term instead of cycling through synonyms',
+			'Name the actor rather than leaving a verb passive',
+			'One idea per sentence',
+		])
+			expect(prompt).toContain(rule);
+	});
+
 	/** Prompt caching is a prefix match, so nothing per-request may leak in. */
 	test('is a constant, with nothing interpolated', () => {
 		expect(SYSTEM_PROMPT).toBe(SYSTEM_PROMPT.normalize());
