@@ -99,12 +99,25 @@ function SystemSummaries({ onNavigate }: { onNavigate: () => void }) {
 							))}
 						</SidebarMenu>
 					)}
-					{/* Label/value pairs are a description list, whatever they describe. */}
+					{/*
+					 * Label/value pairs are a description list, whatever they describe.
+					 *
+					 * The row carries `min-w-0` of its own, and `truncate` on the label
+					 * is not enough without it. A `flex-1` child makes its flex parent's
+					 * min-content width the child's *full* text width, and a grid item
+					 * may not shrink below min-content while its `min-width` is `auto` —
+					 * so one long title widened the shared column, and `SidebarContent`
+					 * scrolled every detail in the group out of sight, including the
+					 * ones beside short titles. The link rows escape this by being
+					 * `w-full` buttons, which are never sized by their content.
+					 */}
 					{readings.length > 0 && (
 						<dl className="grid gap-1 px-3 py-1">
 							{readings.map((row) => (
-								<div className="flex items-center gap-2" key={row.key}>
-									<dt className="min-w-0 flex-1 truncate">{row.label}</dt>
+								<div className="flex min-w-0 items-center gap-2" key={row.key}>
+									<dt className="min-w-0 flex-1 truncate" title={row.label}>
+										{row.label}
+									</dt>
 									<dd className={DETAIL_CLASS}>{row.detail}</dd>
 								</div>
 							))}
