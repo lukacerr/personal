@@ -196,6 +196,8 @@ API:
 - El contexto de build debe ser la raíz: `docker build -f api.Dockerfile -t personal-api .`.
 - La API se compila como binario Bun y la imagen final usa distroless non-root.
 - No agregues archivos o dependencias del frontend a la imagen final.
+- **Cloud Run se auto-despliega al llegar un commit a `main`.** No hay workflow en `.github/workflows` que lo haga, así que mirar ahí no lo revela: el único workflow del repo es `migrate.yml`. Es la pieza que completa el cuadro — un push a `main` despliega las tres cosas a la vez: la migración por GitHub Actions, la API por Cloud Run y la web por Cloudflare Pages. Sin esto, alguien que lea solo los workflows concluye que la API queda atrás y que la web va a pedir endpoints que no existen todavía.
+- Los tres salen en paralelo, no en orden, así que **una migración tiene que servir a la versión vieja de la API tanto como a la nueva** durante esa ventana. Agregar tablas o columnas nullable es seguro; renombrar o borrar algo que la versión saliente todavía usa, no. Eso se hace en dos pasos y dos pushes.
 
 Migraciones:
 
