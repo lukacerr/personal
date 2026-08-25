@@ -10,11 +10,11 @@ import { describeDiscardedSync, refreshCalendar } from '@web/lib/calendar-sync';
 import { CalendarDaysIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
-/** Three lines is what fits beside the navigation without crowding it out. */
-const UPCOMING_LIMIT = 3;
+/** Five lines is what fits beside the navigation without crowding it out. */
+const UPCOMING_LIMIT = 5;
 
 /**
- * Tags whose events never earn one of those three lines.
+ * Tags whose events never earn one of those five lines.
  *
  * They mark the routine that fills most days — the taps and the repeats — and
  * with them in, a habit that recurs daily would take every slot every day and

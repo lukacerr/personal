@@ -243,9 +243,39 @@ describe('AppSidebar summaries', () => {
 	});
 
 	/**
+	 * The cap is the sidebar's, not the agenda's: `upcomingAgenda` would keep
+	 * walking forward for a year, so what stops the list is what fits beside the
+	 * navigation.
+	 */
+	it('stops the agenda at five occurrences', async () => {
+		const today = todayLocalDate();
+		await calendarDb.events.bulkPut(
+			['Uno', 'Dos', 'Tres', 'Cuatro', 'Cinco', 'Seis'].map((title, index) => ({
+				id: `e${index}`,
+				title,
+				details: null,
+				tag: null,
+				date: today,
+				timeMinutes: (8 + index) * 60,
+				recurrence: null,
+				completedAt: null,
+				createdAt: index,
+				updatedAt: index,
+			})),
+		);
+
+		renderSidebar();
+
+		await waitFor(() => expect(groupOf('Calendar')).toBeTruthy());
+		const calendar = groupOf('Calendar');
+		expect(within(calendar).getByText('Cinco')).toBeTruthy();
+		expect(within(calendar).queryByText('Seis')).toBeNull();
+	});
+
+	/**
 	 * The routine tags fill most days, so with them in, a daily habit would take
-	 * all three slots every day and the summary would never say anything a glance
-	 * did not already know.
+	 * every slot every day and the summary would never say anything a glance did
+	 * not already know.
 	 */
 	it('skips the routine tags and shows what is actually coming', async () => {
 		const today = todayLocalDate();

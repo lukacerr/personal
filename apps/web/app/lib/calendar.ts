@@ -674,7 +674,7 @@ const UPCOMING_HORIZON_DAYS = 366;
  *
  * Chronological where `scheduleItems` is deliberately not: it answers "what is
  * next", so a daily series occupies consecutive slots, because that genuinely
- * is what the next three things are. `scheduleItems` caps a series at one
+ * is what the next `limit` things are. `scheduleItems` caps a series at one
  * occurrence because it lists what the days on screen already cover; nothing
  * covers this, so nothing has to be thinned out.
  *
