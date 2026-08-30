@@ -66,8 +66,7 @@ export function AgentThreadRail({
 	selectedId,
 	selected = new Set<string>(),
 	generatingTitleId,
-	titleActionBusy = false,
-	interactionBusy = false,
+	running = [],
 	onSelect,
 	onNew,
 	onRetry,
@@ -96,8 +95,13 @@ export function AgentThreadRail({
 	selectedId?: string;
 	selected?: ReadonlySet<string>;
 	generatingTitleId?: string;
-	titleActionBusy?: boolean;
-	interactionBusy?: boolean;
+	/**
+	 * Conversations answering right now — more than one may be. They stay fully
+	 * navigable, which is the point of running them in the background; what
+	 * their row withholds are the three mutations that would race the thread's
+	 * own server-side lease.
+	 */
+	running?: readonly string[];
 	onSelect: (id: string) => void;
 	onNew: () => void;
 	onRetry: () => void;
@@ -124,13 +128,13 @@ export function AgentThreadRail({
 	}
 
 	function selectOnly(id: string) {
-		if (interactionBusy || generatingTitleId !== undefined) return;
+		if (generatingTitleId !== undefined) return;
 		anchorRef.current = id;
 		onSelectionChange(new Set([id]));
 	}
 
 	function toggleSelected(id: string) {
-		if (interactionBusy || generatingTitleId !== undefined) return;
+		if (generatingTitleId !== undefined) return;
 		const next = new Set(selected);
 		if (next.has(id)) next.delete(id);
 		else if (next.size < MAX_BULK_SELECTION) next.add(id);
@@ -145,7 +149,7 @@ export function AgentThreadRail({
 	}
 
 	function selectRange(id: string) {
-		if (interactionBusy || generatingTitleId !== undefined) return;
+		if (generatingTitleId !== undefined) return;
 		const anchor = anchorRef.current;
 		if (!anchor) {
 			selectOnly(id);
@@ -249,7 +253,6 @@ export function AgentThreadRail({
 						<Button
 							variant="ghost"
 							size="sm"
-							disabled={interactionBusy}
 							onClick={() => onSelectionChange(new Set())}
 							aria-label="Clear selection"
 						>
@@ -258,7 +261,6 @@ export function AgentThreadRail({
 						<Button
 							variant="destructive"
 							size="sm"
-							disabled={interactionBusy}
 							onClick={onDeleteSelected}
 							aria-label={`Delete ${selected.size}`}
 						>
@@ -277,7 +279,6 @@ export function AgentThreadRail({
 							size="sm"
 							className="max-sm:h-11"
 							onClick={onNew}
-							disabled={interactionBusy}
 							aria-keyshortcuts="n"
 						>
 							<PlusIcon aria-hidden="true" />
@@ -375,6 +376,7 @@ export function AgentThreadRail({
 								 * mutations while marking none as the one in flight.
 								 */
 								const generating = generatingTitleId === thread.id;
+								const answering = running.includes(thread.id);
 								return (
 									<li
 										key={thread.id}
@@ -383,7 +385,6 @@ export function AgentThreadRail({
 										{selectionMode ? (
 											<Checkbox
 												checked={selected.has(thread.id)}
-												disabled={interactionBusy}
 												onCheckedChange={() => toggleSelected(thread.id)}
 												aria-label={`Select ${thread.title}`}
 												className="ml-2"
@@ -391,7 +392,6 @@ export function AgentThreadRail({
 										) : null}
 										<button
 											type="button"
-											disabled={interactionBusy}
 											onClick={(event) => {
 												if (event.shiftKey) selectRange(thread.id);
 												else onSelect(thread.id);
@@ -399,7 +399,7 @@ export function AgentThreadRail({
 											aria-current={
 												thread.id === selectedId ? 'true' : undefined
 											}
-											aria-busy={generating || undefined}
+											aria-busy={generating || answering || undefined}
 											className={cn(
 												'flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md px-2 pr-10 text-left text-sm lg:min-h-9',
 												thread.id === selectedId
@@ -411,8 +411,10 @@ export function AgentThreadRail({
 												{thread.title}
 											</span>
 											{/* `aria-busy` above is what the row says out
-											    loud; this is its visible half. */}
-											{generating && (
+											    loud; this is its visible half — for the title
+											    round trip and for a turn still streaming into a
+											    conversation that is not on screen. */}
+											{(generating || answering) && (
 												<Spinner
 													aria-hidden="true"
 													className="size-4 shrink-0"
@@ -430,7 +432,6 @@ export function AgentThreadRail({
 															size="icon"
 															className="-translate-y-1/2 absolute top-1/2 right-1 size-8 text-muted-foreground opacity-0 focus-visible:opacity-100 group-hover/thread:opacity-100 data-popup-open:opacity-100 max-lg:opacity-100"
 															aria-label={`Actions for ${thread.title}`}
-															disabled={interactionBusy}
 														/>
 													}
 												>
@@ -446,8 +447,7 @@ export function AgentThreadRail({
 														</DropdownMenuItem>
 														<DropdownMenuItem
 															disabled={
-																titleActionBusy ||
-																generatingTitleId !== undefined
+																answering || generatingTitleId !== undefined
 															}
 															onClick={() => onGenerateTitle(thread)}
 														>
@@ -472,14 +472,18 @@ export function AgentThreadRail({
 															)}
 														</DropdownMenuItem>
 														<DropdownMenuItem
-															disabled={generatingTitleId !== undefined}
+															disabled={
+																answering || generatingTitleId !== undefined
+															}
 															onClick={() => onRename(thread)}
 														>
 															<PencilIcon aria-hidden="true" /> Rename
 														</DropdownMenuItem>
 														<DropdownMenuItem
 															variant="destructive"
-															disabled={generatingTitleId !== undefined}
+															disabled={
+																answering || generatingTitleId !== undefined
+															}
 															onClick={() => onDelete(thread)}
 														>
 															<Trash2Icon aria-hidden="true" /> Delete

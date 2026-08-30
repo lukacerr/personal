@@ -1,4 +1,5 @@
 import { AGENT_PATH, clearAgentLocal } from '@web/lib/agent';
+import { resetRuns } from '@web/lib/agent-runs';
 import { agentSnapshot, useAgentStore } from '@web/lib/agent-store';
 import type { AppBreadcrumbItem } from '@web/lib/app-navigation';
 import {
@@ -91,6 +92,8 @@ export const agentSystem: AppSystem = {
 
 	/** Drop the local mirror and session-scoped server data on sign-out. */
 	clearLocalData: async () => {
+		// Runs first: nothing may keep streaming into a session that just ended.
+		resetRuns();
 		useAgentStore.getState().reset();
 		clearAgentLocal();
 	},

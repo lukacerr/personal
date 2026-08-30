@@ -8,7 +8,7 @@ Lee este archivo antes de modificar:
 
 | System | Archivos |
 | --- | --- |
-| Agent | `src/agent.ts`, `src/agent-models.ts`, `src/agent-tools.ts`, `src/agent-cache.ts`, `src/schema/agent-thread.ts`, `src/schema/agent-message.ts` |
+| Agent | `src/agent.ts`, `src/agent-models.ts`, `src/agent-tools.ts`, `src/agent-files.ts`, `src/agent-cache.ts`, `src/schema/agent-thread.ts`, `src/schema/agent-message.ts` |
 | Auth | `src/auth.ts` |
 | Calendar | `src/events.ts`, `src/schema/event.ts`, `src/schema/event-completion.ts` |
 | Credentials | `src/credentials.ts`, `src/credentials-crypto.ts`, `src/schema/credential.ts` |
@@ -113,14 +113,76 @@ Lee este archivo antes de modificar:
 - **El thread no persiste model/reasoning/tools**: la selección viaja por
   request (un thread puede mezclar modelos) y el modelo que produjo cada
   respuesta queda en la `metadata` del mensaje. Los registries viven en
-  `agent-models.ts` — 16 modelos con niveles de reasoning **nativos por
-  modelo**, sin escala genérica ni clamps: nivel fuera de la lista es 422, y
-  **todos declaran al menos un nivel** (un modelo cuyo reasoning no se pueda
+  `agent-models.ts` — los modelos curados, con niveles de reasoning **nativos
+  por modelo**, sin escala genérica ni clamps: nivel fuera de la lista es 422,
+  y **todos declaran al menos un nivel** (un modelo cuyo reasoning no se pueda
   dirigir no entra al registry) — y
-  `agent-tools.ts` (`tavily` vía `@tavily/core`). Agregar un modelo o una tool
+  `agent-tools.ts` (`tavily` vía `@tavily/core`, más `storageSearch` y
+  `storageRead` sobre el system Storage). Agregar un modelo o una tool
   es una entrada en su registry y nada más: catálogo, validación y web derivan
-  de ahí. El body `tools: string[]` expone solo esas tools a `streamText`;
+  de ahí. El catálogo de tools publica además un `group` (`TOOL_GROUPS`, con el
+  que el picker de la web arma su rail): es un `satisfies Record<AgentToolName,
+  string>`, así que registrar una tool sin grupo no compila y las dos listas no
+  pueden separarse. El body `tools: string[]` expone solo esas tools a `streamText`;
   un nombre desconocido es 422, nunca un grant menor silencioso.
+- **Lectura de archivos (`storageRead` + `src/agent-files.ts`): el `execute`
+  persiste solo metadata (~250 bytes) y el contenido pesado viaja por
+  `toModelOutput`**, que la SDK invoca al armar cada prompt — tanto en
+  `convertToModelMessages` (historial) como en el step-loop de `streamText`
+  dentro del mismo request. La división no es estética: los parts persistidos
+  alimentan la ventana de 65 KiB, el cache Redis de 512 KiB y el transcript de
+  compactación, así que un output con contenido los rompería los tres. Las
+  menciones `@f:<fileId>` son texto plano en el mensaje del usuario; el
+  `SYSTEM_PROMPT` documenta la sintaxis (estático, sigue byte-estable) y
+  `deriveTitle` la filtra para no titular threads con uuids.
+- **Cada modelo declara `attachments: { image, pdf }` curado, y la hidratación
+  se ata por request**: `bindToolsToModel(model.attachments)` produce el
+  registry cuyo `toModelOutput` sabe qué puede ver el modelo. **El registry
+  completo atado va a `convertToModelMessages` y el subset `picked` a
+  `streamText`**: el historial puede tener tool parts de turnos cuyas tools no
+  están otorgadas ahora, y sus outputs igual deben hidratarse (o degradarse)
+  para el modelo actual. **Ningún modelo Novita declara `pdf`** y toda entrega
+  degradada usa `{type:'text'}` plano, nunca un content array de solo texto:
+  `@ai-sdk/openai-compatible` hace `JSON.stringify` de un content array, así
+  que un media ahí sería base64 como texto.
+- **Las imágenes sí llegan a Novita, pero un mensaje después.** Cinco de sus
+  modelos declaran `image` en `input_modalities` de su propio `/models`
+  (`kimi-k3`, `glm-5.3-flash`, `minimax-m3`, `qwen3.8-max`, `qwen3.8-flash`);
+  esa lista está curada desde ahí, no adivinada, y un test la fija. El mismo
+  adapter que estringa un tool result **sí** mapea un file part `image/*` de un
+  mensaje **user** a `image_url`, así que `liftToolImagesToUserMessages`
+  (`agent-files.ts`) saca los bytes del tool result, deja en su lugar una línea
+  diciendo dónde fueron, y los pone en un user message inmediatamente después.
+  Se aplica en dos lados porque hay dos armadores de prompt:
+  `toProviderMessages` cubre el historial y **`prepareStep` cubre los pasos de
+  la misma request**, que es donde cae justamente la lectura recién hecha.
+  Lift sobre algo ya lifteado es no-op —los outputs que movió ya son texto—,
+  cosa que importa porque el SDK arrastra el override de un paso al siguiente.
+  PDFs no: chat-completions no tiene una parte para eso que Novita documente.
+- **`fileReadModelOutput` jamás lanza.** Un throw dentro de `toModelOutput`
+  falla la conversión de prompt de **todos** los turnos futuros del thread: un
+  archivo borrado, S3 caído o una extracción rota degradan ese tool result a
+  un texto `[file … no longer readable]` y nada más.
+- **La conversión Office→PDF ocurre una sola vez, en `execute`, nunca en
+  `toModelOutput`.** LibreOffice estampa CreationDate en cada PDF que emite:
+  convertir por turno alimentaría al provider bytes distintos cada vez y
+  rompería el prefix cache de Anthropic, además de pagar Gotenberg por turno.
+  El resultado se cachea como objeto derivado inmutable
+  (`derived/<fileId>/converted.pdf`, key en `files-storage.ts`) y la
+  hidratación lee esos bytes estables. Gotenberg (`GOTENBERG_URL`, opcional)
+  es LibreOffice detrás de HTTP: en Compose corre el servicio local, en
+  producción un Cloud Run privado aparte con HTTP/2; sin URL configurada docx
+  degrada a texto mammoth y pptx falla con mensaje claro. En Cloud Run el
+  cliente adjunta un ID token del metadata server (audience = la URL); fuera
+  no hay metadata server y va sin header. Caps en `ATTACHMENT_LIMITS`
+  (imagen 5 MiB, PDF 15 MiB, documentos 20 MiB fuente; texto extraído
+  `EXTRACT_MAX_CHARS = 100k chars`), aplicados sobre `row.size` antes de leer
+  bytes.
+- **Los bytes de media hidratados son invisibles para el presupuesto de
+  `promptWindow`** (mide los parts persistidos): varios PDFs en un thread
+  pueden desbordar la context window del modelo y ese turno falla con el error
+  del provider, igual que cualquier thread largo — compactar o cambiar de
+  modelo sigue siendo decisión del usuario.
 - El body de chat lleva `maxSteps` entero positivo acotado por
   `AGENT_MAX_STEPS` (250, en `agent-settings.ts`; default 5) y pasado sin
   reinterpretar a `isStepCount`. **La cota vive en `agentSelectionSchema`, no en
@@ -478,6 +540,7 @@ Lee este archivo antes de modificar:
 
 - La tabla `file` de Storage describe únicamente archivos que ya existen en el bucket: no tiene `uploadId` ni `uploadedAt`. Toda subida en curso vive en Redis bajo `storage:upload:<id>` (estado) y `storage:name:<path>/<name>` (reserva del nombre, escrita con `NX`), con TTL de 24 h renovado en cada pedido de partes. La fila se escribe recién en `POST /files/:id/complete`, así que el listado no filtra nada y `createdAt` es cuándo el archivo empezó a existir. No reintroduzcas columnas de estado intermedio.
 - La key en S3 es `files/<id>` y es inmutable: renombrar o mover un archivo es un `UPDATE` puro y nunca un `CopyObject` + `DeleteObject`, que no es atómico. Nombre y carpeta viven solo en la DB.
+- **Los derivados viven bajo `derived/` a propósito, fuera de `OBJECT_PREFIX`** (hoy: `derived/<id>/converted.pdf`, el PDF que el tool de lectura del Agent convierte de un Office). Reconcile solo recorre `files/`, así que un derivado nunca puede confundirse con un upload huérfano; `deleteObject` borra el derivado best-effort junto con el objeto (un fallo ahí deja basura inaccesible, más barato que fallar el delete). El Agent es hoy el único que **lee bytes** server-side (`storage.file(objectKey(id))`, en `agent-files.ts`).
 - `complete` lee el tamaño real con `stat()` y nunca confía en el `size` declarado. Si el objeto no existe, aborta el multipart y libera las claves sin crear fila. Si el `INSERT` falla porque alguien tomó el nombre, borra el objeto recién subido antes de responder: un objeto sin fila es basura que solo `reconcile` puede encontrar. Un conflicto sobre el **id** es lo contrario y no cae en ese catch: significa que un `complete` concurrente o reintentado ya escribió esta misma fila, así que se responde la fila almacenada (201) sin tocar el objeto — borrarlo dejaría la fila del ganador apuntando a nada. Por eso el insert lleva `onConflictDoNothing({ target: file.id })`.
 - El orden de borrado es siempre S3 primero y Postgres después. Al revés, un fallo deja un objeto que ya nadie sabe que existe.
 - `Bun.S3Client` no expone multipart: su `presign` firma una operación simple sobre una key, y `partNumber`/`uploadId` entran en la firma canónica de SigV4. `apps/api/src/files-multipart.ts` usa `aws4fetch` para `CreateMultipartUpload`, firmar partes, `Complete` y `Abort`. `CompleteMultipartUpload` responde `200 OK` con un `<Error>` en el body: verifica el body, nunca solo el status.

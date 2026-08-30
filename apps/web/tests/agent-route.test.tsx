@@ -10,6 +10,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AgentSettings } from '@web/lib/agent-api';
+import { markRunBusy } from '@web/lib/agent-runs';
 import Agent from '@web/routes/_app.agent';
 import { MemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -79,6 +80,46 @@ vi.mock('@web/lib/agent-api', async (importOriginal) => ({
 	searchThread: api.searchThread,
 }));
 
+/**
+ * The run registry, faked down to what the route reads: which conversations
+ * are answering. Its own behaviour — surviving an unmount, settling, dropping
+ * — is pinned in `agent-runs.test.ts`.
+ */
+const runs = vi.hoisted(() => {
+	const listeners = new Set<() => void>();
+	let ids: readonly string[] = [];
+	return {
+		listeners,
+		read: () => ids,
+		set(next: readonly string[]) {
+			if (next.length === ids.length && next.every((id, i) => id === ids[i]))
+				return;
+			ids = next;
+			for (const listener of [...listeners]) listener();
+		},
+		reset() {
+			ids = [];
+		},
+		dropRun: vi.fn(),
+	};
+});
+vi.mock('@web/lib/agent-runs', () => ({
+	subscribeRuns: (listener: () => void) => {
+		runs.listeners.add(listener);
+		return () => runs.listeners.delete(listener);
+	},
+	runningThreads: () => runs.read(),
+	isThreadRunning: (id: string) => runs.read().includes(id),
+	liveRun: () => undefined,
+	dropRun: runs.dropRun,
+	markRunBusy: (id: string, busy: boolean) =>
+		runs.set(
+			busy
+				? [...new Set([...runs.read(), id])]
+				: runs.read().filter((entry) => entry !== id),
+		),
+}));
+
 vi.mock('@web/lib/agent-store', () => ({ useAgentStore: store.useStore }));
 vi.mock('@web/lib/agent-preferences', () => ({
 	useAgentPreferences: () => ({
@@ -94,7 +135,7 @@ vi.mock('@web/components/agent/agent-thread-rail', () => ({
 		onGenerateTitle,
 		onSelectionChange,
 		onDeleteSelected,
-		interactionBusy,
+		running,
 		selected,
 	}: {
 		onSelect: (id: string) => void;
@@ -102,16 +143,13 @@ vi.mock('@web/components/agent/agent-thread-rail', () => ({
 		onGenerateTitle: (thread: { id: string; title: string }) => void;
 		onSelectionChange: (selected: Set<string>) => void;
 		onDeleteSelected: () => void;
-		interactionBusy: boolean;
+		running: readonly string[];
 		selected: Set<string>;
 	}) => (
 		<div>
 			<span>Rail selected {selected.size}</span>
-			<button
-				type="button"
-				disabled={interactionBusy}
-				onClick={() => onSelect('thread-b')}
-			>
+			<span>Rail running {running.join(',')}</span>
+			<button type="button" onClick={() => onSelect('thread-b')}>
 				Open thread B
 			</button>
 			<button type="button" onClick={() => onSelect('thread-b')}>
@@ -141,14 +179,12 @@ vi.mock('@web/components/agent/agent-thread-rail', () => ({
 vi.mock('@web/components/agent/agent-chat', () => ({
 	AgentChat: ({
 		chatId,
-		onBusyChange,
 		compactionMessage,
 		edgeRequest,
 		ensureThread,
 		busyReason,
 	}: {
 		chatId: string;
-		onBusyChange?: (busy: boolean) => void;
 		compactionMessage?: { id: string };
 		edgeRequest?: { edge: string; token: number };
 		ensureThread: (text: string) => Promise<unknown>;
@@ -162,7 +198,7 @@ vi.mock('@web/components/agent/agent-chat', () => ({
 					Edge {edgeRequest.edge} {edgeRequest.token}
 				</span>
 			) : null}
-			<button type="button" onClick={() => onBusyChange?.(true)}>
+			<button type="button" onClick={() => markRunBusy(chatId, true)}>
 				Start turn
 			</button>
 			<button
@@ -311,6 +347,8 @@ beforeEach(() => {
 afterEach(() => {
 	vi.unstubAllGlobals();
 	cleanup();
+	runs.reset();
+	runs.dropRun.mockReset();
 });
 
 describe('Agent route operations', () => {
@@ -417,7 +455,12 @@ describe('Agent route operations', () => {
 		);
 	});
 
-	it('guards rail navigation and new chat while a turn is busy', async () => {
+	/**
+	 * A turn in flight used to freeze the screen it was on. It no longer does:
+	 * the runtime outlives the transcript, so the conversation keeps answering
+	 * in the rail while another one — or a new one — is opened.
+	 */
+	it('opens another conversation while a turn keeps answering in the background', async () => {
 		render(
 			<MemoryRouter initialEntries={['/agent?thread=thread-a']}>
 				<Agent />
@@ -425,16 +468,30 @@ describe('Agent route operations', () => {
 		);
 		await screen.findByText('Chat thread-a');
 		await userEvent.click(screen.getByRole('button', { name: 'Start turn' }));
+
 		await userEvent.click(
-			screen.getAllByRole('button', { name: 'Force open thread B' })[0],
+			screen.getAllByRole('button', { name: 'Open thread B' })[0],
 		);
+		expect(await screen.findByText('Chat thread-b')).toBeDefined();
+		expect(screen.getAllByText('Rail running thread-a').length).toBeGreaterThan(
+			0,
+		);
+
 		await userEvent.click(
 			screen.getAllByRole('button', { name: 'Force new chat' })[0],
 		);
-		expect(screen.getByText('Chat thread-a')).toBeDefined();
+		await waitFor(() => expect(screen.queryByText('Chat thread-b')).toBeNull());
+		expect(screen.getAllByText('Rail running thread-a').length).toBeGreaterThan(
+			0,
+		);
 	});
 
-	it('cancels and deletes a draft created after history navigation made preflight stale', async () => {
+	/**
+	 * Leaving a draft mid-creation used to delete the row and drop the message.
+	 * Now the send stands on its own: the thread is created, the run streams
+	 * into it, and the url stays where the navigation put it.
+	 */
+	it('keeps a draft created after history navigation left it', async () => {
 		const creation = deferred<{
 			id: string;
 			title: string;
@@ -462,12 +519,15 @@ describe('Agent route operations', () => {
 		});
 
 		await waitFor(() =>
-			expect(api.deleteThread).toHaveBeenCalledWith('draft-created-stale'),
+			expect(store.state.upsertLocal).toHaveBeenCalledWith(
+				expect.objectContaining({ id: 'draft-created-stale' }),
+			),
 		);
-		expect(store.state.upsertLocal).not.toHaveBeenCalled();
+		expect(api.deleteThread).not.toHaveBeenCalled();
 		expect(api.preflightResult).toHaveBeenCalledWith(
-			expect.objectContaining({ status: 'cancelled' }),
+			expect.objectContaining({ status: 'ready' }),
 		);
+		// The navigation stands: the created draft does not pull the url back.
 		expect(screen.getByText('Chat thread-b')).toBeDefined();
 	});
 

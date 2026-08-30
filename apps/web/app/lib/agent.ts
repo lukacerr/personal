@@ -1,4 +1,8 @@
 import {
+	draftMentionsFiles,
+	FILE_MENTION_PATTERN,
+} from '@web/lib/agent-mentions';
+import {
 	AGENT_SETTINGS_KEY,
 	legacySelectionSchema,
 } from '@web/lib/agent-settings';
@@ -247,7 +251,12 @@ export function restoreSelection(
 }
 
 export function draftThreadTitle(text: string) {
-	const collapsed = text.replace(/\s+/g, ' ').trim();
+	// Mirrors the server's deriveTitle: a file mention is a uuid, and a uuid
+	// is a terrible thread title.
+	const collapsed = text
+		.replaceAll(FILE_MENTION_PATTERN, '')
+		.replace(/\s+/g, ' ')
+		.trim();
 	return collapsed.slice(0, THREAD_TITLE_MAX) || 'New chat';
 }
 
@@ -262,6 +271,53 @@ export function tavilyQuery(input: unknown): string | undefined {
 	if (!input || typeof input !== 'object') return undefined;
 	const query = (input as Record<string, unknown>).query;
 	return typeof query === 'string' && query.length > 0 ? query : undefined;
+}
+
+/** What the storage search tool was scoped to, for the in-flight shimmer. */
+export function storageSearchLabel(input: unknown): string | undefined {
+	if (!input || typeof input !== 'object') return undefined;
+	const { query, folder } = input as Record<string, unknown>;
+	if (typeof query === 'string' && query.length > 0) return query;
+	if (typeof folder === 'string' && folder.length > 0) return folder;
+	return undefined;
+}
+
+export type StorageSearchResult = { fileId: string; name: string };
+
+export function storageSearchFiles(output: unknown): StorageSearchResult[] {
+	if (!output || typeof output !== 'object') return [];
+	const files = (output as Record<string, unknown>).files;
+	if (!Array.isArray(files)) return [];
+	const results: StorageSearchResult[] = [];
+	for (const entry of files) {
+		if (!entry || typeof entry !== 'object') continue;
+		const { fileId, name } = entry as Record<string, unknown>;
+		if (typeof fileId === 'string' && typeof name === 'string')
+			results.push({ fileId, name });
+	}
+	return results;
+}
+
+export type StorageReadResult = {
+	fileId: string;
+	name: string;
+	mediaType: string;
+	size: number;
+};
+
+export function storageReadFile(
+	output: unknown,
+): StorageReadResult | undefined {
+	if (!output || typeof output !== 'object') return undefined;
+	const { fileId, name, mediaType, size } = output as Record<string, unknown>;
+	if (
+		typeof fileId === 'string' &&
+		typeof name === 'string' &&
+		typeof mediaType === 'string' &&
+		typeof size === 'number'
+	)
+		return { fileId, name, mediaType, size };
+	return undefined;
 }
 
 export function tavilySources(output: unknown): AgentSource[] {
@@ -421,6 +477,29 @@ export function turnFailureMessage(error?: { message?: string }): string {
 	for (const [code, sentence] of Object.entries(TURN_FAILURES))
 		if (raw.includes(code)) return sentence;
 	return raw;
+}
+
+/**
+ * Whether anything on screen needs a file's name: a `@f:` mention in a user
+ * message, or a read the agent performed. The transcript resolves both against
+ * the Storage index, so a thread that has either is what makes loading that
+ * index worth a request — and a thread that has neither must not cost one.
+ */
+export function messagesReferenceFiles(
+	messages: readonly { parts: readonly unknown[] }[],
+) {
+	return messages.some((message) =>
+		message.parts.some((part) => {
+			if (!part || typeof part !== 'object') return false;
+			const candidate = part as { type?: unknown; text?: unknown };
+			if (candidate.type === 'tool-storageRead') return true;
+			return (
+				candidate.type === 'text' &&
+				typeof candidate.text === 'string' &&
+				draftMentionsFiles(candidate.text)
+			);
+		}),
+	);
 }
 
 /** The plain text of a message, for the clipboard. */

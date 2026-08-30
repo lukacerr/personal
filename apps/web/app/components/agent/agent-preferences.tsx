@@ -1,6 +1,6 @@
 import {
 	type AgentModelOption,
-	AgentModelPicker,
+	AgentModelPickerPopover,
 } from '@web/components/agent/agent-model-picker';
 import { Button } from '@web/components/ui/button';
 import {
@@ -90,7 +90,7 @@ function AgentSettingsModelRow({
 				</p>
 				<p className="text-muted-foreground/70 text-xs">{hint}</p>
 			</div>
-			<AgentModelPicker
+			<AgentModelPickerPopover
 				models={models}
 				value={value ?? ''}
 				onSelect={onSelect}

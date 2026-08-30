@@ -46,12 +46,18 @@ import {
 	type AgentUIMessage,
 	compactThread,
 	createThread,
-	deleteThread,
 	forkThread,
 	readThreadMessages,
 	searchThread,
 } from '@web/lib/agent-api';
 import { useAgentPreferences } from '@web/lib/agent-preferences';
+import {
+	dropRun,
+	isThreadRunning,
+	liveRun,
+	runningThreads,
+	subscribeRuns,
+} from '@web/lib/agent-runs';
 import { useAgentStore } from '@web/lib/agent-store';
 import { isTransientApiFailure } from '@web/lib/api';
 import { useConsumeCreateParam } from '@web/lib/create-param';
@@ -98,6 +104,9 @@ const cancelledSend = (): AgentEnsureThreadResult => ({
 	status: 'cancelled',
 	message: 'Send canceled because this conversation is no longer open.',
 });
+
+/** One frozen array, so the server snapshot never looks like a change. */
+const emptyRunning: readonly string[] = [];
 
 const AGENT_DESKTOP_RAIL_QUERY = '(min-width: 1024px)';
 const subscribeToAgentRail = (notify: () => void) => {
@@ -249,6 +258,24 @@ export default function Agent() {
 			return;
 		}
 
+		/**
+		 * A conversation still answering keeps its runtime in the registry, so
+		 * coming back to it reattaches instead of reading a page the stream has
+		 * already moved past.
+		 */
+		const running = liveRun(selectedId);
+		if (running) {
+			setSessionError(undefined);
+			setSession({
+				chatId: selectedId,
+				initialMessages: running.chat.messages,
+				window: running.window,
+				isDraft: false,
+				generation: ++sessionGeneration.current,
+			});
+			return;
+		}
+
 		let stale = false;
 		setSession(undefined);
 		setSessionError(undefined);
@@ -303,20 +330,6 @@ export default function Agent() {
 			const expectedGeneration = current.generation;
 			try {
 				const created = await createThread(expectedId);
-				const active = sessionRef.current;
-				if (
-					selectedIdRef.current !== undefined ||
-					active?.chatId !== expectedId ||
-					active.generation !== expectedGeneration ||
-					!active.isDraft
-				) {
-					try {
-						await deleteThread(created.id);
-					} catch {
-						// Best effort: navigation already owns the screen.
-					}
-					return cancelledSend();
-				}
 				// Optimistic title so the rail and breadcrumb read right away; the
 				// turn's onFinish reconciles it with what the server derived.
 				useAgentStore.getState().upsertLocal({
@@ -336,35 +349,26 @@ export default function Agent() {
 					? { ...value, isDraft: false }
 					: value,
 			);
-			rememberThread(expectedId);
-			setThreadParam(expectedId);
+			/**
+			 * Only if this draft is still what the screen is on. Leaving it — for
+			 * another conversation, or for a fresh one — no longer cancels the
+			 * send: the row exists, the run keeps streaming into it, and the rail
+			 * shows it answering. Yanking the url back would undo the navigation
+			 * that made that possible.
+			 */
+			const active = sessionRef.current;
+			if (
+				selectedIdRef.current === undefined &&
+				active?.chatId === expectedId &&
+				active.generation === expectedGeneration
+			) {
+				rememberThread(expectedId);
+				setThreadParam(expectedId);
+			}
 			return { status: 'ready' };
 		},
 		[setThreadParam],
 	);
-
-	/**
-	 * The delayed index refresh after a turn. Held so leaving the screen — or
-	 * signing out — cancels it: a timer that outlives the screen fires a request
-	 * for a session that may no longer exist.
-	 */
-	const titleRefresh = useRef<number | undefined>(undefined);
-	useEffect(() => () => window.clearTimeout(titleRefresh.current), []);
-
-	const onTurnFinished = useCallback(() => {
-		void useAgentStore.getState().load(true);
-		/**
-		 * The generated title lands seconds after the stream closes — the server
-		 * writes it after persisting, with its own LLM round-trip — so one delayed
-		 * refresh picks it up. Cheap on a miss: the read carries the tag it holds,
-		 * so an index that did not change answers 304 with no payload.
-		 */
-		window.clearTimeout(titleRefresh.current);
-		titleRefresh.current = window.setTimeout(
-			() => void useAgentStore.getState().load(true),
-			6000,
-		);
-	}, []);
 
 	/**
 	 * Every transient command the route hands the transcript, in one object.
@@ -394,16 +398,43 @@ export default function Agent() {
 	 */
 	const [compacting, setCompacting] = useState(false);
 	const compactingRef = useRef(false);
-	const [chatBusy, setChatBusy] = useState(false);
-	const chatBusyRef = useRef(false);
-	const changeChatBusy = useCallback((busy: boolean) => {
-		chatBusyRef.current = busy;
-		setChatBusy(busy);
-	}, []);
+	/**
+	 * Which conversations are answering right now — several may be. Nothing
+	 * here blocks navigation any more: the only operations a running turn still
+	 * rules out are the ones that would race its own thread's mutation lease.
+	 */
+	const running = useSyncExternalStore(
+		subscribeRuns,
+		runningThreads,
+		() => emptyRunning,
+	);
+	const chatBusy = selectedId !== undefined && running.includes(selectedId);
+
+	/**
+	 * A conversation answering off screen has to say when it is done, or the
+	 * only way to find out is to go looking. Deleted threads are skipped: their
+	 * run ends the same way a finished one does.
+	 */
+	const wasRunning = useRef<readonly string[]>(emptyRunning);
+	useEffect(() => {
+		const before = wasRunning.current;
+		wasRunning.current = running;
+		for (const id of before) {
+			if (running.includes(id) || id === selectedIdRef.current) continue;
+			const thread = useAgentStore
+				.getState()
+				.threads.find((entry) => entry.id === id);
+			if (!thread) continue;
+			toast.success(`“${thread.title}” finished answering.`, {
+				action: { label: 'Open', onClick: () => setThreadParam(id) },
+			});
+		}
+	}, [running, setThreadParam]);
 	const [generatingTitleId, setGeneratingTitleId] = useState<string>();
 	const generateTitleFor = useCallback(
 		async (thread: AgentThread) => {
-			if (!selection?.model || generatingTitleId || chatBusyRef.current) return;
+			if (!selection?.model || generatingTitleId || isThreadRunning(thread.id))
+				return;
 			setGeneratingTitleId(thread.id);
 			const failure = await generateTitle(thread.id, selection.model);
 			setGeneratingTitleId(undefined);
@@ -417,7 +448,7 @@ export default function Agent() {
 		if (
 			!selectedId ||
 			!compactionFallback ||
-			chatBusyRef.current ||
+			isThreadRunning(selectedId) ||
 			compactingRef.current
 		)
 			return;
@@ -555,7 +586,6 @@ export default function Agent() {
 
 	const selectThread = useCallback(
 		(id: string) => {
-			if (chatBusyRef.current) return;
 			setThreadParam(id);
 		},
 		[setThreadParam],
@@ -586,7 +616,6 @@ export default function Agent() {
 	);
 
 	const startNewChat = useCallback(() => {
-		if (chatBusyRef.current) return;
 		setSelectedThreads(new Set());
 		rememberThread(undefined);
 		setThreadParam(undefined);
@@ -703,6 +732,10 @@ export default function Agent() {
 
 	async function confirmDelete() {
 		if (!deleting) return;
+		// Nothing may keep streaming into a thread that is about to stop
+		// existing; its row disables this while it answers, but a turn can
+		// start between opening the menu and confirming.
+		dropRun(deleting.id);
 		setDialogBusy(true);
 		const failure = await remove(deleting.id);
 		setDialogBusy(false);
@@ -718,6 +751,7 @@ export default function Agent() {
 	async function confirmBulkDelete() {
 		if (selectedThreads.size === 0 || bulkDeleteBusy) return;
 		const ids = [...selectedThreads];
+		for (const id of ids) dropRun(id);
 		setBulkDeleteBusy(true);
 		setBulkDeleteError(undefined);
 		const result = await removeMany(ids);
@@ -768,8 +802,7 @@ export default function Agent() {
 			selectedId={selectedId}
 			selected={selectedThreads}
 			generatingTitleId={generatingTitleId}
-			titleActionBusy={chatBusy}
-			interactionBusy={chatBusy}
+			running={running}
 			reserveCloseSpace={inSheet}
 			onLoadMore={() => void loadMore()}
 			onQueryChange={(next) => {
@@ -850,7 +883,6 @@ export default function Agent() {
 						size="icon"
 						className="max-sm:size-11 lg:hidden"
 						onClick={startNewChat}
-						disabled={chatBusy}
 						aria-label="New chat"
 						aria-keyshortcuts="n"
 					>
@@ -957,8 +989,6 @@ export default function Agent() {
 						preferences={preferences}
 						onSelectionChange={changeSelection}
 						ensureThread={ensureThread}
-						onTurnFinished={onTurnFinished}
-						onBusyChange={changeChatBusy}
 						/*
 						 * The compaction holds this thread's mutation lease, so every
 						 * send would come back a 409 while it runs. Blocking is not

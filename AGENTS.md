@@ -197,6 +197,7 @@ API:
 - El contexto de build debe ser la raíz: `docker build -f api.Dockerfile -t personal-api .`.
 - La API se compila como binario Bun y la imagen final usa distroless non-root.
 - No agregues archivos o dependencias del frontend a la imagen final.
+- Gotenberg corre en producción como **un segundo servicio Cloud Run** (imagen pública `gotenberg/gotenberg`, HTTP/2 para evitar el límite de request de 32 MB, scale-to-zero), deployado manualmente por el usuario — no participa del auto-deploy. La API lo alcanza por `GOTENBERG_URL` y adjunta un ID token del metadata server; sin la variable, la conversión degrada (ver `apps/api/AGENTS.md`).
 - **Cloud Run se auto-despliega al llegar un commit a `main`.** No hay workflow en `.github/workflows` que lo haga, así que mirar ahí no lo revela: el único workflow del repo es `migrate.yml`. Es la pieza que completa el cuadro — un push a `main` despliega las tres cosas a la vez: la migración por GitHub Actions, la API por Cloud Run y la web por Cloudflare Pages. Sin esto, alguien que lea solo los workflows concluye que la API queda atrás y que la web va a pedir endpoints que no existen todavía.
 - Los tres salen en paralelo, no en orden, así que **una migración tiene que servir a la versión vieja de la API tanto como a la nueva** durante esa ventana. Agregar tablas o columnas nullable es seguro; renombrar o borrar algo que la versión saliente todavía usa, no. Eso se hace en dos pasos y dos pushes.
 
@@ -216,7 +217,7 @@ Web:
 
 Entorno local con Docker Compose:
 
-- `docker-compose.yml` levanta web, API, PostgreSQL 17, un shim propio del endpoint HTTP `/sql` de Neon (servicio `db-proxy`, `apps/api/scripts/neon-http-shim.ts`: Bun.serve sobre un pool de `pg` con parsers identidad), MinIO y Redis detrás de un proxy REST compatible con Upstash. El shim reemplazó a `local-neon-http-proxy`, que costaba ~150 ms por request re-consultando secretos SCRAM contra su control plane mock (la suite de API tardaba ~125 s); el shim responde en ~1 ms.
+- `docker-compose.yml` levanta web, API, PostgreSQL 17, un shim propio del endpoint HTTP `/sql` de Neon (servicio `db-proxy`, `apps/api/scripts/neon-http-shim.ts`: Bun.serve sobre un pool de `pg` con parsers identidad), MinIO, Redis detrás de un proxy REST compatible con Upstash, y Gotenberg (LibreOffice detrás de HTTP, puerto 3000) para la conversión Office→PDF del Agent. El shim reemplazó a `local-neon-http-proxy`, que costaba ~150 ms por request re-consultando secretos SCRAM contra su control plane mock (la suite de API tardaba ~125 s); el shim responde en ~1 ms.
 - Compose usa `dev.Dockerfile` para web/API: monta las fuentes, ejecuta `bun --watch` en API y React Router/Vite HMR en web. No reutilices ni conviertas `api.Dockerfile` en una imagen de desarrollo; es exclusivamente la imagen compilada de Cloud Run.
 - Las dependencias de desarrollo quedan dentro de la imagen y no se montan desde el host. Los cambios de código tienen recarga automática; cambios en manifests, lockfile o Dockerfiles requieren `bun run docker:rebuild`.
 - Cuando agregues o cambies dependencias durante una tarea, ejecuta inmediatamente `bun run docker:rebuild` en vez de levantar un servidor host paralelo, para que la instancia visible en `localhost:5173` permanezca actualizada para el usuario.

@@ -63,6 +63,13 @@ export const env = createEnv({
 		OPENAI_API_KEY: z.string().min(1),
 		NOVITA_API_KEY: z.string().min(1),
 		TAVILY_API_KEY: z.string().min(1),
+		/**
+		 * Gotenberg (LibreOffice detrás de HTTP) para convertir docx/pptx a PDF
+		 * en el tool de lectura del Agent. Opcional: sin valor, docx degrada a
+		 * extracción de texto y pptx reporta el formato como no convertible.
+		 * Compose apunta al servicio local; producción, al Cloud Run privado.
+		 */
+		GOTENBERG_URL: z.url().optional(),
 	},
 	runtimeEnv: process.env,
 	emptyStringAsUndefined: true,

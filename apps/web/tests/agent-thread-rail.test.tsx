@@ -198,23 +198,51 @@ describe('the selected row', () => {
 });
 
 describe('busy row actions', () => {
-	it('disables navigation, new chat, shift selection, and row actions during a turn', async () => {
-		const props = renderRail({ interactionBusy: true });
+	/**
+	 * A turn in flight no longer freezes the list — running one in the
+	 * background is the whole point. What its row still withholds are the three
+	 * mutations that would race the thread's own server-side lease, and only on
+	 * that row.
+	 */
+	it('keeps a running conversation navigable and holds back only its mutations', async () => {
+		const props = renderRail({ running: ['thread-1'] });
 		const row = screen.getByRole('button', { name: 'Conversation 1' });
-		const actions = screen.getByRole('button', {
-			name: 'Actions for Conversation 1',
-		});
-		expect(row.hasAttribute('disabled')).toBe(true);
-		expect(actions.hasAttribute('disabled')).toBe(true);
+		expect(row.hasAttribute('disabled')).toBe(false);
+		expect(row.getAttribute('aria-busy')).toBe('true');
+		expect(row.querySelector('[data-slot="spinner"]')).not.toBeNull();
 		expect(
 			screen.getByRole('button', { name: 'New chat' }).hasAttribute('disabled'),
-		).toBe(true);
+		).toBe(false);
 
-		fireEvent.click(row, { shiftKey: true });
-		await userEvent.click(actions);
-		expect(props.onSelect).not.toHaveBeenCalled();
-		expect(props.onSelectionChange).not.toHaveBeenCalled();
-		expect(screen.queryByRole('menu')).toBeNull();
+		await userEvent.click(row);
+		expect(props.onSelect).toHaveBeenCalledWith('thread-1');
+
+		await userEvent.click(
+			screen.getByRole('button', { name: 'Actions for Conversation 1' }),
+		);
+		for (const name of ['Generate title', 'Rename', 'Delete'])
+			expect(
+				(await screen.findByRole('menuitem', { name })).getAttribute(
+					'aria-disabled',
+				),
+			).toBe('true');
+		expect(
+			(await screen.findByRole('menuitem', { name: 'Select' })).getAttribute(
+				'aria-disabled',
+			),
+		).not.toBe('true');
+		await userEvent.keyboard('{Escape}');
+
+		const idle = screen.getByRole('button', { name: 'Conversation 2' });
+		expect(idle.getAttribute('aria-busy')).toBeNull();
+		await userEvent.click(
+			screen.getByRole('button', { name: 'Actions for Conversation 2' }),
+		);
+		expect(
+			(await screen.findByRole('menuitem', { name: 'Rename' })).getAttribute(
+				'aria-disabled',
+			),
+		).not.toBe('true');
 	});
 
 	/**

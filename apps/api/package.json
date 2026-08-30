@@ -8,7 +8,7 @@
 		"dev": "bun --watch src/index.ts",
 		"mig": "bunx drizzle-kit generate",
 		"mig:push": "bunx drizzle-kit migrate",
-		"test": "docker compose -f ../../docker-compose.yml --env-file .env.test up -d --wait db-proxy cache s3 && docker compose -f ../../docker-compose.yml --env-file .env.test run --rm --no-deps s3-init && bun test --env-file .env.test",
+		"test": "docker compose -f ../../docker-compose.yml --env-file .env.test up -d --wait db-proxy cache s3 gotenberg && docker compose -f ../../docker-compose.yml --env-file .env.test run --rm --no-deps s3-init && bun test --env-file .env.test",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
@@ -32,6 +32,8 @@
 		"elysia-logger": "^0.5.2",
 		"elysia-oauth2": "^2.1.0",
 		"jsondiffpatch": "catalog:",
+		"mammoth": "catalog:",
+		"read-excel-file": "catalog:",
 		"zod": "catalog:"
 	},
 	"devDependencies": {

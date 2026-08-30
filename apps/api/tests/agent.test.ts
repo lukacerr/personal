@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import {
 	buildSnippet,
 	CARRIED_CONTEXT_BUDGET_CHARS,
@@ -16,8 +16,9 @@ import {
 	agentSettingsStore,
 } from '@api/agent-settings';
 import { tavilyOverride } from '@api/agent-tools';
-import { cache, db } from '@api/env';
-import { agentMessage, agentThread } from '@api/schema';
+import { cache, db, storage } from '@api/env';
+import { objectKey } from '@api/files-storage';
+import { agentMessage, agentThread, file } from '@api/schema';
 import type { UIMessage } from 'ai';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { asc, eq, inArray, sql } from 'drizzle-orm';
@@ -239,6 +240,12 @@ describe('the system prompt', () => {
 		expect(SYSTEM_PROMPT).toContain('\\$100');
 	});
 
+	test('teaches the file mention syntax and the storage tools', () => {
+		expect(SYSTEM_PROMPT).toContain('@f:');
+		expect(SYSTEM_PROMPT).toContain('storageRead');
+		expect(SYSTEM_PROMPT).toContain('storageSearch');
+	});
+
 	test("includes Luka's response preferences", () => {
 		const prompt = SYSTEM_PROMPT.replaceAll(/\s+/g, ' ');
 		for (const preference of [
@@ -300,7 +307,11 @@ describe('agent catalog', () => {
 		expect(catalog.models.map((model) => model.id)).toEqual(
 			AGENT_MODELS.map((model) => model.id),
 		);
-		expect(catalog.tools.map((tool) => tool.name)).toEqual(['tavily']);
+		expect(catalog.tools.map((tool) => tool.name)).toEqual([
+			'tavily',
+			'storageSearch',
+			'storageRead',
+		]);
 	});
 });
 
@@ -2119,6 +2130,232 @@ describe('agent thread titles', () => {
 			.from(agentThread)
 			.where(eq(agentThread.id, id));
 		expect(thread?.title).toBe('Mismo derivado');
+	});
+});
+
+describe('storage read hydration', () => {
+	const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+	const seededFileIds = new Set<string>();
+
+	async function seedPng() {
+		const id = Bun.randomUUIDv7();
+		seededFileIds.add(id);
+		await storage.write(objectKey(id), PNG_BYTES);
+		await db.insert(file).values({
+			id,
+			name: 'photo.png',
+			path: `agent-chat-test/${id}`,
+			contentType: 'image/png',
+			size: PNG_BYTES.byteLength,
+		});
+		return id;
+	}
+
+	afterAll(async () => {
+		const ids = [...seededFileIds];
+		if (ids.length === 0) return;
+		await db.delete(file).where(inArray(file.id, ids));
+		await Promise.allSettled(ids.map((id) => storage.delete(objectKey(id))));
+	});
+
+	function storageReadCallResult(fileId: string) {
+		return {
+			stream: simulateReadableStream({
+				chunks: [
+					{ type: 'stream-start' as const, warnings: [] },
+					{
+						type: 'tool-input-start' as const,
+						id: 'call-1',
+						toolName: 'storageRead',
+					},
+					{
+						type: 'tool-input-delta' as const,
+						id: 'call-1',
+						delta: JSON.stringify({ fileId }),
+					},
+					{ type: 'tool-input-end' as const, id: 'call-1' },
+					{
+						type: 'tool-call' as const,
+						toolCallId: 'call-1',
+						toolName: 'storageRead',
+						input: JSON.stringify({ fileId }),
+					},
+					{
+						type: 'finish' as const,
+						finishReason: { unified: 'tool-calls' as const, raw: undefined },
+						usage,
+					},
+				],
+			}),
+		};
+	}
+
+	test('hydrates media for vision models and placeholders for text-only ones', async () => {
+		const fileId = await seedPng();
+		const threadId = await createThread();
+
+		const model = useMockModel([
+			storageReadCallResult(fileId),
+			textResult('la vi'),
+		]);
+		await (
+			await json(
+				'/agent/chat',
+				'POST',
+				chatBody(threadId, `mirá @f:${fileId}`, { tools: ['storageRead'] }),
+			)
+		).text();
+		await waitFor(
+			() => Promise.resolve(model.doStreamCalls),
+			(calls) => calls.length === 2,
+		);
+		// The same request's second step already sees the image bytes.
+		const step2 = JSON.stringify(model.doStreamCalls[1]?.prompt);
+		expect(step2).toContain('"type":"file"');
+		expect(step2).toContain('image/png');
+		await waitFor(
+			() => threadRows(threadId),
+			(rows) => rows.length === 2,
+		);
+
+		// A follow-up without the tool granted still hydrates the history.
+		const vision = useMockModel([textResult('sigo viéndola')]);
+		await (
+			await json('/agent/chat', 'POST', chatBody(threadId, 'seguimos'))
+		).text();
+		await waitFor(
+			() => Promise.resolve(vision.doStreamCalls),
+			(calls) => calls.length === 1,
+		);
+		expect(JSON.stringify(vision.doStreamCalls[0]?.prompt)).toContain(
+			'"type":"file"',
+		);
+		await waitFor(
+			() => threadRows(threadId),
+			(rows) => rows.length === 4,
+		);
+
+		// A text-only model gets a placeholder instead of media bytes.
+		const textOnly = useMockModel([textResult('no puedo verla')]);
+		await (
+			await json(
+				'/agent/chat',
+				'POST',
+				chatBody(threadId, '¿y ahora?', {
+					model: 'deepseek/deepseek-v4-pro-0813',
+					reasoning: 'high',
+				}),
+			)
+		).text();
+		await waitFor(
+			() => Promise.resolve(textOnly.doStreamCalls),
+			(calls) => calls.length === 1,
+		);
+		const textPrompt = JSON.stringify(textOnly.doStreamCalls[0]?.prompt);
+		expect(textPrompt).toContain('not viewable');
+		expect(textPrompt).not.toContain('"type":"file"');
+	});
+
+	/**
+	 * Novita is chat-completions compatible, and that adapter stringifies a
+	 * tool result whose output is a content array — base64 as text, invisible
+	 * and expensive. Its multimodal models take images as `image_url` in a user
+	 * message, so the bytes are lifted one message later and the tool result
+	 * says where they went.
+	 */
+	test('lifts images into a user message for a provider whose tool results cannot carry them', async () => {
+		const fileId = await seedPng();
+		const threadId = await createThread();
+
+		const model = useMockModel([
+			storageReadCallResult(fileId),
+			textResult('la veo'),
+		]);
+		await (
+			await json(
+				'/agent/chat',
+				'POST',
+				chatBody(threadId, `mirá @f:${fileId}`, {
+					model: 'minimax/minimax-m3',
+					reasoning: 'adaptive',
+					tools: ['storageRead'],
+				}),
+			)
+		).text();
+		await waitFor(
+			() => Promise.resolve(model.doStreamCalls),
+			(calls) => calls.length === 2,
+		);
+
+		const prompt = model.doStreamCalls[1]?.prompt ?? [];
+		const toolMessage = prompt.find((message) => message.role === 'tool');
+		const toolOutput = JSON.stringify(toolMessage?.content);
+		expect(toolOutput).toContain('"type":"text"');
+		expect(toolOutput).toContain('next message');
+		expect(toolOutput).not.toContain('"type":"file"');
+
+		// The bytes are in a user message the adapter maps to `image_url`.
+		const carrier = prompt.at(-1);
+		expect(carrier?.role).toBe('user');
+		expect(JSON.stringify(carrier?.content)).toContain('image/png');
+	});
+
+	test('a deleted object degrades its tool result without failing the turn', async () => {
+		const fileId = await seedPng();
+		const threadId = await createThread();
+		useMockModel([storageReadCallResult(fileId), textResult('leída')]);
+		await (
+			await json(
+				'/agent/chat',
+				'POST',
+				chatBody(threadId, `leé @f:${fileId}`, { tools: ['storageRead'] }),
+			)
+		).text();
+		await waitFor(
+			() => threadRows(threadId),
+			(rows) => rows.length === 2,
+		);
+
+		await db.delete(file).where(inArray(file.id, [fileId]));
+		await storage.delete(objectKey(fileId));
+
+		const followUp = useMockModel([textResult('ya no está')]);
+		const response = await json(
+			'/agent/chat',
+			'POST',
+			chatBody(threadId, '¿la seguís viendo?'),
+		);
+		expect(response.status).toBe(200);
+		await response.text();
+		await waitFor(
+			() => Promise.resolve(followUp.doStreamCalls),
+			(calls) => calls.length === 1,
+		);
+		expect(JSON.stringify(followUp.doStreamCalls[0]?.prompt)).toContain(
+			'no longer readable',
+		);
+	});
+
+	test('a file mention never titles the thread with its uuid', async () => {
+		const fileId = await seedPng();
+		const threadId = await createThread();
+		useMockModel([textResult('ok')]);
+		await (
+			await json(
+				'/agent/chat',
+				'POST',
+				chatBody(threadId, `@f:${fileId} resumime esto`),
+			)
+		).text();
+		const [thread] = await waitFor(
+			() =>
+				db
+					.select({ title: agentThread.title })
+					.from(agentThread)
+					.where(eq(agentThread.id, threadId)),
+			(rows) => rows[0]?.title !== 'New chat',
+		);
+		expect(thread?.title).toBe('resumime esto');
 	});
 });
 

@@ -40,6 +40,21 @@ export function objectKey(id: string) {
 	return `${OBJECT_PREFIX}${id}`;
 }
 
+/**
+ * Derived artifacts (today: the PDF the agent's read tool converts an Office
+ * file into) live outside `OBJECT_PREFIX` on purpose: reconcile only walks
+ * `files/`, so a derivative can never be mistaken for an orphaned upload.
+ */
+export const DERIVED_PREFIX = 'derived/';
+
+/**
+ * Immutable like the source object: file bytes never change under an id, so a
+ * conversion done once is valid forever. Deleting the file deletes this too.
+ */
+export function derivedPdfKey(id: string) {
+	return `${DERIVED_PREFIX}${id}/converted.pdf`;
+}
+
 export type ObjectPage = {
 	contents?: Array<{ key?: string }>;
 	isTruncated?: boolean;

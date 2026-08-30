@@ -50,12 +50,15 @@ Lee este archivo antes de modificar `apps/web/app/components/agent/**`,
 - Si `createThread` falla, el error queda inline bajo el composer y el texto
   no se pierde: el composer solo se limpia después de despachar el mensaje.
 - El preflight devuelve un resultado discriminado (`ready`/`failed`/
-  `cancelled`), no un string ambiguo. La identidad es `(chatId, generation)`:
-  si URL/history cambia mientras `createThread` está en vuelo, el resultado no
-  puede promover ni redirigir el draft viejo. Si el row llegó a crearse, se
-  intenta borrar best-effort y AgentChat conserva el draft sin enviar.
+  `cancelled`), no un string ambiguo. La identidad es `(chatId, generation)`,
+  pero **solo decide la URL, no si el send ocurre**: si history cambia mientras
+  `createThread` está en vuelo, el thread se crea igual, el run le sigue
+  streameando y el rail lo muestra contestando; lo único que no pasa es que la
+  URL vuelva sola al draft. Antes ese caso borraba el row y tiraba el mensaje,
+  que era defendible cuando irse estaba prohibido y dejó de serlo cuando dejó
+  de estarlo.
 - El título lo deriva el server del primer mensaje; `draftThreadTitle` es su
-  espejo exacto para la fila optimista, y el `onFinish` del turno recarga el
+  espejo exacto para la fila optimista, y el `onFinish` del run recarga el
   índice (barato: ETag) para reconciliar título y orden por recencia.
 - Un 404 al abrir un thread saca `?thread` de la URL y vuelve al draft; un
   fallo transitorio muestra retry inline. La distinción es
@@ -132,26 +135,20 @@ Lee este archivo antes de modificar `apps/web/app/components/agent/**`,
   razón la conoce la ruta. Se muestra como línea muted con spinner arriba del
   composer, no en su prop `error`: rojo destructivo para una operación que va
   bien la reportaría como falla.
-- **`busy` esconde las acciones de una fila, pero un editor ya abierto sobrevive
-  y es el único camino de envío que queda en pantalla.** Por eso `busyReason`
-  baja hasta `MessageEditor` y entra en su `disabled` — el mismo que ya frena el
-  texto vacío, así que cubre el botón y el `Ctrl+Enter` que lo saltea — y se
-  muestra en el pie del editor, junto al control que quedó inerte. El borrador
-  **no se cierra ni se descarta**: bloquear no puede costar la reescritura, y
-  tragarse el click sin decir nada era la misma falla que el ítem de menú
-  muerto. Los saltos del finder y de los extremos, las páginas viejas y el
-  copiar siguen vivos a propósito: son lecturas y no tocan el lease.
-- **La reescritura en curso vive en `AgentChat`, no en la fila que la muestra.**
-  Un salto del finder o de un extremo reemplaza la ventana entera con
-  `setMessages`, así que esa fila se desmonta y su estado local se va con ella:
-  `editingId` sobrevivía pero las palabras no, y volver reabría el editor con el
-  texto original como si nadie hubiera tipeado. El borrador es un **ref**, no
-  estado: cambia en cada tecla y ponerlo en estado re-renderizaría —y
-  re-parsearía el markdown de— todas las filas del transcript por carácter,
-  justo lo que el memo de `MessageRow` existe para evitar. Se limpia al cancelar,
-  al mandar y al abrir el editor de otro mensaje (un solo editor a la vez, y ese
-  es el acto explícito de abandonar el anterior); los accesores que bajan a la
-  fila son estables para no romperle el memo.
+- **Editar un mensaje usa el composer, no un editor propio de la fila.** El
+  lápiz carga el texto del turno en el mismo input que todo envío usa (banner
+  "Editing a sent message" + Cancel, Escape también cancela), así una
+  reescritura tiene menciones `@`, adjuntos y pickers gratis — el
+  `MessageEditor` aparte era un segundo camino de envío más pobre que además
+  necesitaba su propia coreografía de draft-ref para sobrevivir a los saltos
+  de ventana. Ahora la reescritura vive donde vive todo draft: en el estado
+  del composer, que ninguna ventana desmonta. `AgentChat` solo guarda **qué**
+  mensaje se reemplaza más el draft desplazado (`editingState`), y cancelar lo
+  devuelve; el submit en modo edición sale por `resendById`, o sea la misma
+  semántica de truncado del retry. Bloquear con `busyReason` no cuesta nada:
+  el texto sigue en el composer y el botón inerte se explica en la línea de
+  arriba. La fila que se está reescribiendo se marca con el mismo highlight
+  del finder.
 - Sign-out invalida una generación exclusiva de settings **antes** de vaciar el
   store y borrar `personal-agent:v1` más `personal-agent-settings:v1`. Cada
   read, seed y save en cola captura esa generación: una respuesta de la sesión
@@ -165,6 +162,51 @@ Lee este archivo antes de modificar `apps/web/app/components/agent/**`,
 - `onTurnFinished` recarga el índice dos veces: al cerrar el stream y ~6 s
   después, porque el título generado llega tras su propio round-trip LLM. La
   segunda pasada es un 304 casi siempre.
+
+## Hilos En Segundo Plano
+
+- **El runtime del chat vive en `app/lib/agent-runs.ts`, no en el componente.**
+  Un `Chat` del SDK por thread, en un `Map` de módulo, y `AgentChat` se ata con
+  `useChat({ chat })`. Eso es toda la feature: `useChat` **nunca abortó al
+  desmontarse** (verificado en el dist de `@ai-sdk/react`; el server además
+  tiene `consumeSseStream`, así que la generación termina y persiste igual), lo
+  que se perdía al cambiar de hilo era el *estado*, que vivía en el hook. Con el
+  run afuera, abrir otra conversación —o irse a otro system— deja la primera
+  contestando y volver reengancha al stream.
+- **Lo que sí termina un turno es cerrar la pestaña.** Reenganchar a un stream
+  desde una página que no lo emitió necesita que el server sepa reemitirlo
+  (`resume` + un GET del stream activo), y eso pide pub/sub de verdad —
+  Upstash REST no lo da. Es un límite conocido, no una tarea pendiente a medias.
+- **Un run se guarda mientras contesta o mientras alguien lo mira**, y se
+  descarta cuando deja de cumplir las dos. Descartarlo es correcto: el server
+  ya tiene el turno persistido y reabrir el hilo lo lee normal.
+- `releaseRun` difiere el settle a un `queueMicrotask` porque **React suelta
+  antes de retener**: un efecto doble-invocado en desarrollo pasa por cero
+  dentro del mismo tick. Sin ese diferido se descartaba el run de un turno
+  recién enviado — la respuesta llegaba igual, pero nada sabía que el hilo
+  estaba contestando. Lo encontró la verificación en el navegador, no un test;
+  ahora hay test.
+- `acquireRun` **adopta, no reconstruye**: un run ocioso toma la página que el
+  caller acaba de leer (un leftover devolvería mensajes más viejos) y uno que
+  está streameando conserva la suya, que es lo más nuevo que existe. Y se llama
+  **una vez por mount** (`useState`), nunca por render: por render le
+  devolvería a la pantalla la página con la que abrió, pisando sus ediciones.
+- **El busy que el componente reporta no se limpia al desmontarse.** Un send ya
+  despachado tiene que seguir marcando el hilo como ocupado; quien lo limpia es
+  `finishTurn`, que un `finally` alcanza desde una pantalla que ya no está.
+- Lo que era `chatBusy` global es ahora **por hilo**: el rail marca las filas
+  que contestan (`aria-busy` + spinner) y **solo deshabilita en esa fila** las
+  tres mutaciones que competirían con el lease del server —generar título,
+  renombrar, borrar—. Navegar, abrir, seleccionar y crear un chat nuevo ya no
+  se bloquean nunca. Borrar en masa hace `dropRun` de cada id antes de pedirlo.
+- El `onFinish` vive en el run, así que **el refresh del índice y el título
+  generado ocurren aunque nadie esté mirando**. El aviso de que un hilo terminó
+  es un toast con acción "Open" que dispara la ruta comparando el set anterior
+  con el nuevo; se saltea el hilo abierto y los borrados. Es de la pantalla de
+  Agent: fuera de ella no hay aviso, y avisar desde cualquier system sería otra
+  feature.
+- `resetRuns` entra en el `clearLocalData` del system: nada puede seguir
+  streameando hacia una sesión que se cerró.
 
 ## Pantalla
 
@@ -373,39 +415,75 @@ Lee este archivo antes de modificar `apps/web/app/components/agent/**`,
 
 ## Controles Del Composer Y De Vista
 
-- **Toda la selección de la próxima vuelta vive detrás de un solo control.**
-  Afuera del campo quedan exactamente dos affordances: el
-  send/stop/pending y el trigger "Generation settings"; adentro van modelo,
-  reasoning, tools, `maxSteps` y temperature. Inline, cada uno de esos era
-  texto cuyo largo lo decide un registry hecho para crecer, así que la fila se
-  partía en dos o tres líneas en cuanto una etiqueta se alargaba — a 1024 px
-  con el rail abierto faltaban ~40 px para wrapear, y las skills propias
-  todavía no habían llegado. Con dos botones de icono el ancho de la fila es
-  una constante, así que ya **no lleva `flex-wrap`**: no hay nada que envolver,
-  y afirmar lo contrario esconde la próxima vez que alguien meta un control de
-  vuelta en la fila.
-- **Una sola superficie para los dos anchos, y es un Popover.** Un popover en
+- **Toda la selección de la próxima vuelta vive detrás de dos controles.**
+  Afuera del campo quedan exactamente cuatro affordances, todas de icono: el
+  trigger "Generation settings" (modelo, reasoning, temperature), el de "Tools
+  and steps" (tools y `maxSteps`), el clip de adjuntar y el send/stop/pending.
+  **El corte es qué contesta la pregunta contra qué puede usar mientras la
+  contesta**, y el presupuesto de pasos va con las tools porque es lo que esas
+  tools tienen permitido gastar. Estuvieron los cinco en una sola superficie
+  hasta que el picker de modelos pasó a ser un browser de dos paneles y la
+  superficie se volvió un scroll. Inline, cada uno de esos era texto cuyo largo lo decide un registry hecho para crecer,
+  así que la fila se partía en dos o tres líneas en cuanto una etiqueta se
+  alargaba — a 1024 px con el rail abierto faltaban ~40 px para wrapear, y las
+  skills propias todavía no habían llegado. Con botones de icono el ancho de
+  la fila es una constante, así que ya **no lleva `flex-wrap`**: no hay nada
+  que envolver, y afirmar lo contrario esconde la próxima vez que alguien meta
+  un control de texto de vuelta en la fila.
+- **Una sola superficie para los dos anchos por control, y es un Popover.** Un popover en
   desktop más un sheet en móvil serían dos estados de apertura para un mismo
   control, y el `AGENTS.md` raíz ya documenta el precio: un cambio de
   breakpoint deja el backdrop tapando la pantalla. Por eso el composer dejó de
   leer su propio media query — los 44 px de target salen de variantes
   `max-sm:`, no de JS — y por eso es Popover y no Sheet: ya está probado como
-  anfitrión (`agent-preferences.tsx` monta el picker de modelos adentro de uno)
-  y anida bien, con el picker de modelos, el de tools y el menú de reasoning
-  abriendo encima sin cerrarlo. Abre `side="top"` porque el composer es
-  `sticky bottom-0`.
-- El trigger es **icon-only y nombra el modelo activo en su accessible name**
-  (`Generation settings: <label>`). Una etiqueta visible sería justo el texto de
-  largo indeterminado que se sacó de la fila; el costo aceptado es que en
-  desktop el modelo ya no se ve de un vistazo, y está en la primera fila de la
-  superficie. Su glifo es `SlidersHorizontalIcon` y **no `Settings2Icon`**: ese
-  es el de "View preferences" en la toolbar de arriba, y dos superficies
-  distintas con el mismo icono a unos pixeles de distancia se leen como la
-  misma.
-- Modelo y tools son **pickers con buscador** (`agent-model-picker.tsx`,
-  `agent-tool-picker.tsx`, Popover + cmdk): los dos son registries hechos para
-  crecer y un menú plano de cuarenta modelos es un scroll, no una elección.
-  Reasoning sigue siendo un menú: sus niveles son por modelo y nunca pasan de
+  anfitrión (`agent-preferences.tsx` monta un picker de modelos adentro de uno)
+  y anida bien, con el menú de reasoning abriendo encima sin cerrarlo. Abre
+  `side="top"` porque el composer es `sticky bottom-0`.
+- Cada trigger es **icon-only y lleva su estado en el accessible name**
+  (`Generation settings: <label del modelo>`, `Tools and steps: N of M`). Una
+  etiqueta visible sería justo el texto de largo indeterminado que se sacó de
+  la fila; el costo aceptado es que en desktop el modelo ya no se ve de un
+  vistazo, y está en la primera fila de la superficie. El glifo de settings es
+  `SlidersHorizontalIcon` y **no `Settings2Icon`**: ese es el de "View
+  preferences" en la toolbar de arriba, y dos superficies distintas con el
+  mismo icono a unos pixeles de distancia se leen como la misma. El de tools es
+  `WrenchIcon` y **muestra el número de tools habilitadas**, forzadas
+  incluidas, que es el único estado de esa superficie que se puede resumir en
+  un glifo.
+- **Modelo y tools son el mismo picker de dos paneles**
+  (`agent-entity-picker.tsx`; `agent-model-picker.tsx` y `agent-tool-picker.tsx`
+  solo traducen su registry a filas): rail de grupos a la izquierda, filas a la
+  derecha, un buscador arriba de todo. Está escrito una vez porque son el mismo
+  problema — una lista hecha para crecer que un menú plano convierte en scroll
+  — y porque la segunda copia es donde los dos se separan. Van **embebidos** en
+  su popover, no detrás de otro trigger: ahí el modelo *es* la superficie.
+  `AgentModelPickerPopover` es la variante con trigger, para las pantallas donde
+  el modelo es un setting entre varios (`agent-preferences.tsx` monta dos).
+- Reglas del picker compartido, todas con test propio:
+  - El filtro es nuestro (`shouldFilter={false}`): el rail es un segundo eje que
+    cmdk no conoce, y los contadores por grupo tienen que salir de la misma
+    pasada que decide las filas.
+  - **El grupo activo cede ante la búsqueda.** Un filtro en Anthropic con una
+    query que solo matchea Novita contestaría "nada matchea" con la fila a un
+    click; `resolveGroup` lo devuelve a "All". Un grupo sin matches queda
+    deshabilitado, con su contador en cero.
+  - **La búsqueda mira todos los campos de la fila**, incluido el id y el nombre
+    del grupo: el id es como el provider llama al modelo en su documentación.
+  - El rail vive adentro del `Command` pero **corta `Enter` y espacio**
+    (`stopPropagation`): cmdk escucha esas teclas en su root y filtrar por
+    provider dispararía además la fila resaltada. Es un `<fieldset>` con
+    `<legend class="sr-only">` porque un `role="group"` en un div es lo que
+    Biome pide reemplazar, y el nombre accesible tiene que existir igual.
+  - **Un badge, y solo donde cambia lo que la vuelta puede hacer**: sale de
+    `attachments` del catálogo, y **nombra la capacidad, no la categoría**
+    (`Reads images and PDFs` contra `Reads images`), porque los dos flags son
+    independientes — los modelos multimodales de Novita toman imágenes y no
+    PDFs. Es un glifo (`EyeIcon`) con esa frase en `sr-only` y en `title`: un
+    icono solo no es un mensaje que alguien pueda leer en voz alta. Un modelo
+    sin badge igual lee un archivo mencionado, solo que recibe el placeholder
+    de texto en vez de los bytes. Reasoning y temperature no son badges: no
+    cambian qué se le puede pedir.
+- Reasoning sigue siendo un menú: sus niveles son por modelo y nunca pasan de
   un puñado, así que un campo de búsqueda ahí sería mobiliario. Es controlado y
   se cierra al elegir un nivel; seleccionar no obliga a cerrarlo a mano.
 - `maxSteps` y temperature son inputs numéricos. Mantienen texto
@@ -413,9 +491,9 @@ Lee este archivo antes de modificar `apps/web/app/components/agent/**`,
   y el step del catálogo; al perder foco restauran el valor efectivo si quedó
   algo inválido. Temperature vacío significa omitir el campo y usar el default
   del provider. Esas reglas —incluida la cota `AGENT_MAX_STEPS`, que la API
-  devuelve como 422— viven en **una sola función** (`generationInputs`): si
-  alguna vez hace falta una segunda superficie, renderiza esa función en vez de
-  copiarlas.
+  devuelve como 422— viven en **una sola función cada una** (`maxStepsInput`,
+  `temperatureInput`): están en popovers distintos, así que si alguna vez hace
+  falta una tercera superficie, renderiza esas funciones en vez de copiarlas.
 - Las preferencias de vista (escala de fuente, márgenes) son **propias del
   Agent** (`lib/agent-preferences.ts`, clave `personal-agent-view:v1`), no
   compartidas con Notes: una conversación y un documento se leen distinto. Se
@@ -436,7 +514,81 @@ Lee este archivo antes de modificar `apps/web/app/components/agent/**`,
   hover: en una pantalla táctil no hay hover, y un control que solo existe
   para el mouse es un control que la mitad de los dispositivos no tiene.
   Mientras el turno streamea no se muestra: sus números todavía no son
-  finales.
+  finales. **Los tools se muestran como conteo, no como lista**: los nombres
+  son texto de registry de largo sin cota y spellearlos partía la fila en dos
+  líneas; el detalle vive en el tooltip del ítem.
+
+## Menciones De Archivos
+
+- **La gramática vive en `lib/agent-mentions.ts` y es pura**: `@f:<fileId>`
+  dentro del texto plano del mensaje. El token es lo que realmente viaja — el
+  system prompt del server le enseña al modelo a pasar ese id a `storageRead`
+  — así que no hay file parts, no hay campo nuevo en el body y el wire no
+  cambió. El prefijo es un namespace a propósito: `@f:` es Files hoy y `@n:`
+  queda reservado para Notes (la opción aparece deshabilitada en el picker
+  para que la forma sea descubrible).
+- **El picker es un typeahead que nunca roba el foco.** `@` al inicio de una
+  palabra abre la lista de namespaces; `@f:` cambia a la búsqueda de archivos,
+  y **el query se tipea en el propio textarea** — cada tecla re-deriva el
+  estado con `mentionStateAt(text, caret)`, que es función pura del draft y
+  del caret, sin estado de apertura que sincronizar. Flechas, Enter y Escape
+  se interceptan en el `onKeyDown` del textarea mientras la lista está
+  abierta; **Enter con la lista abierta jamás es submit**. El panel es
+  `absolute bottom-full` contra el field (que es sticky, así que el absolute
+  es correcto acá), con `role="listbox"`; los items usan `onMouseDown`
+  preventDefault para que un click no blurée el textarea.
+- **Cada fila muestra la carpeta, no el tamaño.** Dos archivos que hace falta
+  distinguir acá son dos versiones del mismo nombre en carpetas distintas — el
+  storage local ya tiene un `0807.vtt` en `Agent` y otro en `Simulación` —, y
+  la cuenta de bytes no dice cuál es cuál. Sin carpeta la fila dice `Root`,
+  igual que Storage.
+- **La pantalla pide el índice de Storage cuando el transcript lo necesita.**
+  Los nombres detrás de un `@f:` y de una card de lectura salen de ahí, y hasta
+  que `AgentChat` lo pidió nadie lo hacía: el composer lo carga al abrir la
+  lista de menciones y una subida lo llena de rebote, así que un thread abierto
+  fresco mostraba uuids crudos sin preview hasta que una de esas dos cosas
+  ocurriera. La condición es `messagesReferenceFiles(messages)` — un thread que
+  nunca tocó un archivo no gasta el request — más la guarda `status === 'idle'`,
+  que evita que un fallo de fondo quede reintentando en loop.
+- **Subidas (clip, drop sobre el composer, paste de archivos) van a la carpeta
+  `Agent/`** vía `lib/storage-file-upload.ts` (`uploadStoredFiles`), la
+  generalización de la que `uploadNoteFiles` es ahora un delegado de una
+  línea. Al completar, cada archivo appendea su token `@f:<id>` al draft; un
+  fallo se reporta inline (`role="alert"`) y no toca el draft.
+- **Los tokens del draft se muestran como chips debajo del textarea**: el
+  `@f:<uuid>` crudo no dice qué archivo nombra, así que cada mención tiene su
+  chip con icono, nombre y tamaño, un botón de preview y una X que borra los
+  tokens de ese archivo del texto. Las subidas en curso aparecen en la misma
+  fila como chips punteados con spinner y porcentaje — ese es el feedback de
+  drop/paste/clip, no una barra aparte.
+- **Preview sin salir del chat**: el chip del composer, el chip de mención en
+  el transcript y la card de `storageRead` abren el `StoragePreview` de
+  Storage (mismo componente que usa Notes), con download vía
+  `getFileLink(id, 'attachment')`. La card solo ofrece preview si el índice
+  todavía conoce el archivo: uno borrado conserva su metadata persistida pero
+  no un botón que no puede cumplir.
+- **El grant de tools por turno vive en `prepareAgentChatRequest`**
+  (`toolsForTurn`): un mensaje saliente que menciona archivos suma **solo
+  `storageRead`** al request — ahí y no en el submit, porque submit, edit,
+  retry y regenerate pasan todos por ese body. `storageSearch` es siempre un
+  grant intencional: una mención prueba que hay que leer ese archivo, no que
+  el modelo deba poder recorrer el bucket. Nunca toca los settings guardados,
+  y **el composer espeja la misma regla en el picker de tools** (`forced` en
+  `AgentToolPicker`): la fila aparece marcada con "Auto — file mentioned" y no
+  se puede desmarcar mientras el draft mencione un archivo — el request que
+  sale es el que está en pantalla. Forzada no es deshabilitada: cmdk es dueño
+  de `aria-disabled`, así que el lock viaja en `data-forced` más el hint
+  visible.
+- **En el transcript la mención se muestra como chip con el nombre del
+  archivo** (`FileMentionChip` en `agent-message-parts.tsx`): se suscribe al
+  índice de Storage por selector de un solo nombre, así un refresh de fondo no
+  re-renderiza todas las filas. Un id que el índice no conoce degrada al token
+  crudo — lo único veraz que queda. Los outputs de `storageSearch`/`storageRead`
+  se leen con guards (`storageSearchLabel`/`storageSearchFiles`/`storageReadFile`
+  en `lib/agent.ts`), nunca con casts, como los de tavily.
+- `draftThreadTitle` filtra los tokens igual que el `deriveTitle` del server:
+  el espejo optimista no puede titular con un uuid lo que el server va a
+  titular sin él.
 
 ## Elements Vendoreados
 

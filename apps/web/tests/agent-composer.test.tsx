@@ -1,11 +1,56 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen, within } from '@testing-library/react';
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentComposer } from '@web/components/agent/agent-composer';
 import type { AgentCatalog } from '@web/lib/agent-api';
 import { AGENT_MAX_STEPS } from '@web/lib/agent-settings';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const FILE_ID = '0198c9a2-1111-7000-8000-abcdefabcdef';
+
+const storageState = {
+	files: [
+		{
+			id: FILE_ID,
+			name: 'report.pdf',
+			path: 'Agent',
+			contentType: 'application/pdf',
+			size: 1234,
+			isPublic: false,
+			viewCount: 0,
+			uploadedFromNotes: false,
+			createdAt: 0,
+			updatedAt: 0,
+		},
+	],
+	status: 'ready' as const,
+	load: vi.fn(async () => 'loaded'),
+};
+
+vi.mock('@web/lib/storage-store', () => ({
+	useStorageStore: (selector: (state: typeof storageState) => unknown) =>
+		selector(storageState),
+}));
+
+const uploadStoredFiles = vi.hoisted(() => vi.fn());
+vi.mock('@web/lib/storage-file-upload', () => ({ uploadStoredFiles }));
+
+vi.mock('@web/lib/storage-api', () => ({
+	storageTransport: {},
+	getFileLink: vi.fn(async () => 'https://example.test/link'),
+}));
+
+beforeEach(() => {
+	uploadStoredFiles.mockReset();
+});
 
 afterEach(() => {
 	cleanup();
@@ -18,6 +63,7 @@ const catalog: AgentCatalog = {
 			id: 'claude-sonnet-5',
 			provider: 'anthropic',
 			label: 'Claude Sonnet 5',
+			attachments: { image: true, pdf: true },
 			reasoning: { levels: ['off', 'low', 'high'], default: 'high' },
 			temperature: {
 				min: 0,
@@ -31,6 +77,7 @@ const catalog: AgentCatalog = {
 			id: 'qwen/qwen3.8-max',
 			provider: 'novita',
 			label: 'Qwen3.7 Max',
+			attachments: { image: false, pdf: false },
 			reasoning: { levels: ['off', 'on'], default: 'on' },
 			temperature: null,
 		},
@@ -38,13 +85,15 @@ const catalog: AgentCatalog = {
 			id: 'minimax/minimax-m3',
 			provider: 'novita',
 			label: 'MiniMax M3',
+			attachments: { image: true, pdf: false },
 			reasoning: { levels: ['off', 'adaptive'], default: 'adaptive' },
 			temperature: null,
 		},
 	],
 	tools: [
-		{ name: 'tavily', description: 'Search the web' },
-		{ name: 'calculator', description: 'Do arithmetic' },
+		{ name: 'tavily', group: 'Web', description: 'Search the web' },
+		{ name: 'calculator', group: 'Math', description: 'Do arithmetic' },
+		{ name: 'storageRead', group: 'Storage', description: 'Read stored files' },
 	],
 };
 
@@ -75,6 +124,13 @@ function renderComposer(model = 'claude-sonnet-5', models = catalog.models) {
 async function openSettings() {
 	await userEvent.click(
 		screen.getByRole('button', { name: /^Generation settings/ }),
+	);
+}
+
+/** The other half of the split: what the turn may use while it answers. */
+async function openTools() {
+	await userEvent.click(
+		screen.getByRole('button', { name: /^Tools and steps/ }),
 	);
 }
 
@@ -144,10 +200,6 @@ describe('the composer controls', () => {
 	it('searches the model picker instead of listing everything', async () => {
 		renderComposer();
 		await openSettings();
-		// The trigger announces its setting, not just its name: "Model: <label>".
-		await userEvent.click(
-			await screen.findByRole('button', { name: /^Model:/ }),
-		);
 		expect(await screen.findByText('Qwen3.7 Max')).toBeDefined();
 
 		await userEvent.type(screen.getByPlaceholderText(/search models/i), 'qwen');
@@ -155,21 +207,56 @@ describe('the composer controls', () => {
 		expect(screen.queryByText('MiniMax M3')).toBe(null);
 	});
 
-	it('searches the tool picker and keeps it open while toggling', async () => {
-		const props = renderComposer();
+	/**
+	 * The provider rail is the second axis of the same list. It also has to
+	 * yield to a query it no longer matches: a filter still pointing at
+	 * Anthropic while the only match is a Novita model would answer "nothing
+	 * matches" with the row one click away.
+	 */
+	it('filters the model list by provider and yields to the search', async () => {
+		renderComposer();
 		await openSettings();
 		await userEvent.click(
-			await screen.findByRole('button', {
-				name: 'Tools for this conversation',
-			}),
+			await screen.findByRole('button', { name: /^Anthropic/ }),
 		);
-		await userEvent.type(screen.getByPlaceholderText(/search tools/i), 'calc');
+		expect(screen.queryByText('Qwen3.7 Max')).toBe(null);
+
+		await userEvent.type(screen.getByPlaceholderText(/search models/i), 'qwen');
+		expect(await screen.findByText('Qwen3.7 Max')).toBeDefined();
+	});
+
+	/**
+	 * A model that cannot be sent bytes says so where it is chosen, and the two
+	 * flags are independent: the badge is a glyph, so what it means has to be
+	 * readable — by a screen reader and on hover — not inferred from an eye.
+	 */
+	it('badges what each model can actually be shown', async () => {
+		renderComposer();
+		await openSettings();
+		const rows = await screen.findAllByRole('option');
+		const claude = rows.find((row) => row.textContent?.includes('Claude'));
+		const qwen = rows.find((row) => row.textContent?.includes('Qwen'));
+		const minimax = rows.find((row) => row.textContent?.includes('MiniMax'));
+		expect(claude?.textContent).toContain('Reads images and PDFs');
+		expect(minimax?.textContent).toContain('Reads images');
+		expect(minimax?.textContent).not.toContain('PDFs');
+		expect(qwen?.textContent).not.toContain('Reads');
+	});
+
+	it('searches the tool picker and keeps it open while toggling', async () => {
+		const props = renderComposer();
+		await openTools();
+		await userEvent.type(
+			await screen.findByPlaceholderText(/search tools/i),
+			'calc',
+		);
 		expect(screen.queryByText('tavily')).toBe(null);
 
 		await userEvent.click(screen.getByText('calculator'));
 		expect(props.onSelectionChange).toHaveBeenCalledWith(
 			expect.objectContaining({ tools: ['tavily', 'calculator'] }),
 		);
+		expect(screen.getByPlaceholderText(/search tools/i)).toBeDefined();
 	});
 
 	/**
@@ -179,7 +266,7 @@ describe('the composer controls', () => {
 	 */
 	it('accepts a step count up to the ceiling and no further', async () => {
 		const props = renderComposer();
-		await openSettings();
+		await openTools();
 		const steps = await screen.findByRole('spinbutton', {
 			name: 'Maximum steps',
 		});
@@ -268,7 +355,7 @@ describe('the composer controls', () => {
 	 * turn's selection behind one trigger the row has a fixed composition, so
 	 * what matters is that nothing else got into it and send stays right there.
 	 */
-	it('keeps only the settings trigger and send outside the surface', () => {
+	it('keeps only the icon affordances outside the surface', () => {
 		mockViewport(true);
 		renderComposer();
 		const row = controlRow();
@@ -276,7 +363,12 @@ describe('the composer controls', () => {
 			within(row)
 				.getAllByRole('button')
 				.map((button) => button.getAttribute('aria-label')),
-		).toEqual([expect.stringMatching(/^Generation settings/), 'Send message']);
+		).toEqual([
+			expect.stringMatching(/^Generation settings/),
+			expect.stringMatching(/^Tools and steps/),
+			'Attach files',
+			'Send message',
+		]);
 		expect(within(row).queryAllByRole('spinbutton')).toHaveLength(0);
 		expect(within(row).queryAllByRole('combobox')).toHaveLength(0);
 	});
@@ -291,24 +383,23 @@ describe('the composer controls', () => {
 			mockViewport(mobile);
 			renderComposer();
 			expect(screen.queryByRole('spinbutton')).toBeNull();
-			expect(screen.queryByRole('button', { name: /^Model:/ })).toBeNull();
+			expect(screen.queryByPlaceholderText(/search models/i)).toBeNull();
 			expect(
 				screen.queryByRole('button', { name: 'Reasoning level' }),
 			).toBeNull();
-			expect(
-				screen.queryByRole('button', { name: 'Tools for this conversation' }),
-			).toBeNull();
+			expect(screen.queryByPlaceholderText(/search tools/i)).toBeNull();
 
 			await openSettings();
 			expect(
-				await screen.findByRole('button', { name: /^Model:/ }),
+				await screen.findByPlaceholderText(/search models/i),
 			).toBeDefined();
 			expect(
 				screen.getByRole('button', { name: 'Reasoning level' }),
 			).toBeDefined();
-			expect(
-				screen.getByRole('button', { name: 'Tools for this conversation' }),
-			).toBeDefined();
+			await userEvent.keyboard('{Escape}');
+
+			await openTools();
+			expect(await screen.findByPlaceholderText(/search tools/i)).toBeDefined();
 			expect(
 				screen.getByRole('spinbutton', { name: 'Maximum steps' }),
 			).toBeDefined();
@@ -329,12 +420,13 @@ describe('the composer controls', () => {
 				id: 'claude-sonnet-5',
 				provider: 'anthropic',
 				label: longLabel,
+				attachments: { image: true, pdf: true },
 				reasoning: { levels: ['off', 'low', 'high'], default: 'high' },
 				temperature: null,
 			},
 		]);
 		const row = controlRow();
-		expect(within(row).getAllByRole('button')).toHaveLength(2);
+		expect(within(row).getAllByRole('button')).toHaveLength(4);
 		expect(row.textContent).not.toContain('Extremely Verbose');
 		expect(screen.queryByText(longLabel)).toBeNull();
 
@@ -345,5 +437,182 @@ describe('the composer controls', () => {
 
 		await userEvent.click(trigger);
 		expect(await screen.findByText(longLabel)).toBeDefined();
+	});
+});
+
+/**
+ * The composer is controlled; these tests wire value/onChange to real state so
+ * typing accumulates the way it does on screen.
+ */
+function StatefulComposer(props: { onSubmit?: () => void }) {
+	const [value, setValue] = useState('');
+	return (
+		<AgentComposer
+			value={value}
+			status="ready"
+			catalog={catalog}
+			selection={{
+				model: 'claude-sonnet-5',
+				reasoning: 'high',
+				tools: [],
+				maxSteps: 5,
+			}}
+			onChange={setValue}
+			onSelectionChange={() => {}}
+			onSubmit={props.onSubmit ?? (() => {})}
+			onStop={() => {}}
+		/>
+	);
+}
+
+describe('file mentions', () => {
+	it('typing @ opens the namespace list with Notes disabled', async () => {
+		render(<StatefulComposer />);
+		await userEvent.type(screen.getByRole('textbox'), '@');
+		const list = await screen.findByRole('listbox', { name: 'Mention' });
+		expect(within(list).getByText('Files')).toBeDefined();
+		const notes = within(list).getByText(/Notes/);
+		expect(notes.closest('[aria-disabled="true"]')).not.toBeNull();
+	});
+
+	it('picking Files completes the namespace and searching inserts the token', async () => {
+		render(<StatefulComposer />);
+		const textbox = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await userEvent.type(textbox, '@');
+		await userEvent.click(await screen.findByText('Files'));
+		expect(textbox.value).toBe('@f:');
+
+		await userEvent.type(textbox, 'rep');
+		const option = await screen.findByText('report.pdf');
+		await userEvent.click(option);
+		expect(textbox.value).toBe(`@f:${FILE_ID} `);
+	});
+
+	it('typing @f: and pressing Enter selects without submitting', async () => {
+		const onSubmit = vi.fn();
+		render(<StatefulComposer onSubmit={onSubmit} />);
+		const textbox = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await userEvent.type(textbox, '@f:rep');
+		await screen.findByText('report.pdf');
+		await userEvent.keyboard('{Enter}');
+		expect(onSubmit).not.toHaveBeenCalled();
+		expect(textbox.value).toBe(`@f:${FILE_ID} `);
+	});
+
+	it('Escape dismisses the list until a new trigger', async () => {
+		render(<StatefulComposer />);
+		const textbox = screen.getByRole('textbox');
+		await userEvent.type(textbox, '@');
+		await screen.findByRole('listbox', { name: 'Mention' });
+		await userEvent.keyboard('{Escape}');
+		expect(screen.queryByRole('listbox', { name: 'Mention' })).toBeNull();
+	});
+});
+
+describe('mention chips', () => {
+	it('shows the mentioned file as a chip and removing it strips the token', async () => {
+		render(<StatefulComposer />);
+		const textbox = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await userEvent.type(textbox, '@f:rep');
+		await userEvent.click(await screen.findByText('report.pdf'));
+		expect(textbox.value).toBe(`@f:${FILE_ID} `);
+
+		// The chip names what the raw token only points at, with a preview.
+		expect(
+			screen.getByRole('button', { name: 'Preview report.pdf' }),
+		).toBeDefined();
+
+		await userEvent.click(
+			screen.getByRole('button', { name: 'Remove report.pdf' }),
+		);
+		expect(textbox.value).toBe('');
+		expect(
+			screen.queryByRole('button', { name: 'Remove report.pdf' }),
+		).toBeNull();
+	});
+
+	it('forces the read tool visibly while the draft mentions a file', async () => {
+		render(<StatefulComposer />);
+		await userEvent.type(screen.getByRole('textbox'), '@f:rep');
+		await userEvent.click(await screen.findByText('report.pdf'));
+
+		await openTools();
+		const option = (await screen.findByText('storageRead')).closest(
+			'[role="option"]',
+		);
+		if (!option) throw new Error('storageRead option missing');
+		expect(option.getAttribute('aria-checked')).toBe('true');
+		expect(option.getAttribute('data-forced')).toBe('true');
+		expect(screen.getByText('Auto — file mentioned')).toBeDefined();
+	});
+});
+
+describe('attachments', () => {
+	it('uploads through the paperclip and appends a mention per file', async () => {
+		uploadStoredFiles.mockResolvedValue([{ id: FILE_ID, name: 'photo.png' }]);
+		render(<StatefulComposer />);
+		const textbox = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await userEvent.type(textbox, 'look at this');
+
+		const input = screen.getByLabelText('Attach files (file input)');
+		await userEvent.upload(
+			input,
+			new File(['x'], 'photo.png', { type: 'image/png' }),
+		);
+
+		expect(uploadStoredFiles).toHaveBeenCalledWith(
+			[expect.any(File)],
+			{ folder: 'Agent' },
+			expect.any(Function),
+		);
+		expect(textbox.value).toBe(`look at this @f:${FILE_ID} `);
+	});
+
+	it('reports an upload that failed without touching the draft', async () => {
+		uploadStoredFiles.mockRejectedValue(new Error('offline'));
+		render(<StatefulComposer />);
+		const textbox = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await userEvent.type(textbox, 'draft');
+
+		const input = screen.getByLabelText('Attach files (file input)');
+		await userEvent.upload(
+			input,
+			new File(['x'], 'photo.png', { type: 'image/png' }),
+		);
+
+		expect(await screen.findByRole('alert')).toBeDefined();
+		expect(textbox.value).toBe('draft');
+	});
+
+	it('routes a drop on the field to the same upload path', async () => {
+		uploadStoredFiles.mockResolvedValue([{ id: FILE_ID, name: 'a.png' }]);
+		render(<StatefulComposer />);
+		const textbox = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const field = textbox.closest('div');
+		if (!field) throw new Error('field container missing');
+
+		fireEvent.drop(field, {
+			dataTransfer: {
+				types: ['Files'],
+				files: [new File(['x'], 'a.png', { type: 'image/png' })],
+			},
+		});
+
+		await vi.waitFor(() => expect(uploadStoredFiles).toHaveBeenCalled());
+	});
+
+	it('routes pasted files to the same upload path', async () => {
+		uploadStoredFiles.mockResolvedValue([{ id: FILE_ID, name: 'a.png' }]);
+		render(<StatefulComposer />);
+		const textbox = screen.getByRole('textbox');
+
+		fireEvent.paste(textbox, {
+			clipboardData: {
+				files: [new File(['x'], 'a.png', { type: 'image/png' })],
+				getData: () => '',
+			},
+		});
+
+		await vi.waitFor(() => expect(uploadStoredFiles).toHaveBeenCalled());
 	});
 });

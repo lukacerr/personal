@@ -27,10 +27,48 @@ type ReasoningMapping =
 	| 'openai-effort'
 	| 'novita-thinking';
 
+/**
+ * What the model can see when the read tool hydrates a stored file into the
+ * prompt. Curated, never inferred from the provider: it gates whether media
+ * bytes or a text placeholder reach the wire.
+ */
+export type AttachmentSupport = { image: boolean; pdf: boolean };
+
+/** Anthropic, Google and OpenAI all take images and PDFs in tool results. */
+const VISION: AttachmentSupport = { image: true, pdf: true };
+
+/**
+ * Novita's multimodal models, per its own `/models` endpoint: Kimi K3,
+ * GLM-5.3-Flash, MiniMax M3 and both Qwen3.8 declare `image` (and video) as
+ * input modalities. PDFs stay off — chat-completions has no part for them
+ * that Novita documents.
+ *
+ * The bytes cannot ride in the tool result: `@ai-sdk/openai-compatible`
+ * JSON-stringifies a content-array output, so base64 would arrive as text.
+ * `liftToolImagesToUserMessages` moves them to the next user message, where
+ * the same package maps them to `image_url`. That lift is what this flag
+ * turns on for these models, not a different tool output.
+ */
+const NOVITA_VISION: AttachmentSupport = { image: true, pdf: false };
+
+/** No image input at all: the placeholder is the only honest delivery. */
+const TEXT_ONLY: AttachmentSupport = { image: false, pdf: false };
+
+/**
+ * Whether a provider's adapter carries media inside a tool result. Anthropic,
+ * Google and OpenAI map it to native blocks; `@ai-sdk/openai-compatible`
+ * stringifies it, so Novita's images travel as a following user message
+ * instead (`liftToolImagesToUserMessages`).
+ */
+export function toolResultsCarryMedia(provider: AgentProvider) {
+	return provider !== 'novita';
+}
+
 export type AgentModel = {
 	id: string;
 	provider: AgentProvider;
 	label: string;
+	attachments: AttachmentSupport;
 	/**
 	 * The levels this model actually accepts, in its provider's native
 	 * vocabulary — no generic scale, no clamping. Every model declares at least
@@ -73,6 +111,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'claude-opus-5',
 		provider: 'anthropic',
+		attachments: VISION,
 		label: 'Claude Opus 5',
 		// Thinking is always on for Opus 5 and Fable 5: `off` does not exist.
 		reasoning: { levels: ANTHROPIC_EFFORTS, default: 'high' },
@@ -82,6 +121,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'claude-sonnet-5',
 		provider: 'anthropic',
+		attachments: VISION,
 		label: 'Claude Sonnet 5',
 		reasoning: { levels: ['off', ...ANTHROPIC_EFFORTS], default: 'high' },
 		temperature: null,
@@ -90,6 +130,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'claude-fable-5',
 		provider: 'anthropic',
+		attachments: VISION,
 		label: 'Claude Fable 5',
 		reasoning: { levels: ANTHROPIC_EFFORTS, default: 'high' },
 		temperature: null,
@@ -98,6 +139,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'claude-haiku-4-5',
 		provider: 'anthropic',
+		attachments: VISION,
 		label: 'Claude Haiku 4.5',
 		reasoning: { levels: ['off', 'low', 'medium', 'high'], default: 'off' },
 		temperature: temperatureFor(['off'], 1),
@@ -106,6 +148,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'gpt-5.6-sol',
 		provider: 'openai',
+		attachments: VISION,
 		label: 'GPT-5.6 Sol',
 		reasoning: {
 			levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
@@ -117,6 +160,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'gpt-5.6-terra',
 		provider: 'openai',
+		attachments: VISION,
 		label: 'GPT-5.6 Terra',
 		reasoning: {
 			levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
@@ -128,6 +172,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'gpt-5.6-luna',
 		provider: 'openai',
+		attachments: VISION,
 		label: 'GPT-5.6 Luna',
 		reasoning: {
 			levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
@@ -139,6 +184,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'gemini-3.7-flash',
 		provider: 'google',
+		attachments: VISION,
 		label: 'Gemini 3.7 Flash',
 		reasoning: { levels: ['low', 'medium', 'high'], default: 'medium' },
 		temperature: null,
@@ -147,6 +193,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'gemini-3.5-flash-lite',
 		provider: 'google',
+		attachments: VISION,
 		label: 'Gemini 3.5 Flash-Lite',
 		reasoning: {
 			levels: ['minimal', 'low', 'medium', 'high'],
@@ -158,6 +205,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'gemini-3.1-pro-preview',
 		provider: 'google',
+		attachments: VISION,
 		label: 'Gemini 3.1 Pro Preview',
 		reasoning: { levels: ['low', 'medium', 'high'], default: 'high' },
 		temperature: null,
@@ -187,6 +235,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'deepseek/deepseek-v4-pro-0813',
 		provider: 'novita',
+		attachments: TEXT_ONLY,
 		label: 'DeepSeek V4 Pro',
 		/**
 		 * DeepSeek collapses `medium` and `xhigh` onto `high`, so declaring them
@@ -199,6 +248,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'deepseek/deepseek-v4-flash-0731',
 		provider: 'novita',
+		attachments: TEXT_ONLY,
 		label: 'DeepSeek V4 Flash',
 		// Same collapsing as the Pro variant.
 		reasoning: { levels: ['off', 'low', 'high', 'max'], default: 'high' },
@@ -208,6 +258,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'moonshotai/kimi-k3',
 		provider: 'novita',
+		attachments: NOVITA_VISION,
 		label: 'Kimi K3',
 		// Kimi K3 cannot be turned off: it always thinks, so there is no `off`.
 		reasoning: { levels: ['low', 'high', 'max'], default: 'max' },
@@ -217,6 +268,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'zai-org/glm-5.3',
 		provider: 'novita',
+		attachments: TEXT_ONLY,
 		label: 'GLM 5.3',
 		// Carries over GLM 5.2's confirmed efforts (`high`/`max`); not reverified against 5.3.
 		reasoning: { levels: ['off', 'high', 'max'], default: 'max' },
@@ -226,6 +278,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'zai-org/glm-5.3-flash',
 		provider: 'novita',
+		attachments: NOVITA_VISION,
 		label: 'GLM 5.3 Flash',
 		// Same confirmed efforts as GLM 5.2/5.3; not reverified for the Flash tier.
 		reasoning: { levels: ['off', 'high', 'max'], default: 'max' },
@@ -235,6 +288,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'minimax/minimax-m3',
 		provider: 'novita',
+		attachments: NOVITA_VISION,
 		label: 'MiniMax M3',
 		/**
 		 * MiniMax M3 does not accept `reasoning_effort` at all — its thinking is
@@ -247,6 +301,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'qwen/qwen3.8-max',
 		provider: 'novita',
+		attachments: NOVITA_VISION,
 		label: 'Qwen3.8 Max',
 		/**
 		 * Carries over Qwen3.7 Max's plain toggle. `thinking_budget` exists in
@@ -261,6 +316,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 	{
 		id: 'qwen/qwen3.8-flash',
 		provider: 'novita',
+		attachments: NOVITA_VISION,
 		label: 'Qwen3.8 Flash',
 		// Same toggle as Qwen3.8 Max; not reverified for the Flash tier.
 		reasoning: { levels: ['off', 'on'], default: 'on' },
@@ -276,12 +332,13 @@ export function findModel(id: string) {
 /** What the catalog endpoint publishes: the registry minus wire details. */
 export function agentModelCatalog() {
 	return AGENT_MODELS.map(
-		({ id, provider, label, reasoning, temperature }) => ({
+		({ id, provider, label, reasoning, temperature, attachments }) => ({
 			id,
 			provider,
 			label,
 			reasoning,
 			temperature,
+			attachments,
 		}),
 	);
 }

@@ -12,6 +12,7 @@ import {
 import {
 	collectObjectIds,
 	contentDisposition,
+	derivedPdfKey,
 	MAX_FILE_SIZE,
 	MAX_PARTS,
 	MAX_PARTS_PER_REQUEST,
@@ -179,6 +180,12 @@ async function releaseUpload(upload: PendingUpload) {
 
 async function deleteObject(id: string) {
 	await storage.delete(objectKey(id));
+	/**
+	 * Best-effort: the agent's read tool may have cached a converted PDF for
+	 * this file. A failure here leaves an unreachable derivative that reconcile
+	 * deliberately ignores, which is cheaper than failing the delete.
+	 */
+	await storage.delete(derivedPdfKey(id)).catch(() => {});
 }
 
 /** Every id storage actually holds, paged through to the end of the bucket. */

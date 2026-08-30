@@ -13,12 +13,16 @@ import {
 	isThreadEndShortcut,
 	isThreadFindShortcut,
 	isThreadStartShortcut,
+	messagesReferenceFiles,
 	messageText,
 	readAgentLocal,
 	reasoningForModel,
 	rememberThread,
 	restoreSelection,
 	type SelectionCatalog,
+	storageReadFile,
+	storageSearchFiles,
+	storageSearchLabel,
 	tavilyQuery,
 	tavilySources,
 	temperatureForModel,
@@ -405,5 +409,99 @@ describe('tavily part guards', () => {
 		expect(tavilySources(undefined)).toEqual([]);
 		expect(tavilySources({ results: 'nope' })).toEqual([]);
 		expect(tavilySources({ results: [{ title: 7, url: 'x' }] })).toEqual([]);
+	});
+});
+
+describe('storage part guards', () => {
+	it('reads the search scope and its results from well-formed parts', () => {
+		expect(storageSearchLabel({ query: 'invoice' })).toBe('invoice');
+		expect(storageSearchLabel({ folder: 'Agent' })).toBe('Agent');
+		expect(storageSearchLabel({ query: 'a', folder: 'b' })).toBe('a');
+		expect(
+			storageSearchFiles({
+				files: [
+					{
+						fileId: 'id-1',
+						name: 'invoice.pdf',
+						folder: null,
+						mediaType: 'application/pdf',
+						size: 10,
+						createdAt: 0,
+					},
+				],
+				hasMore: false,
+			}),
+		).toEqual([{ fileId: 'id-1', name: 'invoice.pdf' }]);
+	});
+
+	it('reads the read tool output from a well-formed part', () => {
+		expect(
+			storageReadFile({
+				fileId: 'id-1',
+				name: 'report.pdf',
+				mediaType: 'application/pdf',
+				size: 1234,
+				kind: 'pdf',
+				converted: true,
+			}),
+		).toEqual({
+			fileId: 'id-1',
+			name: 'report.pdf',
+			mediaType: 'application/pdf',
+			size: 1234,
+		});
+	});
+
+	it('renders malformed shapes as nothing instead of crashing', () => {
+		expect(storageSearchLabel(undefined)).toBeUndefined();
+		expect(storageSearchLabel({ query: 7 })).toBeUndefined();
+		expect(storageSearchFiles(undefined)).toEqual([]);
+		expect(storageSearchFiles({ files: 'nope' })).toEqual([]);
+		expect(storageSearchFiles({ files: [{ name: 7 }] })).toEqual([]);
+		expect(storageReadFile(undefined)).toBeUndefined();
+		expect(storageReadFile({ name: 7 })).toBeUndefined();
+	});
+});
+
+describe('draftThreadTitle with file mentions', () => {
+	it('strips mention tokens exactly like the server', () => {
+		const id = '0198c9a2-1111-7000-8000-abcdefabcdef';
+		expect(draftThreadTitle(`@f:${id} resumime esto`)).toBe('resumime esto');
+		expect(draftThreadTitle(`@f:${id}`)).toBe('New chat');
+	});
+});
+
+/**
+ * The transcript resolves a mention or a read against the Storage index, and
+ * on a fresh load nothing had asked for that index: every chip rendered as a
+ * raw `@f:<uuid>` with no preview until an upload happened to populate it.
+ */
+describe('messagesReferenceFiles', () => {
+	it('is true for a mention in text and for a read the agent performed', () => {
+		const mentioned = [
+			{
+				parts: [
+					{
+						type: 'text',
+						text: 'mirá @f:0198c9a2-1111-7000-8000-abcdefabcdef',
+					},
+				],
+			},
+		];
+		const read = [
+			{ parts: [{ type: 'tool-storageRead', state: 'output-available' }] },
+		];
+		expect(messagesReferenceFiles(mentioned)).toBe(true);
+		expect(messagesReferenceFiles(read)).toBe(true);
+	});
+
+	it('is false for a thread that never touched a file', () => {
+		expect(
+			messagesReferenceFiles([
+				{ parts: [{ type: 'text', text: 'hola, nada de archivos acá' }] },
+				{ parts: [{ type: 'tool-tavily', state: 'output-available' }] },
+			]),
+		).toBe(false);
+		expect(messagesReferenceFiles([])).toBe(false);
 	});
 });

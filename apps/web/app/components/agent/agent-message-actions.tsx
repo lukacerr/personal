@@ -232,10 +232,17 @@ export function AgentMessageActions({
 				/>
 			)}
 			{stats?.tools && stats.tools.length > 0 && (
+				/**
+				 * The count, not the list: tool names are registry text of unbounded
+				 * length, and spelling them out here wrapped the row into a second
+				 * line. The names live in the tooltip.
+				 */
 				<StatItem
 					icon={WrenchIcon}
-					label={stats.tools.join(', ')}
-					title="Tools this turn was allowed to use"
+					label={
+						stats.tools.length === 1 ? '1 tool' : `${stats.tools.length} tools`
+					}
+					title={`Tools this turn was allowed to use: ${stats.tools.join(', ')}`}
 				/>
 			)}
 			{stats?.maxSteps !== undefined && (

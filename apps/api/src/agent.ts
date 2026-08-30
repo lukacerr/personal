@@ -3,6 +3,7 @@ import {
 	readCachedMessages,
 	writeCachedMessages,
 } from '@api/agent-cache';
+import { liftToolImagesToUserMessages } from '@api/agent-files';
 import {
 	type AgentModel,
 	agentModelCatalog,
@@ -10,6 +11,7 @@ import {
 	cacheBreakpoint,
 	findModel,
 	resolveModel,
+	toolResultsCarryMedia,
 } from '@api/agent-models';
 import {
 	type AgentSelection,
@@ -17,7 +19,11 @@ import {
 	agentSettingsSchema,
 	agentSettingsStore,
 } from '@api/agent-settings';
-import { agentToolCatalog, pickTools } from '@api/agent-tools';
+import {
+	agentToolCatalog,
+	bindToolsToModel,
+	pickTools,
+} from '@api/agent-tools';
 import { authPlugin } from '@api/auth';
 import { db } from '@api/env';
 import { createIndexCache } from '@api/http-cache';
@@ -123,7 +129,13 @@ Supported:
   ER and Gantt. Prefer one for anything with more than three related steps.
 
 Because single dollars open inline math, write a currency amount either as
-"100 USD" or with an escaped dollar (\\$100), or it will be parsed as a formula.`;
+"100 USD" or with an escaped dollar (\\$100), or it will be parsed as a formula.
+
+Luka's messages may mention stored files as @f:<fileId> tokens (the id is a
+uuid). Each one names a file in Luka's personal storage: call the storageRead
+tool with that id to read it. Use storageSearch to find files by name or
+folder when no id is at hand. Never invent file ids, and never echo the raw
+@f: token back — refer to the file by its name.`;
 
 const LUKA_TIME_ZONE = 'America/Argentina/Buenos_Aires';
 
@@ -246,10 +258,17 @@ function validateAgentSelection(selection: AgentSelection) {
 			))
 	)
 		return { error: 'AGENT_TEMPERATURE_UNSUPPORTED' as const };
-	const picked = pickTools(selection.tools);
+	/**
+	 * The registry with `storageRead` hydration bound to this model's
+	 * attachment support. `toModelOutput` runs in two places — history
+	 * conversion and streamText's own step loop — so the same bound set must
+	 * serve both; `picked` is the granted subset of it.
+	 */
+	const bound = bindToolsToModel(model.attachments);
+	const picked = pickTools(selection.tools, bound);
 	if (picked.unknown.length > 0)
 		return { error: 'AGENT_TOOL_UNKNOWN' as const };
-	return { model, reasoning, picked };
+	return { model, reasoning, bound, picked };
 }
 
 /**
@@ -471,10 +490,15 @@ async function readThreadMessages(
 	return messages;
 }
 
+/** Matches the composer's file mentions; a uuid is a terrible thread title. */
+const FILE_MENTION_PATTERN = /@f:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi;
+
 function deriveTitle(message: UIMessage | undefined): string {
-	return (
-		messageText(message?.parts ?? []).slice(0, TITLE_MAX_CHARS) || 'New chat'
-	);
+	const text = messageText(message?.parts ?? [])
+		.replaceAll(FILE_MENTION_PATTERN, '')
+		.replaceAll(/\s+/g, ' ')
+		.trim();
+	return text.slice(0, TITLE_MAX_CHARS) || 'New chat';
 }
 
 /** Reads a message's metadata without trusting more shape than it needs. */
@@ -794,10 +818,14 @@ async function toProviderMessages(
 	messages: UIMessage[],
 	tools: ToolSet,
 ): Promise<ModelMessage[]> {
-	const converted = await convertToModelMessages(messages, {
+	const raw = await convertToModelMessages(messages, {
 		tools,
 		ignoreIncompleteToolCalls: true,
 	});
+	// Where a tool result cannot carry bytes, the images ride one message later.
+	const converted = toolResultsCarryMedia(model.provider)
+		? raw
+		: liftToolImagesToUserMessages(raw);
 	const breakpoint = cacheBreakpoint(model.provider);
 	if (breakpoint) {
 		const last = converted.at(-1);
@@ -896,7 +924,7 @@ export const agentRouter = new Elysia({ prefix: '/agent', tags: ['Agent'] })
 		async ({ body, request, server }) => {
 			const selection = validateAgentSelection(body);
 			if ('error' in selection) return status(422, { error: selection.error });
-			const { model, reasoning, picked } = selection;
+			const { model, reasoning, bound, picked } = selection;
 
 			const mutationOwner = Bun.randomUUIDv7();
 			const thread = await claimThreadMutation(body.threadId, mutationOwner);
@@ -960,10 +988,15 @@ export const agentRouter = new Elysia({ prefix: '/agent', tags: ['Agent'] })
 			let generationFailed = false;
 			let result: ReturnType<typeof streamText>;
 			try {
+				/**
+				 * The full bound registry, not just the granted subset: history can
+				 * hold tool parts from turns whose tools are not granted now, and
+				 * their outputs must still hydrate (or degrade) for this model.
+				 */
 				const providerMessages = await toProviderMessages(
 					model,
 					promptWindow(messages),
-					picked.tools,
+					bound,
 				);
 				if (!(await renewThreadMutation(body.threadId, mutationOwner)))
 					return status(409, { error: 'AGENT_THREAD_BUSY' });
@@ -973,6 +1006,20 @@ export const agentRouter = new Elysia({ prefix: '/agent', tags: ['Agent'] })
 					allowSystemInMessages: true,
 					tools: picked.tools,
 					stopWhen: isStepCount(body.maxSteps),
+					/**
+					 * `toProviderMessages` only shapes the first prompt; the steps
+					 * after a tool call are assembled in here, and that is exactly
+					 * where a fresh read lands. Lifting again is a no-op — the
+					 * outputs it already moved are text — and the SDK carries the
+					 * override forward, so each step sees one lift, not one per step.
+					 */
+					...(toolResultsCarryMedia(model.provider)
+						? {}
+						: {
+								prepareStep: ({ messages }) => ({
+									messages: liftToolImagesToUserMessages(messages),
+								}),
+							}),
 					...(body.temperature === undefined
 						? {}
 						: { temperature: body.temperature }),

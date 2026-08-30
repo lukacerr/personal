@@ -9,11 +9,11 @@ import { Message } from '@web/components/agent/elements/message';
 import { Shimmer } from '@web/components/agent/elements/shimmer';
 import { Button } from '@web/components/ui/button';
 import { Spinner } from '@web/components/ui/spinner';
-import { Textarea } from '@web/components/ui/textarea';
 import {
 	type AgentSelection,
 	HEADER_OFFSET,
 	isPinnedToBottom,
+	messagesReferenceFiles,
 	messageText,
 	scrollWindowTo,
 	turnFailureMessage,
@@ -26,7 +26,14 @@ import {
 	readThreadMessages,
 } from '@web/lib/agent-api';
 import type { AgentPreferences } from '@web/lib/agent-preferences';
-import { createAgentChatTransport } from '@web/lib/agent-transport';
+import {
+	acquireRun,
+	markRunBusy,
+	releaseRun,
+	retainRun,
+	setRunWindow,
+} from '@web/lib/agent-runs';
+import { useStorageStore } from '@web/lib/storage-store';
 import { cn } from '@web/lib/utils';
 import {
 	ArrowDownIcon,
@@ -66,40 +73,24 @@ const MessageRow = memo(function MessageRow({
 	message,
 	isStreaming,
 	highlighted,
-	editing,
 	busy,
-	blockedReason,
 	modelLabels,
 	onEdit,
 	onResend,
-	onCancelEdit,
 	onFork,
-	readEditDraft,
-	writeEditDraft,
 }: {
 	message: AgentUIMessage;
 	isStreaming: boolean;
+	/** Finder jump target, or the message a rewrite is about to replace. */
 	highlighted: boolean;
-	/** This row is being rewritten: it renders as an editor, not as prose. */
-	editing: boolean;
 	/** A turn is in flight somewhere: rewriting history now would race it. */
 	busy: boolean;
-	/**
-	 * Why nothing can be sent, when something outside this conversation holds
-	 * the thread. An editor opened before that happened stays open — `busy`
-	 * only hides the actions of rows that are *not* being edited — so the
-	 * reason has to reach the one control that survives.
-	 */
-	blockedReason?: string;
 	modelLabels: Record<string, string>;
+	/** Loads this turn's words into the composer; sending replaces the tail. */
 	onEdit: (message: AgentUIMessage) => void;
 	/** Send `text` as this user message again; everything after it falls. */
 	onResend: (message: AgentUIMessage, text: string) => void;
-	onCancelEdit: () => void;
 	onFork: (message: AgentUIMessage) => void;
-	/** Both stable, so holding the rewrite here does not defeat the memo. */
-	readEditDraft: (messageId: string) => string | undefined;
-	writeEditDraft: (messageId: string, text: string) => void;
 }) {
 	const stats = message.metadata as AgentMessageStats | undefined;
 	const isUser = message.role === 'user';
@@ -109,17 +100,6 @@ const MessageRow = memo(function MessageRow({
 			<CompactionRow
 				message={message}
 				modelLabel={stats.model ? modelLabels[stats.model] : undefined}
-			/>
-		);
-
-	if (editing)
-		return (
-			<MessageEditor
-				initialText={readEditDraft(message.id) ?? messageText(message.parts)}
-				blockedReason={blockedReason}
-				onDraftChange={(text) => writeEditDraft(message.id, text)}
-				onSave={(text) => onResend(message, text)}
-				onCancel={onCancelEdit}
 			/>
 		);
 
@@ -199,90 +179,6 @@ function CompactionRow({
 }
 
 /**
- * The in-place editor of a user turn. Saving resends the same message id with
- * the new words, which drops every turn after it — the send path is the same
- * one a retry uses, so validation and errors surface exactly like any send.
- */
-function MessageEditor({
-	initialText,
-	blockedReason,
-	onDraftChange,
-	onSave,
-	onCancel,
-}: {
-	initialText: string;
-	/** Something else holds the thread: saving cannot land until it lets go. */
-	blockedReason?: string;
-	/** Reports every keystroke up, so the rewrite outlives this component. */
-	onDraftChange: (text: string) => void;
-	onSave: (text: string) => void;
-	onCancel: () => void;
-}) {
-	const [text, setText] = useState(initialText);
-	const change = (next: string) => {
-		setText(next);
-		onDraftChange(next);
-	};
-	/**
-	 * The two reasons a save cannot happen, in one value, because both have to
-	 * stop the button *and* the Ctrl+Enter that bypasses it. Swallowing the
-	 * click instead would leave a dead control claiming to work, and the reason
-	 * pinned to the composer does not explain a button this far above it.
-	 */
-	const disabled = text.trim().length === 0 || blockedReason !== undefined;
-
-	return (
-		<div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3">
-			<Textarea
-				value={text}
-				// The caret lands where the rewrite starts: at the end of the text.
-				autoFocus
-				onFocus={(event) => {
-					const length = event.currentTarget.value.length;
-					event.currentTarget.setSelectionRange(length, length);
-				}}
-				onChange={(event) => change(event.target.value)}
-				onKeyDown={(event) => {
-					if (event.key === 'Escape') onCancel();
-					if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-						event.preventDefault();
-						if (!disabled) onSave(text.trim());
-					}
-				}}
-				className="min-h-24"
-				aria-label="Edit message"
-			/>
-			<div className="flex flex-wrap items-center justify-end gap-2">
-				{blockedReason ? (
-					<p
-						role="status"
-						className="mr-auto flex items-center gap-2 text-muted-foreground text-xs"
-					>
-						<Spinner aria-hidden="true" className="size-3 shrink-0" />
-						<span>{blockedReason}</span>
-					</p>
-				) : (
-					<p className="mr-auto text-muted-foreground text-xs">
-						Saving replaces every turn after this message.
-					</p>
-				)}
-				<Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-					Cancel
-				</Button>
-				<Button
-					type="button"
-					size="sm"
-					disabled={disabled}
-					onClick={() => onSave(text.trim())}
-				>
-					Save & resend
-				</Button>
-			</div>
-		</div>
-	);
-}
-
-/**
  * One conversation. The parent keys this component by `chatId`, so opening
  * another thread remounts it clean; a draft's promotion to a real thread
  * keeps the id — and therefore the stream — alive.
@@ -300,8 +196,6 @@ export function AgentChat({
 	onFork,
 	onSelectionChange,
 	ensureThread,
-	onTurnFinished,
-	onBusyChange,
 	busyReason,
 }: {
 	chatId: string;
@@ -322,16 +216,11 @@ export function AgentChat({
 	onSelectionChange: (next: AgentSelection) => void;
 	/** Creates the thread on a draft's first send; non-ready outcomes keep the text. */
 	ensureThread: (firstText: string) => Promise<AgentEnsureThreadResult>;
-	/** The server derived the title and bumped the index; reconcile it. */
-	onTurnFinished: () => void;
-	/** Lets route-level mutations avoid racing the active conversation. */
-	onBusyChange?: (busy: boolean) => void;
 	/**
-	 * The other direction of `onBusyChange`: a route-level operation holds this
-	 * thread's mutation lease, so no send can succeed until it finishes. It
-	 * carries the reason rather than a bare boolean because the composer going
-	 * inert without saying why is its own bug — and only the route knows which
-	 * operation it is.
+	 * A route-level operation holds this thread's mutation lease, so no send
+	 * can succeed until it finishes. It carries the reason rather than a bare
+	 * boolean because the composer going inert without saying why is its own
+	 * bug — and only the route knows which operation it is.
 	 */
 	busyReason?: string;
 }) {
@@ -341,12 +230,20 @@ export function AgentChat({
 	 */
 	const selectionRef = useRef(selection);
 	selectionRef.current = selection;
-	const onTurnFinishedRef = useRef(onTurnFinished);
-	onTurnFinishedRef.current = onTurnFinished;
 
-	const [transport] = useState(() =>
-		createAgentChatTransport({
-			threadId: chatId,
+	/**
+	 * The runtime of this conversation lives in the registry, not in this
+	 * component: a turn has to keep running — and keep its state — while
+	 * another thread is opened, or another system visited. Mounting only
+	 * attaches to it.
+	 */
+	// Once per mount, never per render: re-acquiring on every render would hand
+	// this transcript's own local edits back the page it opened with.
+	const [run] = useState(() =>
+		acquireRun({
+			chatId,
+			messages: initialMessages,
+			window: initialWindow,
 			getSelection: () => selectionRef.current,
 		}),
 	);
@@ -359,31 +256,37 @@ export function AgentChat({
 		error,
 		regenerate,
 		stop,
-	} = useChat<AgentUIMessage>({
-		id: chatId,
-		messages: initialMessages,
-		transport,
-		// The server persists message ids as uuids; the SDK default is not one.
-		generateId: () => crypto.randomUUID(),
-		onFinish: ({ message, isAbort }) => {
-			if (isAbort) {
-				setMessages((current) => {
-					const interrupted = {
-						...message,
-						metadata: { ...message.metadata, interrupted: true },
-					};
-					const index = current.findIndex((entry) => entry.id === message.id);
-					if (index < 0) return [...current, interrupted];
-					return current.map((entry) =>
-						entry.id === message.id ? interrupted : entry,
-					);
-				});
-			}
-			onTurnFinishedRef.current();
-		},
-	});
+	} = useChat<AgentUIMessage>({ chat: run.chat });
+
+	/**
+	 * The names behind `@f:` tokens and read cards live in the Storage index,
+	 * and nothing on this screen used to ask for it: the composer loads it when
+	 * the mention list opens and an upload fills it as a side effect, so a
+	 * thread opened fresh rendered raw uuids with no preview until one of those
+	 * happened to run. Asked for here, where the need is visible, and only when
+	 * the transcript actually references a file — the `idle` guard is what
+	 * keeps a background failure from spinning.
+	 */
+	const storageStatus = useStorageStore((state) => state.status);
+	const loadStorage = useStorageStore((state) => state.load);
+	useEffect(() => {
+		if (storageStatus !== 'idle') return;
+		if (!messagesReferenceFiles(messages)) return;
+		void loadStorage();
+	}, [messages, storageStatus, loadStorage]);
+
+	useEffect(() => {
+		retainRun(chatId);
+		// Unmounting does not clear the run's busy flag: a send already on its
+		// way has to keep the thread marked as answering while it finishes into
+		// a conversation nobody is looking at. `finishTurn` is what clears it.
+		return () => releaseRun(chatId);
+	}, [chatId]);
 
 	const [draft, setDraft] = useState('');
+	/** For callbacks that need the draft without re-creating on each keystroke. */
+	const draftRef = useRef(draft);
+	draftRef.current = draft;
 	const [sendError, setSendError] = useState<string>();
 	const [submitting, setSubmitting] = useState(false);
 	const [stoppedByUser, setStoppedByUser] = useState(false);
@@ -408,28 +311,54 @@ export function AgentChat({
 		turnLockRef.current = true;
 		setStoppedByUser(false);
 		setSubmitting(true);
-		onBusyChange?.(true);
+		// Directly, not through the effect below: `ensureThread` is awaited in
+		// the same tick and the thread must already read as running.
+		markRunBusy(chatId, true);
 		return true;
-	}, [busyReason, onBusyChange, status]);
+	}, [busyReason, chatId, status]);
 	const finishTurn = useCallback(() => {
 		turnLockRef.current = false;
 		setSubmitting(false);
-	}, []);
+		// Also directly, because a send outlives its transcript: the effect below
+		// stops running the moment the reader opens another conversation, and
+		// this is what a `finally` still reaches from there.
+		markRunBusy(chatId, false);
+	}, [chatId]);
 
-	useEffect(() => {
-		onBusyChange?.(ownBusy);
-		return () => onBusyChange?.(false);
-	}, [ownBusy, onBusyChange]);
+	useEffect(() => markRunBusy(chatId, submitting), [chatId, submitting]);
 
 	/** The window this transcript holds, walked in either direction on demand. */
 	const [oldest, setOldest] = useState(initialWindow.oldest);
 	const [hasOlder, setHasOlder] = useState(initialWindow.hasOlder);
 	const [hasNewer, setHasNewer] = useState(initialWindow.hasNewer);
+	/**
+	 * Mirrored into the run so a reattach starts from the window this
+	 * transcript walked to, not from the one the thread was opened at.
+	 */
+	useEffect(
+		() =>
+			setRunWindow(chatId, {
+				oldest,
+				newest: initialWindow.newest,
+				hasOlder,
+				hasNewer,
+			}),
+		[chatId, oldest, hasOlder, hasNewer, initialWindow.newest],
+	);
 	const [loadingOlder, setLoadingOlder] = useState(false);
 	const [olderError, setOlderError] = useState(false);
 	const [highlightId, setHighlightId] = useState<string>();
-	/** The user message being rewritten in place, if any. */
-	const [editingId, setEditingId] = useState<string>();
+	/**
+	 * The rewrite in progress. The words live in the composer's draft — the
+	 * same input every other send uses, so mentions, attachments and the
+	 * pickers work in a rewrite — and what is held here is only which message
+	 * the send will replace, plus the draft the edit displaced so cancelling
+	 * gives it back.
+	 */
+	const [editingState, setEditingState] = useState<{
+		messageId: string;
+		previousDraft: string;
+	}>();
 
 	/**
 	 * Retry and edit are the same wire move: resend an already-stored user
@@ -444,13 +373,12 @@ export function AgentChat({
 		droppedNewer.current = false;
 		setHasNewer(true);
 	}, []);
-	const resend = useCallback(
-		(message: AgentUIMessage, text: string) => {
-			if (!text || !beginTurn()) return;
-			// The words are on their way to the server now, so the draft has done
-			// its job; a failure surfaces as a turn error, not as a lost rewrite.
-			editDraft.current = undefined;
-			setEditingId(undefined);
+	const resendById = useCallback(
+		(messageId: string, text: string) => {
+			if (!text || !beginTurn()) return false;
+			// The words are on their way to the server now, so the rewrite has
+			// done its job; a failure surfaces as a turn error, not as lost work.
+			setEditingState(undefined);
 			// Claimed, not yet true: the truncation only happens once the request
 			// reaches the server. Remembered so a turn that never left can put the
 			// tail back instead of leaving this window pretending to be the end.
@@ -458,14 +386,21 @@ export function AgentChat({
 				droppedNewer.current = current;
 				return false;
 			});
-			void sendMessage({ text, messageId: message.id })
+			void sendMessage({ text, messageId })
 				// The SDK reports transport failures through `status`, but a send
 				// that rejects outright reports nothing, and dropping it here would
 				// leave the window claiming to be a tail it never became.
 				.catch(restoreDroppedTail)
 				.finally(finishTurn);
+			return true;
 		},
 		[beginTurn, finishTurn, restoreDroppedTail, sendMessage],
+	);
+	const resend = useCallback(
+		(message: AgentUIMessage, text: string) => {
+			resendById(message.id, text);
+		},
+		[resendById],
 	);
 
 	/**
@@ -477,38 +412,23 @@ export function AgentChat({
 		if (status === 'error') restoreDroppedTail();
 	}, [restoreDroppedTail, status]);
 
-	/**
-	 * The rewrite in progress, held here rather than inside the row that shows
-	 * it: a jump or an edge jump replaces the whole window, so that row unmounts
-	 * and its local state dies with it — and the rewrite is not part of the
-	 * window, it is unsent work. `editingId` already survived; the words did not,
-	 * so coming back re-opened the editor with the original text as if nothing
-	 * had been typed.
-	 *
-	 * A ref, not state: this changes on every keystroke, and putting it in state
-	 * would re-render — and re-parse the markdown of — every row in the
-	 * transcript for each character, which is exactly what `MessageRow`'s memo
-	 * exists to prevent.
-	 */
-	const editDraft = useRef<{ messageId: string; text: string }>(undefined);
-	const readEditDraft = useCallback((messageId: string) => {
-		const draft = editDraft.current;
-		return draft?.messageId === messageId ? draft.text : undefined;
-	}, []);
-	const writeEditDraft = useCallback((messageId: string, text: string) => {
-		editDraft.current = { messageId, text };
-	}, []);
-
+	const editingRef = useRef(editingState);
+	editingRef.current = editingState;
 	const beginEdit = useCallback((message: AgentUIMessage) => {
 		// Editing another message abandons the previous rewrite on purpose: one
-		// editor is open at a time, and this is the explicit act of leaving it.
-		if (editDraft.current?.messageId !== message.id)
-			editDraft.current = undefined;
-		setEditingId(message.id);
+		// rewrite at a time, and this is the explicit act of leaving it. The
+		// stashed draft is the first edit's displaced one, not the rewrite's.
+		setEditingState({
+			messageId: message.id,
+			previousDraft: editingRef.current?.previousDraft ?? draftRef.current,
+		});
+		setDraft(messageText(message.parts));
 	}, []);
 	const cancelEdit = useCallback(() => {
-		editDraft.current = undefined;
-		setEditingId(undefined);
+		const current = editingRef.current;
+		if (!current) return;
+		setDraft(current.previousDraft);
+		setEditingState(undefined);
 	}, []);
 	const forkAt = useCallback(
 		(message: AgentUIMessage) => onFork(message.id),
@@ -557,7 +477,17 @@ export function AgentChat({
 
 	const submit = useCallback(async () => {
 		const text = draft.trim();
-		if (!text || !beginTurn()) return;
+		if (!text) return;
+		/**
+		 * A rewrite goes out through the resend path: the same message id, so
+		 * the server replaces every turn after it. The composer draft only
+		 * clears once the turn actually began — a blocked send loses nothing.
+		 */
+		if (editingState) {
+			if (resendById(editingState.messageId, text)) setDraft('');
+			return;
+		}
+		if (!beginTurn()) return;
 		setSendError(undefined);
 		try {
 			const result = await ensureThread(text);
@@ -587,9 +517,11 @@ export function AgentChat({
 	}, [
 		beginTurn,
 		draft,
+		editingState,
 		ensureThread,
 		finishTurn,
 		hasNewer,
+		resendById,
 		sendMessage,
 		showEdge,
 	]);
@@ -857,15 +789,13 @@ export function AgentChat({
 							key={message.id}
 							message={message}
 							modelLabels={modelLabels}
-							highlighted={message.id === highlightId}
-							editing={message.id === editingId}
+							highlighted={
+								message.id === highlightId ||
+								message.id === editingState?.messageId
+							}
 							busy={busy}
-							blockedReason={busyReason}
-							readEditDraft={readEditDraft}
-							writeEditDraft={writeEditDraft}
 							onEdit={beginEdit}
 							onResend={resend}
-							onCancelEdit={cancelEdit}
 							onFork={forkAt}
 							isStreaming={
 								status === 'streaming' &&
@@ -962,6 +892,7 @@ export function AgentChat({
 					catalog={catalog}
 					selection={selection}
 					error={sendError}
+					editing={editingState !== undefined}
 					onChange={setDraft}
 					onSelectionChange={onSelectionChange}
 					onSubmit={() => void submit()}
@@ -969,6 +900,7 @@ export function AgentChat({
 						setStoppedByUser(true);
 						void stop();
 					}}
+					onCancelEdit={cancelEdit}
 				/>
 			</div>
 		</div>

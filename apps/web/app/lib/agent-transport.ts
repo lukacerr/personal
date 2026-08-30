@@ -1,5 +1,6 @@
-import type { AgentSelection } from '@web/lib/agent';
+import { type AgentSelection, messageText } from '@web/lib/agent';
 import type { AgentUIMessage } from '@web/lib/agent-api';
+import { toolsForTurn } from '@web/lib/agent-mentions';
 import { authenticatedFetch } from '@web/lib/authenticated-api';
 import { env } from '@web/lib/env';
 import { DefaultChatTransport } from 'ai';
@@ -9,6 +10,10 @@ import { DefaultChatTransport } from 'ai';
  * message travels — the server owns the history — together with the thread id
  * and the selection of the turn. A regenerate arrives as the same user
  * message id, which is how the server knows to replace the stale tail.
+ *
+ * The tools are widened per turn: a message that mentions files must be able
+ * to read them whatever the saved selection says, and doing it here covers
+ * submit, edit, retry and regenerate alike — they all pass through this body.
  */
 export function prepareAgentChatRequest({
 	threadId,
@@ -19,6 +24,7 @@ export function prepareAgentChatRequest({
 	messages: readonly AgentUIMessage[];
 	selection: AgentSelection;
 }) {
+	const message = messages.at(-1);
 	return {
 		body: {
 			threadId,
@@ -26,12 +32,12 @@ export function prepareAgentChatRequest({
 			...(selection.reasoning === undefined
 				? {}
 				: { reasoning: selection.reasoning }),
-			tools: selection.tools,
+			tools: toolsForTurn(selection.tools, messageText(message?.parts ?? [])),
 			maxSteps: selection.maxSteps,
 			...(selection.temperature === undefined
 				? {}
 				: { temperature: selection.temperature }),
-			message: messages.at(-1),
+			message,
 		},
 	};
 }

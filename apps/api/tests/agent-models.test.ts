@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
 	AGENT_MODELS,
+	agentModelCatalog,
 	buildProviderOptions,
 	cacheBreakpoint,
 	findModel,
 	modelOverride,
 	resolveModel,
+	toolResultsCarryMedia,
 } from '@api/agent-models';
 import { MockLanguageModelV4 } from 'ai/test';
 
@@ -69,6 +71,56 @@ describe('agent model registry', () => {
 		expect(findModel('gpt-5.6-terra')?.provider).toBe('openai');
 		expect(findModel('gemini-3.7-flash')?.provider).toBe('google');
 		expect(findModel('nope')).toBeUndefined();
+	});
+
+	/**
+	 * Attachment support gates how the read tool hydrates a file into the
+	 * prompt. **No Novita model may declare `pdf`**: chat-completions has no
+	 * part for one that its API documents, and the read path would send bytes
+	 * nothing can look at. Images are allowed there — its multimodal models
+	 * take them — but only through the lift, never inside a tool result.
+	 */
+	test('every model declares attachment support, and Novita never gets PDFs', () => {
+		for (const model of AGENT_MODELS) {
+			expect(typeof model.attachments.image).toBe('boolean');
+			expect(typeof model.attachments.pdf).toBe('boolean');
+			if (model.provider === 'novita')
+				expect(model.attachments.pdf).toBe(false);
+			else expect(model.attachments).toEqual({ image: true, pdf: true });
+		}
+	});
+
+	/**
+	 * Which Novita models see images is curated from its own `/models`
+	 * endpoint (`input_modalities`), not guessed: getting it wrong either
+	 * wastes a multimodal model or sends bytes to one that cannot read them.
+	 */
+	test('the Novita models with image input are the ones Novita lists', () => {
+		const vision = AGENT_MODELS.filter(
+			(model) => model.provider === 'novita' && model.attachments.image,
+		).map((model) => model.id);
+		expect(vision.sort()).toEqual(
+			[
+				'minimax/minimax-m3',
+				'moonshotai/kimi-k3',
+				'qwen/qwen3.8-flash',
+				'qwen/qwen3.8-max',
+				'zai-org/glm-5.3-flash',
+			].sort(),
+		);
+	});
+
+	/** Only the openai-compatible transport needs the images lifted out. */
+	test('names the providers whose tool results cannot carry media', () => {
+		expect(toolResultsCarryMedia('novita')).toBe(false);
+		for (const provider of ['anthropic', 'openai', 'google'] as const)
+			expect(toolResultsCarryMedia(provider)).toBe(true);
+	});
+
+	test('the catalog publishes attachment support', () => {
+		const catalog = agentModelCatalog();
+		expect(catalog[0]?.attachments).toEqual({ image: true, pdf: true });
+		for (const entry of catalog) expect(entry.attachments).toBeDefined();
 	});
 });
 

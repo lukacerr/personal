@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { cache, db, storage } from '@api/env';
-import { nameKey, objectKey, uploadKey } from '@api/files-storage';
+import {
+	derivedPdfKey,
+	nameKey,
+	objectKey,
+	uploadKey,
+} from '@api/files-storage';
 import { file, note } from '@api/schema';
 import { randomUUIDv7 } from 'bun';
 import { inArray } from 'drizzle-orm';
@@ -711,6 +716,18 @@ describe('Files', () => {
 		expect(second.status).toBe(204);
 		expect((await request(`/files/${uploaded.id}`)).status).toBe(404);
 		expect(await storage.exists(objectKey(uploaded.id))).toBe(false);
+	});
+
+	it('deletes the derived PDF the agent may have converted', async () => {
+		const uploaded = await uploadSingle({ name: 'report.docx', path: 'work' });
+		await storage.write(derivedPdfKey(uploaded.id), '%PDF-1.7 derived');
+
+		const response = await request(`/files/${uploaded.id}`, {
+			method: 'DELETE',
+		});
+
+		expect(response.status).toBe(204);
+		expect(await storage.exists(derivedPdfKey(uploaded.id))).toBe(false);
 	});
 
 	it.each([

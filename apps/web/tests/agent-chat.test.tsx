@@ -7,11 +7,11 @@ import {
 	render,
 	screen,
 	waitFor,
-	within,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentChat } from '@web/components/agent/agent-chat';
 import { type AgentCatalog, readThreadMessages } from '@web/lib/agent-api';
+import { isThreadRunning, resetRuns } from '@web/lib/agent-runs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const chat = vi.hoisted(() => ({
@@ -61,21 +61,69 @@ function stubIntersectionObserver() {
 	);
 }
 
+/**
+ * The chat runtime, stubbed at the SDK rather than at our own registry: the
+ * registry is what decides a turn survives its screen, so these tests run the
+ * real one. `Chat` keeps the messages and the status subscription — the two
+ * things `useChat` reads — and the shared double drives status and the calls.
+ */
 vi.mock('@ai-sdk/react', async () => {
-	const { useState } = await import('react');
-	return {
-		useChat: ({
+	const { useEffect, useState } = await import('react');
+	type FinishHandler = (result: { message: unknown; isAbort: boolean }) => void;
+	class FakeChat {
+		id: string;
+		messages: unknown[];
+		listeners = new Set<() => void>();
+		constructor({
+			id,
 			messages,
 			onFinish,
 		}: {
+			id: string;
 			messages: unknown[];
-			onFinish: (result: { message: unknown; isAbort: boolean }) => void;
-		}) => {
-			const [current, setCurrent] = useState(messages);
-			chat.onFinish = onFinish;
+			onFinish: FinishHandler;
+		}) {
+			this.id = id;
+			this.messages = messages;
+			chat.onFinish = (result) => {
+				onFinish(result);
+				this.notify();
+			};
+		}
+		get status() {
+			return chat.status;
+		}
+		get error() {
+			return chat.error;
+		}
+		stop = (...args: unknown[]) => chat.stop(...args);
+		'~registerStatusCallback' = (listener: () => void) => {
+			this.listeners.add(listener);
+			return () => this.listeners.delete(listener);
+		};
+		notify() {
+			for (const listener of [...this.listeners]) listener();
+		}
+	}
+	return {
+		Chat: FakeChat,
+		useChat: ({ chat: instance }: { chat: FakeChat }) => {
+			const [, force] = useState(0);
+			useEffect(() => {
+				const unsubscribe = instance['~registerStatusCallback'](() =>
+					force((tick) => tick + 1),
+				);
+				return () => {
+					unsubscribe();
+				};
+			}, [instance]);
 			return {
-				messages: current,
-				setMessages: setCurrent,
+				messages: instance.messages,
+				setMessages: (next: unknown) => {
+					instance.messages =
+						typeof next === 'function' ? next(instance.messages) : next;
+					instance.notify();
+				},
 				sendMessage: chat.sendMessage,
 				status: chat.status,
 				error: chat.error,
@@ -85,6 +133,30 @@ vi.mock('@ai-sdk/react', async () => {
 		},
 	};
 });
+
+/**
+ * The Storage index, which the transcript needs to put a name and a preview
+ * behind a `@f:` token. Nothing else on this screen loads it.
+ */
+const storage = vi.hoisted(() => ({
+	files: [] as unknown[],
+	status: 'idle' as 'idle' | 'loading' | 'ready',
+	load: vi.fn(),
+}));
+vi.mock('@web/lib/storage-store', () => ({
+	useStorageStore: (selector: (state: typeof storage) => unknown) =>
+		selector(storage),
+}));
+vi.mock('@web/lib/storage-api', () => ({
+	storageTransport: {},
+	getFileLink: vi.fn(async () => 'https://example.test/link'),
+}));
+
+/** The registry refreshes the thread index when a turn ends. */
+const storeLoad = vi.hoisted(() => vi.fn());
+vi.mock('@web/lib/agent-store', () => ({
+	useAgentStore: { getState: () => ({ load: storeLoad }) },
+}));
 
 vi.mock('@web/lib/agent-api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('@web/lib/agent-api')>()),
@@ -101,6 +173,7 @@ const catalog: AgentCatalog = {
 			id: 'test-model',
 			provider: 'anthropic',
 			label: 'Test model',
+			attachments: { image: true, pdf: true },
 			reasoning: { levels: ['off'], default: 'off' },
 			temperature: null,
 		},
@@ -139,8 +212,6 @@ function renderChatProps(
 		onFork: vi.fn(),
 		onSelectionChange: vi.fn(),
 		ensureThread: vi.fn().mockResolvedValue({ status: 'ready' }),
-		onTurnFinished: vi.fn(),
-		onBusyChange: vi.fn(),
 		...overrides,
 	};
 }
@@ -161,12 +232,18 @@ beforeEach(() => {
 	chat.regenerate.mockReset().mockResolvedValue(undefined);
 	chat.stop.mockReset().mockResolvedValue(undefined);
 	chat.onFinish = undefined;
+	storeLoad.mockReset();
+	storage.status = 'idle';
+	storage.files = [];
+	storage.load.mockReset();
 	vi.mocked(readThreadMessages).mockReset();
 });
 
 afterEach(() => {
 	vi.unstubAllGlobals();
 	cleanup();
+	// The registry outlives a render on purpose; each test starts from empty.
+	resetRuns();
 });
 
 describe('AgentChat sending', () => {
@@ -184,7 +261,9 @@ describe('AgentChat sending', () => {
 		fireEvent.submit(form);
 
 		expect(props.ensureThread).toHaveBeenCalledTimes(1);
-		expect(props.onBusyChange).toHaveBeenCalledWith(true);
+		// The registry has to know before the await resolves: the thread rail and
+		// every route guard read it, and creation takes a round trip.
+		expect(isThreadRunning(props.chatId)).toBe(true);
 		creation.resolve({ status: 'ready' });
 		await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1));
 	});
@@ -229,15 +308,15 @@ describe('AgentChat sending', () => {
 		const rendered = render(<AgentChat {...props} />);
 
 		// Editing a stored message claims the thread now ends here — but only if
-		// the request reaches the server. This one does not.
+		// the request reaches the server. This one does not. The rewrite happens
+		// in the one composer every send path shares.
 		await userEvent.click(screen.getByRole('button', { name: 'Edit message' }));
-		const editor = screen.getByRole('textbox', { name: 'Edit message' });
+		const editor = screen.getByRole('textbox', { name: 'Message the agent' });
+		expect(editor).toHaveProperty('value', 'middle');
 		await userEvent.clear(editor);
 		await userEvent.type(editor, 'rewritten');
 		chat.sendMessage.mockRejectedValueOnce(new Error('offline'));
-		await userEvent.click(
-			screen.getByRole('button', { name: 'Save & resend' }),
-		);
+		await userEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
 		chat.status = 'error';
 		chat.error = new Error('offline');
@@ -312,7 +391,7 @@ describe('AgentChat sending', () => {
 		fireEvent.click(button);
 
 		expect(chat.sendMessage).toHaveBeenCalledTimes(1);
-		expect(props.onBusyChange).toHaveBeenCalledWith(true);
+		expect(isThreadRunning(props.chatId)).toBe(true);
 		retry.resolve();
 	});
 
@@ -336,7 +415,7 @@ describe('AgentChat sending', () => {
 		fireEvent.click(button);
 
 		expect(chat.regenerate).toHaveBeenCalledTimes(1);
-		expect(props.onBusyChange).toHaveBeenCalledWith(true);
+		expect(isThreadRunning(props.chatId)).toBe(true);
 		retry.resolve();
 	});
 
@@ -381,16 +460,15 @@ describe('AgentChat sending', () => {
 
 		expect(chat.sendMessage).not.toHaveBeenCalled();
 		expect(input).toHaveProperty('value', 'hold this');
-		// The chat's own busy is what the route watches to avoid racing it; a turn
-		// that never began must not report one.
-		expect(props.onBusyChange).not.toHaveBeenCalledWith(true);
+		// The registry is what the rail and the route guards read; a turn that
+		// never began must not make the thread look like it is answering.
+		expect(isThreadRunning(props.chatId)).toBe(false);
 	});
 
 	/**
-	 * An editor opened before the lease was taken is the one send path that
-	 * survives on screen: its row renders as an editor instead of as the actions
-	 * `busy` hides. Swallowing that save would be the same defect as the dead
-	 * menu item — and the rewrite has to still be there afterwards.
+	 * A rewrite started before the lease was taken lives in the composer, the
+	 * one send path on screen. Swallowing that save would be the same defect as
+	 * the dead menu item — and the rewrite has to still be there afterwards.
 	 */
 	it('keeps an open rewrite and explains why it cannot be saved yet', async () => {
 		const props = renderChatProps({
@@ -405,7 +483,7 @@ describe('AgentChat sending', () => {
 		const rendered = render(<AgentChat {...props} />);
 
 		await userEvent.click(screen.getByRole('button', { name: 'Edit message' }));
-		const editor = screen.getByRole('textbox', { name: 'Edit message' });
+		const editor = screen.getByRole('textbox', { name: 'Message the agent' });
 		await userEvent.clear(editor);
 		await userEvent.type(editor, 'the rewrite worth keeping');
 
@@ -416,26 +494,21 @@ describe('AgentChat sending', () => {
 			/>,
 		);
 
-		const save = screen.getByRole('button', { name: 'Save & resend' });
-		expect(save.hasAttribute('disabled')).toBe(true);
-		// The blocked control explains itself where it lives, not in a line
-		// pinned to the composer far below it.
-		const editorBox = save.closest('div.rounded-lg');
-		if (!editorBox) throw new Error('editor container missing');
+		// The reason is on screen and the send affordance is inert, not gone.
 		expect(
-			within(editorBox as HTMLElement).getByText(
+			screen.getByText(
 				'Compacting the context — sending resumes when it finishes.',
 			),
 		).toBeDefined();
+		const pending = screen.getByRole('button', { name: 'Preparing message' });
+		expect(pending.hasAttribute('disabled')).toBe(true);
 
-		fireEvent.click(save);
-		fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
+		fireEvent.keyDown(editor, { key: 'Enter' });
 		expect(chat.sendMessage).not.toHaveBeenCalled();
 
 		// The assertion that matters: blocked, not quietly destroyed.
-		expect(
-			screen.getByRole('textbox', { name: 'Edit message' }),
-		).toHaveProperty('value', 'the rewrite worth keeping');
+		expect(editor).toHaveProperty('value', 'the rewrite worth keeping');
+		expect(screen.getByText(/Editing a sent message/)).toBeDefined();
 	});
 
 	/**
@@ -461,15 +534,13 @@ describe('AgentChat sending', () => {
 		const rendered = render(<AgentChat {...props} />);
 
 		await userEvent.click(screen.getByRole('button', { name: 'Edit message' }));
-		await userEvent.clear(
-			screen.getByRole('textbox', { name: 'Edit message' }),
-		);
-		await userEvent.type(
-			screen.getByRole('textbox', { name: 'Edit message' }),
-			'the rewrite worth keeping',
-		);
+		const editor = screen.getByRole('textbox', { name: 'Message the agent' });
+		await userEvent.clear(editor);
+		await userEvent.type(editor, 'the rewrite worth keeping');
 
 		// Jump to the oldest page: a window that does not contain the message.
+		// The rewrite lives in the composer, not in the replaced rows, so it
+		// survives the window swap without any bookkeeping.
 		vi.mocked(readThreadMessages).mockResolvedValueOnce({
 			messages: [
 				{
@@ -487,27 +558,32 @@ describe('AgentChat sending', () => {
 			<AgentChat {...props} edgeRequest={{ edge: 'start', token: 1 }} />,
 		);
 		await waitFor(() =>
-			expect(
-				screen.queryByRole('textbox', { name: 'Edit message' }),
-			).toBeNull(),
+			expect(screen.queryByText('original question')).toBeNull(),
 		);
 
-		// And back to the window it was in.
-		vi.mocked(readThreadMessages).mockResolvedValueOnce({
-			messages: [stored],
-			oldest: 10,
-			newest: 10,
-			hasOlder: true,
-			hasNewer: false,
-		});
-		rendered.rerender(
-			<AgentChat {...props} edgeRequest={{ edge: 'end', token: 2 }} />,
-		);
-
-		const editor = await screen.findByRole('textbox', {
-			name: 'Edit message',
-		});
 		expect(editor).toHaveProperty('value', 'the rewrite worth keeping');
+		expect(screen.getByText(/Editing a sent message/)).toBeDefined();
+	});
+
+	it('cancelling an edit restores the draft it displaced', async () => {
+		renderChat({
+			initialMessages: [
+				{
+					id: 'stored-user',
+					role: 'user',
+					parts: [{ type: 'text', text: 'original question' }],
+				},
+			],
+		});
+		const input = screen.getByRole('textbox', { name: 'Message the agent' });
+		await userEvent.type(input, 'half-written thought');
+
+		await userEvent.click(screen.getByRole('button', { name: 'Edit message' }));
+		expect(input).toHaveProperty('value', 'original question');
+
+		await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(input).toHaveProperty('value', 'half-written thought');
+		expect(screen.queryByText(/Editing a sent message/)).toBeNull();
 	});
 
 	it('does not regenerate a failed turn while the route holds the thread', () => {
@@ -591,10 +667,14 @@ describe('AgentChat sending', () => {
 			/>,
 		);
 
-		expect(input).toHaveProperty('value', 'keep this draft');
-		expect(screen.getByRole('textbox', { name: 'Edit message' })).toBeDefined();
+		// The rewrite is in the composer; the displaced draft comes back on cancel.
+		expect(input).toHaveProperty('value', 'failed turn');
+		expect(screen.getByText(/Editing a sent message/)).toBeDefined();
 		expect(screen.getByRole('button', { name: 'Retry' })).toBeDefined();
 		expect(await screen.findByText(/Context compacted/)).toBeDefined();
+
+		await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(input).toHaveProperty('value', 'keep this draft');
 	});
 
 	it('does not append a tail compaction marker into a middle window', () => {
@@ -651,7 +731,7 @@ describe('AgentChat sending', () => {
 
 		expect(await screen.findByText('Interrupted')).toBeDefined();
 		expect(screen.getByText('partial answer')).toBeDefined();
-		expect(props.onTurnFinished).toHaveBeenCalledTimes(1);
+		expect(storeLoad).toHaveBeenCalledWith(true);
 		expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
 	});
 
@@ -670,7 +750,7 @@ describe('AgentChat sending', () => {
 	});
 
 	it('appends an aborted assistant callback that was not in local messages yet', () => {
-		const props = renderChat();
+		renderChat();
 		const assistant = {
 			id: 'late-aborted-assistant',
 			role: 'assistant' as const,
@@ -680,7 +760,7 @@ describe('AgentChat sending', () => {
 		act(() => chat.onFinish?.({ message: assistant, isAbort: true }));
 
 		expect(screen.getByText('Interrupted')).toBeDefined();
-		expect(props.onTurnFinished).toHaveBeenCalledTimes(1);
+		expect(storeLoad).toHaveBeenCalledWith(true);
 	});
 });
 
@@ -730,5 +810,43 @@ describe('AgentChat earlier pages', () => {
 				screen.queryByRole('button', { name: 'Try loading earlier messages' }),
 			).toBeNull(),
 		);
+	});
+});
+
+/**
+ * Opening a thread fresh used to render every mention as a raw uuid with no
+ * preview: the index behind those names was only loaded by the mention list or
+ * by an upload, so it stayed empty until one of those happened to run.
+ */
+describe('AgentChat file references', () => {
+	const mention = {
+		id: 'with-mention',
+		role: 'user' as const,
+		parts: [
+			{
+				type: 'text' as const,
+				text: 'mirá @f:0198c9a2-1111-7000-8000-abcdefabcdef',
+			},
+		],
+	};
+
+	it('loads the storage index when the transcript references a file', async () => {
+		renderChat({ initialMessages: [mention] });
+		await waitFor(() => expect(storage.load).toHaveBeenCalledTimes(1));
+	});
+
+	it('does not load it for a thread that never touched a file', () => {
+		renderChat({
+			initialMessages: [
+				{ id: 'plain', role: 'user', parts: [{ type: 'text', text: 'hola' }] },
+			],
+		});
+		expect(storage.load).not.toHaveBeenCalled();
+	});
+
+	it('leaves an index that is already loaded alone', () => {
+		storage.status = 'ready';
+		renderChat({ initialMessages: [mention] });
+		expect(storage.load).not.toHaveBeenCalled();
 	});
 });

@@ -1,24 +1,21 @@
-import { Button } from '@web/components/ui/button';
 import {
-	Command,
-	CommandEmpty,
-	CommandGroup,
-	CommandInput,
-	CommandItem,
-	CommandList,
-} from '@web/components/ui/command';
+	AgentEntityPicker,
+	type PickerEntity,
+} from '@web/components/agent/agent-entity-picker';
+import { Button } from '@web/components/ui/button';
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
 } from '@web/components/ui/popover';
-import { ChevronDownIcon } from 'lucide-react';
+import { ChevronDownIcon, EyeIcon } from 'lucide-react';
 import { useState } from 'react';
 
 export type AgentModelOption = {
 	id: string;
 	provider: string;
 	label: string;
+	attachments: { image: boolean; pdf: boolean };
 	reasoning: { levels: readonly string[]; default?: string };
 };
 
@@ -29,12 +26,12 @@ export type AgentModelOption = {
  */
 const providerHeadings: Record<string, string> = {
 	anthropic: 'Anthropic',
-	google: 'Google AI Studio',
+	google: 'Google',
 	openai: 'OpenAI',
 	novita: 'Novita',
 };
 
-function providerHeading(provider: string) {
+export function providerHeading(provider: string) {
 	return (
 		providerHeadings[provider] ??
 		(provider.charAt(0).toUpperCase() + provider.slice(1) || 'Other')
@@ -42,30 +39,57 @@ function providerHeading(provider: string) {
 }
 
 /**
- * Grouped in the order the catalogue lists them, not alphabetically: the server
- * already orders the models it prefers first, and re-sorting here would hide
- * that intent behind provider names.
+ * What a model can be *shown*, spelled out: the two flags are independent —
+ * Novita's multimodal models take images but not PDFs — so the badge names
+ * exactly what arrives as bytes. A model without it still reads a mentioned
+ * file, it just receives the text placeholder instead. Nothing else the
+ * catalogue knows — reasoning levels, a temperature knob — changes what the
+ * model can be asked, so it stays out of a row meant to be scanned.
  */
-function groupByProvider(models: readonly AgentModelOption[]) {
-	const groups: {
-		provider: string;
-		heading: string;
-		models: AgentModelOption[];
-	}[] = [];
-	for (const model of models) {
-		const group = groups.find((entry) => entry.provider === model.provider);
-		if (group) group.models.push(model);
-		else
-			groups.push({
-				provider: model.provider,
-				heading: providerHeading(model.provider),
-				models: [model],
-			});
-	}
-	return groups;
+export function attachmentBadge(attachments: AgentModelOption['attachments']) {
+	if (attachments.image && attachments.pdf) return 'Reads images and PDFs';
+	if (attachments.image) return 'Reads images';
+	if (attachments.pdf) return 'Reads PDFs';
+	return undefined;
+}
+
+export function modelEntity(model: AgentModelOption): PickerEntity {
+	const badge = attachmentBadge(model.attachments);
+	return {
+		id: model.id,
+		label: model.label,
+		group: providerHeading(model.provider),
+		...(badge ? { badges: [{ icon: EyeIcon, label: badge }] } : {}),
+	};
 }
 
 export function AgentModelPicker({
+	models,
+	value,
+	onSelect,
+}: {
+	models: readonly AgentModelOption[];
+	value: string;
+	onSelect: (id: string) => void;
+}) {
+	return (
+		<AgentEntityPicker
+			entities={models.map(modelEntity)}
+			selected={[value]}
+			noun="models"
+			groupsLabel="Providers"
+			onSelect={onSelect}
+		/>
+	);
+}
+
+/**
+ * The same picker behind a trigger, for the surfaces that pick a model as one
+ * setting among several — the preferences popover holds two of these. The
+ * composer embeds the picker directly instead: there the model *is* the
+ * surface, and a trigger inside a popover would be a second click to nowhere.
+ */
+export function AgentModelPickerPopover({
 	models,
 	value,
 	onSelect,
@@ -79,7 +103,6 @@ export function AgentModelPicker({
 	const [open, setOpen] = useState(false);
 	const active = models.find((model) => model.id === value);
 	const activeLabel = active?.label ?? 'Select model';
-	const groups = groupByProvider(models);
 
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
@@ -104,42 +127,16 @@ export function AgentModelPicker({
 			<PopoverContent
 				align="start"
 				side="top"
-				className="w-72 gap-0 overflow-hidden p-0"
+				className="w-[min(92vw,26rem)] gap-0 overflow-hidden p-0"
 			>
-				{/* cmdk filters: this is a handful of rows already in memory, so the
-				    match is cheaper than a round trip to the registry. The two arbitrary
-				    variants undo chrome the vendored input carries for the command
-				    dialog — room for its close button, and a 56px row. */}
-				<Command
-					loop
-					className="rounded-none bg-transparent p-0 [&_[data-slot=command-input-wrapper]]:pr-0 [&_[data-slot=input-group]]:h-11"
-				>
-					<CommandInput placeholder="Search models…" />
-					<CommandList className="max-h-64 overflow-y-auto overscroll-contain">
-						<CommandEmpty>No models match.</CommandEmpty>
-						{groups.map((group) => (
-							<CommandGroup key={group.provider} heading={group.heading}>
-								{group.models.map((model) => (
-									<CommandItem
-										key={model.id}
-										// Both, so typing the identifier or the display name finds it.
-										value={`${model.id} ${model.label}`}
-										aria-checked={model.id === value}
-										data-checked={model.id === value}
-										onSelect={() => {
-											onSelect(model.id);
-											setOpen(false);
-										}}
-									>
-										<span className="min-w-0 flex-1 truncate">
-											{model.label}
-										</span>
-									</CommandItem>
-								))}
-							</CommandGroup>
-						))}
-					</CommandList>
-				</Command>
+				<AgentModelPicker
+					models={models}
+					value={value}
+					onSelect={(id) => {
+						onSelect(id);
+						setOpen(false);
+					}}
+				/>
 			</PopoverContent>
 		</Popover>
 	);

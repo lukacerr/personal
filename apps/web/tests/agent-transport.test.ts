@@ -32,6 +32,22 @@ describe('prepareAgentChatRequest', () => {
 		});
 	});
 
+	it('widens the tools when the outgoing message mentions a file', () => {
+		const fileId = '0198c9a2-1111-7000-8000-abcdefabcdef';
+		const { body } = prepareAgentChatRequest({
+			threadId: 't1',
+			messages: [
+				{
+					id: 'u3',
+					role: 'user',
+					parts: [{ type: 'text', text: `read @f:${fileId}` }],
+				},
+			],
+			selection: { model: 'claude-sonnet-5', tools: ['tavily'], maxSteps: 5 },
+		});
+		expect(body.tools).toEqual(['tavily', 'storageRead']);
+	});
+
 	it('omits reasoning for models without a knob', () => {
 		const { body } = prepareAgentChatRequest({
 			threadId: 't1',

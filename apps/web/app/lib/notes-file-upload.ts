@@ -1,60 +1,18 @@
 import { NOTES_UPLOAD_FOLDER, pastedImageName } from '@web/lib/notes-files';
-import { uniqueFileName } from '@web/lib/storage';
-import { type StoredFile, storageTransport } from '@web/lib/storage-api';
-import { useStorageStore } from '@web/lib/storage-store';
-import { createUploadQueue, type UploadItem } from '@web/lib/storage-upload';
+import type { StoredFile } from '@web/lib/storage-api';
+import { uploadStoredFiles } from '@web/lib/storage-file-upload';
+import type { UploadItem } from '@web/lib/storage-upload';
 
-/**
- * Uploads into the Notes folder and answers with what the server stored.
- *
- * The index is refreshed first because the names it holds decide the suffix:
- * a stale copy would let a name through that the server then rejects, and a
- * rejection in the middle of typing is the dead end this avoids.
- */
+/** Notes' shape of the shared upload: its folder, flagged as its own. */
 export async function uploadNoteFiles(
 	selected: File[],
 	onProgress?: (items: UploadItem[]) => void,
 ): Promise<StoredFile[]> {
-	if (selected.length === 0) return [];
-	await useStorageStore.getState().load(true);
-
-	const claimed = useStorageStore
-		.getState()
-		.files.map(({ id, name, path }) => ({ id, name, path }));
-	const candidates = selected.map((item) => {
-		const name = uniqueFileName(claimed, NOTES_UPLOAD_FOLDER, item.name);
-		const id = crypto.randomUUID();
-		// Two files pasted at once must not both claim the same free name.
-		claimed.push({ id, name, path: NOTES_UPLOAD_FOLDER });
-		return {
-			id,
-			name,
-			path: NOTES_UPLOAD_FOLDER,
-			contentType: item.type || 'application/octet-stream',
-			size: item.size,
-			uploadedFromNotes: true,
-			body: item,
-		};
-	});
-
-	const queue = createUploadQueue({
-		transport: storageTransport,
-		onChange: onProgress,
-	});
-	await queue.enqueue(candidates);
-
-	const stored = new Set(
-		queue
-			.items()
-			.filter((item) => item.status === 'completed')
-			.map((item) => item.id),
+	return uploadStoredFiles(
+		selected,
+		{ folder: NOTES_UPLOAD_FOLDER, uploadedFromNotes: true },
+		onProgress,
 	);
-	if (stored.size === 0) return [];
-
-	// The rows come back from the server rather than from the candidates: the
-	// size and the name are whatever storage actually recorded.
-	await useStorageStore.getState().load(true);
-	return useStorageStore.getState().files.filter((file) => stored.has(file.id));
 }
 
 /**
