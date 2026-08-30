@@ -55,7 +55,7 @@ const catalog: SelectionCatalog = {
 				reasoning: ['off', 'low'],
 			},
 		},
-		{ id: 'qwen/qwen3.7-max', reasoning: { levels: [] } },
+		{ id: 'qwen/qwen3.8-max', reasoning: { levels: [] } },
 	],
 	tools: [{ name: 'tavily' }],
 };
@@ -108,13 +108,13 @@ describe('restoreSelection', () => {
 
 	it('drops reasoning entirely for models without a knob', () => {
 		const restored = restoreSelection(catalog, {
-			model: 'qwen/qwen3.7-max',
+			model: 'qwen/qwen3.8-max',
 			reasoning: 'high',
 			tools: ['tavily'],
 			maxSteps: 5,
 			temperature: 0.7,
 		});
-		expect(restored.model).toBe('qwen/qwen3.7-max');
+		expect(restored.model).toBe('qwen/qwen3.8-max');
 		expect('reasoning' in restored).toBe(false);
 		expect('temperature' in restored).toBe(false);
 	});

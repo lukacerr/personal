@@ -28,7 +28,7 @@ const catalog: AgentCatalog = {
 			},
 		},
 		{
-			id: 'qwen/qwen3.7-max',
+			id: 'qwen/qwen3.8-max',
 			provider: 'novita',
 			label: 'Qwen3.7 Max',
 			reasoning: { levels: ['off', 'on'], default: 'on' },

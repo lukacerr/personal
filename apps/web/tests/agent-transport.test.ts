@@ -36,7 +36,7 @@ describe('prepareAgentChatRequest', () => {
 		const { body } = prepareAgentChatRequest({
 			threadId: 't1',
 			messages,
-			selection: { model: 'qwen/qwen3.7-max', tools: [], maxSteps: 5 },
+			selection: { model: 'qwen/qwen3.8-max', tools: [], maxSteps: 5 },
 		});
 		expect('reasoning' in body).toBe(false);
 		expect('temperature' in body).toBe(false);

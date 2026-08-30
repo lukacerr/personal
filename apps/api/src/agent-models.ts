@@ -215,10 +215,19 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 		mapping: 'novita-thinking',
 	},
 	{
-		id: 'zai-org/glm-5.2',
+		id: 'zai-org/glm-5.3',
 		provider: 'novita',
-		label: 'GLM 5.2',
-		// Only `high` and `max` are confirmed efforts for GLM 5.2.
+		label: 'GLM 5.3',
+		// Carries over GLM 5.2's confirmed efforts (`high`/`max`); not reverified against 5.3.
+		reasoning: { levels: ['off', 'high', 'max'], default: 'max' },
+		temperature: temperatureFor(['off', 'high', 'max']),
+		mapping: 'novita-thinking',
+	},
+	{
+		id: 'zai-org/glm-5.3-flash',
+		provider: 'novita',
+		label: 'GLM 5.3 Flash',
+		// Same confirmed efforts as GLM 5.2/5.3; not reverified for the Flash tier.
 		reasoning: { levels: ['off', 'high', 'max'], default: 'max' },
 		temperature: temperatureFor(['off', 'high', 'max']),
 		mapping: 'novita-thinking',
@@ -236,15 +245,24 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 		mapping: 'novita-thinking',
 	},
 	{
-		id: 'qwen/qwen3.7-max',
+		id: 'qwen/qwen3.8-max',
 		provider: 'novita',
-		label: 'Qwen3.7 Max',
+		label: 'Qwen3.8 Max',
 		/**
-		 * Qwen3.7 Max takes the plain toggle. `thinking_budget` exists in Qwen's
-		 * own API, but it is not verified that Novita forwards it, so it is not
-		 * exposed as a level: a knob that silently does nothing is worse than no
-		 * knob.
+		 * Carries over Qwen3.7 Max's plain toggle. `thinking_budget` exists in
+		 * Qwen's own API, but it is not verified that Novita forwards it, so it is
+		 * not exposed as a level: a knob that silently does nothing is worse than
+		 * no knob.
 		 */
+		reasoning: { levels: ['off', 'on'], default: 'on' },
+		temperature: null,
+		mapping: 'novita-thinking',
+	},
+	{
+		id: 'qwen/qwen3.8-flash',
+		provider: 'novita',
+		label: 'Qwen3.8 Flash',
+		// Same toggle as Qwen3.8 Max; not reverified for the Flash tier.
 		reasoning: { levels: ['off', 'on'], default: 'on' },
 		temperature: null,
 		mapping: 'novita-thinking',

@@ -25,9 +25,11 @@ describe('agent model registry', () => {
 			'deepseek/deepseek-v4-pro-0813',
 			'deepseek/deepseek-v4-flash-0731',
 			'moonshotai/kimi-k3',
-			'zai-org/glm-5.2',
+			'zai-org/glm-5.3',
+			'zai-org/glm-5.3-flash',
 			'minimax/minimax-m3',
-			'qwen/qwen3.7-max',
+			'qwen/qwen3.8-max',
+			'qwen/qwen3.8-flash',
 		]);
 	});
 
@@ -193,9 +195,9 @@ describe('buildProviderOptions', () => {
 			{ novita: { reasoningEffort: 'low' } },
 		],
 		['moonshotai/kimi-k3', undefined, { novita: { reasoningEffort: 'max' } }],
-		['zai-org/glm-5.2', 'max', { novita: { reasoningEffort: 'max' } }],
+		['zai-org/glm-5.3', 'max', { novita: { reasoningEffort: 'max' } }],
 		[
-			'zai-org/glm-5.2',
+			'zai-org/glm-5.3',
 			'off',
 			{ novita: { thinking: { type: 'disabled' }, enable_thinking: false } },
 		],
@@ -209,10 +211,10 @@ describe('buildProviderOptions', () => {
 			undefined,
 			{ novita: { thinking: { type: 'adaptive' } } },
 		],
-		['qwen/qwen3.7-max', 'on', { novita: { enable_thinking: true } }],
-		['qwen/qwen3.7-max', undefined, { novita: { enable_thinking: true } }],
+		['qwen/qwen3.8-max', 'on', { novita: { enable_thinking: true } }],
+		['qwen/qwen3.8-max', undefined, { novita: { enable_thinking: true } }],
 		[
-			'qwen/qwen3.7-max',
+			'qwen/qwen3.8-max',
 			'off',
 			{ novita: { thinking: { type: 'disabled' }, enable_thinking: false } },
 		],
