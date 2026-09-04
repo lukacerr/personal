@@ -178,7 +178,7 @@ describe('AppSidebar summaries', () => {
 		expect(within(draft).getByText('Draft')).toBeTruthy();
 	});
 
-	it('caps conversations at five however many the store holds', async () => {
+	it('caps conversations at three however many the store holds', async () => {
 		useAgentStore.setState({
 			threads: Array.from(
 				{ length: 8 },
@@ -194,7 +194,47 @@ describe('AppSidebar summaries', () => {
 
 		renderSidebar();
 		await waitFor(() => expect(groupOf('Agent')).toBeTruthy());
-		expect(within(groupOf('Agent')).getAllByRole('link')).toHaveLength(5);
+		expect(within(groupOf('Agent')).getAllByRole('link')).toHaveLength(3);
+	});
+
+	/**
+	 * Agent's group is a recency feed, not a reading: what is next and what is
+	 * left matter more at a glance than which chat was touched last, so its rows
+	 * sink below Calendar and Finance while its navigation entry stays first.
+	 */
+	it('reads Agent conversations below Calendar and Finance', async () => {
+		seedFinance();
+		useAgentStore.setState({
+			threads: [{ id: 't1', title: 'Ideas', updatedAt: 10 } as AgentThread],
+			status: 'ready',
+		});
+		await calendarDb.events.put({
+			id: 'e1',
+			title: 'Dentista',
+			details: null,
+			tag: null,
+			date: todayLocalDate(),
+			timeMinutes: 15 * 60,
+			recurrence: null,
+			completedAt: null,
+			createdAt: 1,
+			updatedAt: 1,
+		});
+
+		renderSidebar();
+
+		await waitFor(() => {
+			expect(groupOf('Calendar')).toBeTruthy();
+			expect(groupOf('Finance')).toBeTruthy();
+			expect(groupOf('Agent')).toBeTruthy();
+		});
+		const follows = (later: HTMLElement, earlier: HTMLElement) =>
+			Boolean(
+				earlier.compareDocumentPosition(later) &
+					Node.DOCUMENT_POSITION_FOLLOWING,
+			);
+		expect(follows(groupOf('Finance'), groupOf('Calendar'))).toBe(true);
+		expect(follows(groupOf('Agent'), groupOf('Finance'))).toBe(true);
 	});
 
 	/**

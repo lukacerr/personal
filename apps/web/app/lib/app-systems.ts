@@ -85,6 +85,12 @@ export type AppSystem = {
 	 */
 	loadSummary?: () => Promise<SystemSummary | undefined>;
 	/**
+	 * Where this system's summary group sits relative to the others. Defaults
+	 * to 0; ties keep sidebar order, so most systems never set it. Only the
+	 * summary moves — navigation and palette order stay the sidebar's.
+	 */
+	summaryRank?: number;
+	/**
 	 * Trailing breadcrumb items for the record this route has open, or an empty
 	 * array when the route belongs to another system or has none.
 	 */
@@ -313,8 +319,13 @@ export type SystemSummaryGroup = { system: AppSystem; summary: SystemSummary };
  * component stays a `map` over what it was handed.
  */
 export async function loadSystemSummaries(): Promise<SystemSummaryGroup[]> {
+	// Sidebar order first, then `summaryRank`: the sort is stable, so systems
+	// that never set a rank keep reading exactly where the navigation puts them.
+	const bySummaryRank = systemsInSidebarOrder().sort(
+		(a, b) => (a.summaryRank ?? 0) - (b.summaryRank ?? 0),
+	);
 	const groups = await Promise.all(
-		systemsInSidebarOrder().map(async (system) => ({
+		bySummaryRank.map(async (system) => ({
 			system,
 			summary: await system.loadSummary?.(),
 		})),

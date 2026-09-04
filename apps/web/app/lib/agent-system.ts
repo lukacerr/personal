@@ -11,13 +11,20 @@ import {
 } from '@web/lib/app-systems';
 import { BotIcon } from 'lucide-react';
 
-/** As asked for: the five most recently touched conversations. */
-const RECENT_THREADS_LIMIT = 5;
+/** As asked for: the three most recently touched conversations. */
+const RECENT_THREADS_LIMIT = 3;
 
 export const agentSystem: AppSystem = {
 	key: 'agent',
 	heading: 'Agent',
 	icon: BotIcon,
+
+	/**
+	 * A recency feed reads below the readings: what is next (Calendar) and what
+	 * is left (Finance) matter more at a glance than which chat was touched
+	 * last. The navigation entry stays first — only the summary group sinks.
+	 */
+	summaryRank: 1,
 
 	/**
 	 * Agent keeps no local database, so nothing the shell watches would ever
