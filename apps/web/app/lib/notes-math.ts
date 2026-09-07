@@ -122,3 +122,76 @@ export function renderLatex(
 		return { kind: 'invalid' };
 	}
 }
+
+/**
+ * Math as it arrives in pasted markdown. Display first, so `$$x$$` is not read
+ * as an empty inline pair around `x`; the inline half is the input rule's shape
+ * without its anchor, so the same currency rule applies: `$5 y $10` stays text.
+ */
+export const PASTED_MATH_PATTERN =
+	/\$\$([^$]+?)\$\$|\$([^\s$](?:[^$]*[^\s$])?)\$/g;
+
+export type PastedMathSegment =
+	| { kind: 'text'; text: string }
+	| { kind: 'latex'; latex: string };
+
+export function splitPastedMath(text: string): PastedMathSegment[] {
+	const segments: PastedMathSegment[] = [];
+	let last = 0;
+	for (const match of text.matchAll(PASTED_MATH_PATTERN)) {
+		const latex = (match[1] ?? match[2] ?? '').trim();
+		if (!latex) continue;
+		if (match.index > last)
+			segments.push({ kind: 'text', text: text.slice(last, match.index) });
+		segments.push({ kind: 'latex', latex });
+		last = match.index + match[0].length;
+	}
+	if (last < text.length)
+		segments.push({ kind: 'text', text: text.slice(last) });
+	return segments;
+}
+
+/**
+ * A paragraph that is nothing but `$$…$$` is a display equation, the way the
+ * `$$` shorthand only takes a block with nothing else in it. Markdown often
+ * spreads it over lines, so the delimiters may sit on lines of their own.
+ */
+export function pastedDisplayEquation(text: string): string | undefined {
+	const latex = /^\$\$([\s\S]+?)\$\$$/.exec(text.trim())?.[1]?.trim();
+	return latex || undefined;
+}
+
+/** Whether pasted text carries anything the math conversion would act on. */
+export function hasPastedMath(text: string) {
+	return new RegExp(PASTED_MATH_PATTERN.source).test(text);
+}
+
+/**
+ * The characters BlockNote's markdown parser both interprets and unescapes.
+ * `<` is deliberately absent: it is not on the parser's escapable list, so a
+ * backslash before it would come out literally.
+ */
+const MARKDOWN_IN_MATH = /[\\`*_~[\]|>]/g;
+
+/**
+ * Markdown pasted as plain text goes through BlockNote's markdown parser
+ * before any of our hooks see it, and `x_{n+1}=x_n` reads to that parser as
+ * emphasis: the underscores vanished and the formula arrived broken. Escaping
+ * the punctuation inside each formula makes the parser hand it back verbatim,
+ * and a `$$…$$` that owns its line gets blank lines around it so it lands in
+ * a paragraph of its own instead of soft-breaking into the previous one.
+ */
+export function protectPastedMath(markdown: string) {
+	return markdown.replace(
+		PASTED_MATH_PATTERN,
+		(span: string, _display: string | undefined, _inline, offset: number) => {
+			const escaped = span.replace(MARKDOWN_IN_MATH, '\\$&');
+			const ownLine =
+				span.startsWith('$$') &&
+				(offset === 0 || markdown[offset - 1] === '\n') &&
+				(offset + span.length === markdown.length ||
+					markdown[offset + span.length] === '\n');
+			return ownLine ? `\n${escaped}\n` : escaped;
+		},
+	);
+}

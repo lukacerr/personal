@@ -115,7 +115,7 @@ Convenciones API:
 - Motion para transiciones ligeras de React y layout; usa `LazyMotion`/`domAnimation` y respeta `prefers-reduced-motion`.
 - Zustand para estado cliente compartido cuando sea necesario.
 - BlockNote como editor de Notes, con KaTeX para renderizar ecuaciones.
-- `@tiptap/core` y `@tiptap/extension-find-and-replace` pineados a la misma versión exacta que BlockNote resuelve: dos instancias de Tiptap rompen el editor, así que no uses un rango.
+- `@tiptap/core`, `@tiptap/extension-find-and-replace` y `@tiptap/pm` pineados a la misma versión exacta que BlockNote resuelve: dos instancias de Tiptap o de ProseMirror rompen el editor, así que no uses un rango.
 - Eden Treaty para llamadas tipadas a la API.
 - T3 Env y Zod en `apps/web/app/lib/env.ts`.
 - Vitest para tests de la web.

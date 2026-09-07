@@ -131,6 +131,49 @@ body {
 	white-space: pre;
 }
 
+/* A mermaid code block draws itself underneath. The preview is a widget
+   decoration placed after the block content, inside the block container, so it
+   moves with the block; the source stays editable above it. */
+.notes-editor .bn-block > .notes-mermaid-preview,
+.notes-history-preview .bn-block > .notes-mermaid-preview {
+	margin-top: 0.5rem;
+	padding: 1rem;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	overflow-x: auto;
+	overscroll-behavior-x: contain;
+}
+
+/* Nothing to show yet — first render in flight — means no box either. */
+.notes-editor
+	.notes-mermaid-preview:not(:has(svg, .notes-mermaid-status:not([hidden]))),
+.notes-history-preview
+	.notes-mermaid-preview:not(:has(svg, .notes-mermaid-status:not([hidden]))) {
+	display: none;
+}
+
+/* Mermaid sizes its SVG to the drawing; wide charts scroll instead of pushing
+   the note sideways, and narrow ones sit centered rather than flush left. */
+.notes-editor .notes-mermaid-diagram > svg,
+.notes-history-preview .notes-mermaid-diagram > svg {
+	display: block;
+	margin-inline: auto;
+	max-width: 100%;
+	height: auto;
+}
+
+.notes-editor .notes-mermaid-status,
+.notes-history-preview .notes-mermaid-status {
+	margin: 0;
+	font-size: 0.875rem;
+	color: var(--destructive);
+}
+
+.notes-editor .notes-mermaid-diagram:not(:empty) + .notes-mermaid-status,
+.notes-history-preview .notes-mermaid-diagram:not(:empty) + .notes-mermaid-status {
+	margin-top: 0.75rem;
+}
+
 /* The library hides the picker until hover and delays it a second, which on a
    touch screen means it cannot be reached at all. */
 .notes-editor .bn-block-content[data-content-type="codeBlock"] > div > select,

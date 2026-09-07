@@ -8,17 +8,27 @@ import {
 import { credentialBlock } from '@web/components/notes/note-credential';
 import { storedFileBlock } from '@web/components/notes/note-file';
 import { equationBlock, latexInline } from '@web/components/notes/note-math';
+import { NoteMermaidExtension } from '@web/lib/notes-mermaid';
 
 /**
  * BlockNote ships the highlighting plugin but leaves it inert: its default code
  * block is `createCodeBlockSpec()` with no highlighter and no language list, so
  * it renders plain text and hides its language picker. Passing the official
  * Shiki options turns both on, and the languages load lazily on first use.
+ *
+ * The mermaid preview travels with the spec rather than with each mount: the
+ * same schema is mounted by the editor, the history preview and the public
+ * page, and a diagram has to draw in all three.
  */
+const codeBlock = createCodeBlockSpec(codeBlockOptions);
+
 export const notesSchema = BlockNoteSchema.create({
 	blockSpecs: {
 		...defaultBlockSpecs,
-		codeBlock: createCodeBlockSpec(codeBlockOptions),
+		codeBlock: {
+			...codeBlock,
+			extensions: [...(codeBlock.extensions ?? []), NoteMermaidExtension],
+		},
 		// Holds only which credential it points at; the value never enters a prop.
 		credential: credentialBlock(),
 		equation: equationBlock(),

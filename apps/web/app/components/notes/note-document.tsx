@@ -55,6 +55,7 @@ import {
 	noteCompactStatusLabel,
 	noteStatusLabel,
 	pasteCopiedBlock,
+	pasteWithMath,
 	unavailableSlashItems,
 } from '@web/lib/notes-editor';
 import { readClipboardImages } from '@web/lib/notes-file-upload';
@@ -130,6 +131,7 @@ export function NoteDocument({
 	const editor = useCreateBlockNote({
 		initialContent: note.content,
 		extensions: [NoteFindExtension, NoteMathExtension],
+		pasteHandler: pasteWithMath,
 		schema: notesSchema,
 	});
 	const [title, setTitle] = useState(note.title);

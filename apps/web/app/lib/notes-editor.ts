@@ -1,16 +1,28 @@
 import { createExtension, type PartialBlock } from '@blocknote/core';
 import { Extension, InputRule, isNodeSelection } from '@tiptap/core';
 import FindAndReplace from '@tiptap/extension-find-and-replace';
+import {
+	Fragment,
+	type NodeType,
+	type Node as PMNode,
+	type Schema,
+	Slice,
+} from '@tiptap/pm/model';
+import { Plugin } from '@tiptap/pm/state';
 import { CREDENTIAL_BLOCK_TYPE } from '@web/lib/notes-credentials';
 import { STORED_FILE_BLOCK_TYPE } from '@web/lib/notes-files';
 import {
 	DISPLAY_MATH_INPUT_RULE,
 	EQUATION_BLOCK_TYPE,
+	hasPastedMath,
 	INLINE_MATH_INPUT_RULE,
 	inlineEquationEntry,
 	LATEX_INLINE_TYPE,
 	type MathSide,
 	opensDisplayEquation,
+	pastedDisplayEquation,
+	protectPastedMath,
+	splitPastedMath,
 } from '@web/lib/notes-math';
 import type { NoteBlock, NotesEditor } from '@web/lib/notes-schema';
 
@@ -189,8 +201,154 @@ export const NoteFindExtension = createExtension({
  * ProseMirror already node-selects on its own, whichever key or click got there,
  * so watching for that selection covers every way in at once.
  */
+function inlineMathContent(content: Fragment, latexType: NodeType) {
+	let changed = false;
+	const nodes: PMNode[] = [];
+	content.forEach((child) => {
+		const segments =
+			child.isText && child.text ? splitPastedMath(child.text) : [];
+		if (
+			segments.length === 0 ||
+			(segments[0]?.kind === 'text' && segments.length === 1)
+		) {
+			nodes.push(child);
+			return;
+		}
+		changed = true;
+		for (const segment of segments)
+			nodes.push(
+				segment.kind === 'text'
+					? child.type.schema.text(segment.text, child.marks)
+					: latexType.create({ latex: segment.latex }),
+			);
+	});
+	return changed ? Fragment.fromArray(nodes) : undefined;
+}
+
+/** How deep a slice may be open on one side: down to its first (or last) leaf. */
+function openDepth(fragment: Fragment, side: 'start' | 'end') {
+	let depth = 0;
+	for (
+		let node = side === 'start' ? fragment.firstChild : fragment.lastChild;
+		node && !node.isLeaf;
+		node = side === 'start' ? node.firstChild : node.lastChild
+	)
+		depth++;
+	return depth;
+}
+
+/**
+ * Pasted markdown keeps its math as `$…$` text, and nobody is going to retype
+ * every formula in a copied exercise sheet. This rewrites the pasted slice the
+ * way the input rules would have: an inline pair becomes a `latex` node, and a
+ * paragraph holding nothing but `$$…$$` becomes an equation block. Code is left
+ * alone. Replacing a paragraph with an atom makes the slice shallower on that
+ * side, so its open depths are clamped to what the new content can support.
+ */
+export function convertPastedMath(slice: Slice, schema: Schema): Slice {
+	const latexType = schema.nodes[LATEX_INLINE_TYPE];
+	const equationType = schema.nodes[EQUATION_BLOCK_TYPE];
+	if (!latexType || !equationType) return slice;
+
+	const convertNode = (node: PMNode): PMNode => {
+		if (node.isText || node.type.spec.code) return node;
+		const first = node.firstChild;
+		if (
+			node.type.name === 'blockContainer' &&
+			first?.type.name === 'paragraph'
+		) {
+			const latex = pastedDisplayEquation(
+				first.textBetween(0, first.content.size, '\n', '\n'),
+			);
+			if (latex)
+				return node.copy(
+					node.content.replaceChild(0, equationType.create({ latex })),
+				);
+		}
+		if (node.isTextblock) {
+			if (!node.type.contentMatch.matchType(latexType)) return node;
+			const content = inlineMathContent(node.content, latexType);
+			return content ? node.copy(content) : node;
+		}
+		const content = convertFragment(node.content);
+		return content === node.content ? node : node.copy(content);
+	};
+	const convertFragment = (fragment: Fragment): Fragment => {
+		let changed = false;
+		const nodes: PMNode[] = [];
+		fragment.forEach((node) => {
+			const next = convertNode(node);
+			if (next !== node) changed = true;
+			nodes.push(next);
+		});
+		return changed ? Fragment.fromArray(nodes) : fragment;
+	};
+
+	const content = convertFragment(slice.content);
+	if (content === slice.content) return slice;
+	return new Slice(
+		content,
+		Math.min(slice.openStart, openDepth(content, 'start')),
+		Math.min(slice.openEnd, openDepth(content, 'end')),
+	);
+}
+
+type PasteContext = {
+	event: ClipboardEvent;
+	editor: Pick<NotesEditor, 'pasteMarkdown' | 'getTextCursorPosition'>;
+	defaultPasteHandler: (options?: {
+		prioritizeMarkdownOverHTML?: boolean;
+		plainTextAsMarkdown?: boolean;
+	}) => boolean | undefined;
+};
+
+/**
+ * BlockNote's `pasteHandler`. Its default prefers markdown-looking plain text
+ * over the HTML next to it, and its markdown parser eats the underscores in
+ * `x_{n+1}`; `transformPasted` runs too late to get them back. With math on
+ * the clipboard the HTML wins instead — its text reaches the conversion
+ * untouched — and plain-only markdown goes in with its formulas escaped.
+ * Anything richer than text (files, VS Code, a copied block) and a paste into
+ * code stay with the default, where a dollar is a dollar.
+ */
+export function pasteWithMath({
+	event,
+	editor,
+	defaultPasteHandler,
+}: PasteContext) {
+	const data = event.clipboardData;
+	const plain = data?.getData('text/plain') ?? '';
+	const textOnly =
+		data?.types.every(
+			(type) => type === 'text/plain' || type === 'text/html',
+		) ?? false;
+	if (
+		!data ||
+		!textOnly ||
+		!hasPastedMath(plain) ||
+		editor.getTextCursorPosition().block.type === 'codeBlock'
+	)
+		return defaultPasteHandler();
+	if (data.types.includes('text/html'))
+		return defaultPasteHandler({ prioritizeMarkdownOverHTML: false });
+	editor.pasteMarkdown(protectPastedMath(plain));
+	return true;
+}
+
 export const NoteMathExtension = createExtension({
 	key: 'personalNoteMath',
+	prosemirrorPlugins: [
+		new Plugin({
+			props: {
+				// `plain` is Shift+paste or a paste into code, and inside code a
+				// dollar is a dollar either way.
+				transformPasted: (slice, view, plain) =>
+					plain || view.state.selection.$from.parent.type.spec.code
+						? slice
+						: convertPastedMath(slice, view.state.schema),
+			},
+		}),
+	],
 	tiptapExtensions: [
 		Extension.create({
 			name: 'personalInlineMath',

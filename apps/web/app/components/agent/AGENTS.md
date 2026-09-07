@@ -640,6 +640,9 @@ Lee este archivo antes de modificar `apps/web/app/components/agent/**`,
   o sea el resaltado se veía como texto plano — el peor resultado, porque
   parece que la sintaxis no existe. Su color sale de `--chart-1` en `app.css`;
   el amarillo del browser no pertenece a ningún theme.
+- La config de mermaid (`theme: 'dark'`) vive en `@web/lib/mermaid` y la
+  comparte Notes, que dibuja sus code blocks `mermaid` con la misma instancia
+  de `@streamdown/mermaid`: cambiar el theme acá es cambiarlo en las notas.
 - Cada plugin nuevo suma su línea `@source` en `app.css` (mermaid incluido).
   Si un estilo del renderer no aparece, el fallo es silencioso: revisá eso
   antes de sospechar del componente.

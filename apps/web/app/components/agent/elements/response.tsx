@@ -1,6 +1,7 @@
 import { code } from '@streamdown/code';
 import { createMathPlugin } from '@streamdown/math';
 import { mermaid } from '@streamdown/mermaid';
+import { MERMAID_CONFIG } from '@web/lib/mermaid';
 import { cn } from '@web/lib/utils';
 import { memo } from 'react';
 import remarkFlexibleMarkers from 'remark-flexible-markers';
@@ -43,13 +44,8 @@ const remarkPlugins = [
  */
 const allowedTags = { mark: ['class'] };
 
-/**
- * Mermaid draws with its own palette, which is light: on this shell the
- * diagrams came out as white boxes on a dark page. The app is dark-only —
- * `root.tsx` hard-codes the class — so one theme is the whole decision, and
- * mapping every token by hand would buy nothing over mermaid's own dark set.
- */
-const mermaidOptions = { config: { theme: 'dark' as const } };
+/** The theme decision lives with Notes' copy of it, in `@web/lib/mermaid`. */
+const mermaidOptions = { config: MERMAID_CONFIG };
 
 /**
  * Streaming markdown, memoized so a token appended to the last message does
