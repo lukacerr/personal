@@ -1,6 +1,11 @@
 import { createExtension } from '@blocknote/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import {
+	type EditorState,
+	Plugin,
+	PluginKey,
+	TextSelection,
+} from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import { type MermaidRender, renderMermaid } from '@web/lib/mermaid';
 
@@ -19,6 +24,11 @@ const MERMAID_LANGUAGES = new Set(['mermaid', 'mmd']);
 export const MERMAID_PREVIEW_DEBOUNCE_MS = 300;
 
 export const MERMAID_PREVIEW_CLASS = 'notes-mermaid-preview';
+
+/** Zoom steps multiply; the range keeps a chart readable at both ends. */
+const ZOOM_STEP = 1.25;
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 4;
 
 export type MermaidBlock = {
 	/** The BlockNote block id, which is what keeps a preview attached across edits. */
@@ -46,13 +56,37 @@ export function collectMermaidBlocks(doc: PMNode): MermaidBlock[] {
 	return blocks;
 }
 
+/**
+ * The mermaid block the selection sits in, if any. Editing means seeing the
+ * source, so this is what flips a block into its code view while typing.
+ */
+export function selectedMermaidBlock(state: EditorState): string | undefined {
+	const { selection } = state;
+	const { $from } = selection;
+	const selected = 'node' in selection ? (selection.node as PMNode) : undefined;
+	const container =
+		selected?.type.name === 'codeBlock'
+			? $from.parent
+			: $from.parent.type.name === 'codeBlock' && $from.depth > 0
+				? $from.node($from.depth - 1)
+				: undefined;
+	const id = container?.attrs.id;
+	return typeof id === 'string' ? id : undefined;
+}
+
 type MermaidRenderer = (source: string, id: string) => Promise<MermaidRender>;
+
+type PreviewView = 'diagram' | 'code';
 
 type PreviewEntry = {
 	id: string;
 	element: HTMLElement;
 	diagram: HTMLElement;
 	status: HTMLElement;
+	toggle: HTMLButtonElement;
+	/** What the user asked for; the caret and a missing drawing can override it. */
+	mode: PreviewView;
+	zoom: number;
 	/** Undefined until the first sync: a fresh entry draws without waiting. */
 	source?: string;
 	timer?: ReturnType<typeof setTimeout>;
@@ -61,10 +95,36 @@ type PreviewEntry = {
 	disposed: boolean;
 };
 
-function createEntry(id: string): PreviewEntry {
+type EntryActions = {
+	toggle: (entry: PreviewEntry) => void;
+	zoom: (entry: PreviewEntry, factor: number | null) => void;
+};
+
+function toolbarButton(label: string, text: string) {
+	const button = document.createElement('button');
+	button.type = 'button';
+	button.className = 'notes-mermaid-button';
+	button.setAttribute('aria-label', label);
+	button.textContent = text;
+	return button;
+}
+
+function createEntry(id: string, actions: EntryActions) {
 	const element = document.createElement('div');
 	element.className = MERMAID_PREVIEW_CLASS;
 	element.dataset.state = 'rendering';
+	element.dataset.view = 'code';
+	const toolbar = document.createElement('div');
+	toolbar.className = 'notes-mermaid-toolbar';
+	const zoomOut = toolbarButton('Zoom out', '−');
+	const zoomIn = toolbarButton('Zoom in', '+');
+	const zoomReset = toolbarButton('Reset zoom', '1:1');
+	const zoomGroup = document.createElement('div');
+	zoomGroup.className = 'notes-mermaid-zoom';
+	zoomGroup.append(zoomOut, zoomReset, zoomIn);
+	const toggle = toolbarButton('Show code', 'Show code');
+	toggle.classList.add('notes-mermaid-toggle');
+	toolbar.append(zoomGroup, toggle);
 	const diagram = document.createElement('div');
 	diagram.className = 'notes-mermaid-diagram';
 	diagram.setAttribute('role', 'img');
@@ -72,8 +132,23 @@ function createEntry(id: string): PreviewEntry {
 	const status = document.createElement('p');
 	status.className = 'notes-mermaid-status';
 	status.hidden = true;
-	element.append(diagram, status);
-	return { id, element, diagram, status, generation: 0, disposed: false };
+	element.append(toolbar, diagram, status);
+	const entry: PreviewEntry = {
+		id,
+		element,
+		diagram,
+		status,
+		toggle,
+		mode: 'diagram',
+		zoom: 1,
+		generation: 0,
+		disposed: false,
+	};
+	toggle.addEventListener('click', () => actions.toggle(entry));
+	zoomIn.addEventListener('click', () => actions.zoom(entry, ZOOM_STEP));
+	zoomOut.addEventListener('click', () => actions.zoom(entry, 1 / ZOOM_STEP));
+	zoomReset.addEventListener('click', () => actions.zoom(entry, null));
+	return entry;
 }
 
 function paint(entry: PreviewEntry, result: MermaidRender) {
@@ -84,6 +159,7 @@ function paint(entry: PreviewEntry, result: MermaidRender) {
 		entry.status.textContent = '';
 		entry.status.hidden = true;
 		entry.element.dataset.state = 'ready';
+		applyZoom(entry);
 		return;
 	}
 	// The last good drawing stays: mid-edit the source is broken more often
@@ -97,24 +173,68 @@ function paint(entry: PreviewEntry, result: MermaidRender) {
 }
 
 /**
+ * Mermaid sizes its SVG with `width="100%"` capped by a `max-width` equal to
+ * the drawing's natural width, which is what makes a chart fit the note. Zoom
+ * works on that real width rather than on a `transform`, because a transform
+ * does not take part in layout and the container would never grow to scroll.
+ * At 1:1 the inline sizing comes off and mermaid's own fit is back.
+ */
+function applyZoom(entry: PreviewEntry) {
+	const svg = entry.diagram.querySelector('svg');
+	if (!svg) return;
+	// Mermaid's own cap is what fitting means; it is kept to be put back.
+	svg.dataset.fitMaxWidth ??= svg.style.maxWidth;
+	if (entry.zoom === 1) {
+		svg.style.removeProperty('width');
+		svg.style.removeProperty('height');
+		svg.style.maxWidth = svg.dataset.fitMaxWidth;
+		return;
+	}
+	const natural = naturalWidth(svg);
+	if (natural === undefined) return;
+	svg.style.maxWidth = 'none';
+	svg.style.width = `${Math.round(natural * entry.zoom)}px`;
+	svg.style.height = 'auto';
+}
+
+function naturalWidth(svg: SVGElement) {
+	const viewBox = svg
+		.getAttribute('viewBox')
+		?.trim()
+		.split(/[\s,]+/);
+	const fromViewBox = viewBox?.[2] ? Number(viewBox[2]) : Number.NaN;
+	if (Number.isFinite(fromViewBox) && fromViewBox > 0) return fromViewBox;
+	const fromStyle = Number.parseFloat(svg.dataset.fitMaxWidth ?? '');
+	return Number.isFinite(fromStyle) && fromStyle > 0 ? fromStyle : undefined;
+}
+
+/**
  * Owns the preview elements of one editor view. The decorations only place
- * them; this decides when each one redraws and paints the result.
+ * them; this decides when each one redraws, paints the result and which of
+ * source or drawing is on show.
  */
 class PreviewRegistry {
 	private readonly entries = new Map<string, PreviewEntry>();
 	private renders = 0;
+	private focused = false;
+	private activeId: string | undefined;
 
-	constructor(private readonly render: MermaidRenderer) {}
+	constructor(
+		private readonly view: EditorView,
+		private readonly render: MermaidRenderer,
+	) {}
 
 	element(id: string) {
 		return this.entry(id).element;
 	}
 
-	sync(blocks: readonly MermaidBlock[]) {
+	sync(blocks: readonly MermaidBlock[], activeId: string | undefined) {
+		this.activeId = activeId;
 		const seen = new Set<string>();
 		for (const block of blocks) {
 			seen.add(block.id);
 			const entry = this.entry(block.id);
+			this.applyView(entry);
 			if (entry.source === block.source) continue;
 			const first = entry.source === undefined;
 			entry.source = block.source;
@@ -131,6 +251,11 @@ class PreviewRegistry {
 			this.dispose(entry);
 			this.entries.delete(id);
 		}
+	}
+
+	setFocused(focused: boolean) {
+		this.focused = focused;
+		for (const entry of this.entries.values()) this.applyView(entry);
 	}
 
 	/**
@@ -154,7 +279,16 @@ class PreviewRegistry {
 	private entry(id: string) {
 		let entry = this.entries.get(id);
 		if (!entry) {
-			entry = createEntry(id);
+			entry = createEntry(id, {
+				toggle: (target) => this.toggle(target),
+				zoom: (target, factor) => {
+					target.zoom =
+						factor === null
+							? 1
+							: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, target.zoom * factor));
+					applyZoom(target);
+				},
+			});
 			this.entries.set(id, entry);
 		}
 		return entry;
@@ -175,7 +309,71 @@ class PreviewRegistry {
 		);
 		if (entry.disposed || entry.generation !== generation) return;
 		paint(entry, result);
+		this.applyView(entry);
 	}
+
+	/**
+	 * Source and drawing are never on screen together. The drawing shows when
+	 * there is one, unless the user asked for the source or the caret is in the
+	 * block: editing means seeing what is being edited.
+	 */
+	private applyView(entry: PreviewEntry) {
+		const editing = this.focused && this.activeId === entry.id;
+		const drawn = entry.diagram.childElementCount > 0;
+		const view: PreviewView =
+			drawn && entry.mode === 'diagram' && !editing ? 'diagram' : 'code';
+		entry.element.dataset.view = view;
+		entry.element.dataset.drawn = drawn ? 'true' : 'false';
+		const label = view === 'diagram' ? 'Show code' : 'Show diagram';
+		entry.toggle.textContent = label;
+		entry.toggle.setAttribute('aria-label', label);
+		entry.toggle.disabled = !drawn;
+	}
+
+	/** Flips what is on show and puts the caret where it makes sense to be. */
+	private toggle(entry: PreviewEntry) {
+		const { view } = this;
+		if (entry.element.dataset.view === 'diagram') {
+			entry.mode = 'code';
+			this.applyView(entry);
+			if (!view.editable) return;
+			// The source is what they asked to see, so land the caret in it.
+			const pos = codeStart(view.state.doc, entry.id);
+			if (pos === undefined) return;
+			view.dispatch(
+				view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)),
+			);
+			view.focus();
+			this.settleFocus();
+			return;
+		}
+		entry.mode = 'diagram';
+		// With the caret still inside, the source would stay on show.
+		if (this.focused && this.activeId === entry.id) view.dom.blur();
+		this.settleFocus();
+		this.applyView(entry);
+	}
+
+	/**
+	 * Moving focus by hand does not always come with its event: a window in the
+	 * background gets no `focus`/`blur` at all. Reading the state directly after
+	 * the move keeps the view honest either way.
+	 */
+	private settleFocus() {
+		this.focused = this.view.hasFocus();
+	}
+}
+
+/** Position of the first character of the code block with this container id. */
+function codeStart(doc: PMNode, id: string): number | undefined {
+	let start: number | undefined;
+	doc.descendants((node, pos) => {
+		if (start !== undefined) return false;
+		if (node.attrs.id !== id) return true;
+		if (node.firstChild?.type.name === 'codeBlock') start = pos + 2;
+		return false;
+	});
+	return start;
 }
 
 type PluginState = { blocks: MermaidBlock[]; decorations: DecorationSet };
@@ -194,7 +392,7 @@ export function mermaidPreviewPlugin(render: MermaidRenderer = renderMermaid) {
 	const registryFor = (view: EditorView) => {
 		let registry = registries.get(view);
 		if (!registry) {
-			registry = new PreviewRegistry(render);
+			registry = new PreviewRegistry(view, render);
 			registries.set(view, registry);
 		}
 		return registry;
@@ -210,6 +408,8 @@ export function mermaidPreviewPlugin(render: MermaidRenderer = renderMermaid) {
 					{
 						key: `${MERMAID_PREVIEW_CLASS}:${block.id}`,
 						ignoreSelection: true,
+						// Clicks on the toolbar are the widget's, not the editor's.
+						stopEvent: () => true,
 					},
 				),
 			),
@@ -224,11 +424,25 @@ export function mermaidPreviewPlugin(render: MermaidRenderer = renderMermaid) {
 		},
 		props: {
 			decorations: (state) => pluginKey.getState(state)?.decorations,
+			handleDOMEvents: {
+				focus: (view) => {
+					registryFor(view).setFocused(true);
+					return false;
+				},
+				blur: (view) => {
+					registryFor(view).setFocused(false);
+					return false;
+				},
+			},
 		},
 		view: (view) => {
 			const registry = registryFor(view);
 			const sync = (current: EditorView) =>
-				registry.sync(pluginKey.getState(current.state)?.blocks ?? []);
+				registry.sync(
+					pluginKey.getState(current.state)?.blocks ?? [],
+					selectedMermaidBlock(current.state),
+				);
+			registry.setFocused(view.hasFocus());
 			sync(view);
 			return { update: sync, destroy: () => registry.suspend() };
 		},

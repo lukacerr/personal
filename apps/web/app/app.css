@@ -131,47 +131,169 @@ body {
 	white-space: pre;
 }
 
-/* A mermaid code block draws itself underneath. The preview is a widget
-   decoration placed after the block content, inside the block container, so it
-   moves with the block; the source stays editable above it. */
+/* A mermaid code block shows either its drawing or its source, never both. The
+   preview is a widget decoration placed after the block content, inside the
+   block container, so it moves with the block; `data-view` says which side is
+   on show. In diagram view the block content collapses to nothing — hiding it
+   outright would leave BlockNote's side menu with no box to anchor to. */
 .notes-editor .bn-block > .notes-mermaid-preview,
 .notes-history-preview .bn-block > .notes-mermaid-preview {
+	position: relative;
 	margin-top: 0.5rem;
-	padding: 1rem;
 	border: 1px solid var(--border);
 	border-radius: var(--radius-md);
-	overflow-x: auto;
-	overscroll-behavior-x: contain;
+}
+
+.notes-editor .bn-block > .notes-mermaid-preview[data-view="diagram"],
+.notes-history-preview .bn-block > .notes-mermaid-preview[data-view="diagram"] {
+	margin-top: 0;
 }
 
 /* Nothing to show yet — first render in flight — means no box either. */
-.notes-editor
-	.notes-mermaid-preview:not(:has(svg, .notes-mermaid-status:not([hidden]))),
+.notes-editor .notes-mermaid-preview[data-drawn="false"][data-state="rendering"],
 .notes-history-preview
-	.notes-mermaid-preview:not(:has(svg, .notes-mermaid-status:not([hidden]))) {
+	.notes-mermaid-preview[data-drawn="false"][data-state="rendering"] {
 	display: none;
 }
 
-/* Mermaid sizes its SVG to the drawing; wide charts scroll instead of pushing
-   the note sideways, and narrow ones sit centered rather than flush left. */
+.notes-editor
+	.bn-block:has(> .notes-mermaid-preview[data-view="diagram"])
+	> .bn-block-content[data-content-type="codeBlock"],
+.notes-history-preview
+	.bn-block:has(> .notes-mermaid-preview[data-view="diagram"])
+	> .bn-block-content[data-content-type="codeBlock"] {
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+}
+
+.notes-editor
+	.bn-block:has(> .notes-mermaid-preview[data-view="diagram"])
+	> .bn-block-content[data-content-type="codeBlock"]
+	> :is(pre, div),
+.notes-history-preview
+	.bn-block:has(> .notes-mermaid-preview[data-view="diagram"])
+	> .bn-block-content[data-content-type="codeBlock"]
+	> :is(pre, div) {
+	display: none;
+}
+
+/* The toolbar floats over the drawing, like the zoom panel in Agent; in code
+   view there is nothing to float over, so it becomes a slim bar. */
+.notes-editor .notes-mermaid-toolbar,
+.notes-history-preview .notes-mermaid-toolbar {
+	display: flex;
+	justify-content: flex-end;
+	align-items: center;
+	gap: 0.25rem;
+	padding: 0.375rem;
+}
+
+.notes-editor .notes-mermaid-preview[data-view="diagram"] > .notes-mermaid-toolbar,
+.notes-history-preview
+	.notes-mermaid-preview[data-view="diagram"]
+	> .notes-mermaid-toolbar {
+	position: absolute;
+	top: 0.5rem;
+	right: 0.5rem;
+	z-index: 1;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: color-mix(in oklab, var(--background) 80%, transparent);
+	padding: 0.25rem;
+}
+
+@supports (backdrop-filter: blur(4px)) {
+	.notes-editor .notes-mermaid-preview[data-view="diagram"] > .notes-mermaid-toolbar,
+	.notes-history-preview
+		.notes-mermaid-preview[data-view="diagram"]
+		> .notes-mermaid-toolbar {
+		backdrop-filter: blur(4px);
+	}
+}
+
+.notes-editor .notes-mermaid-zoom,
+.notes-history-preview .notes-mermaid-zoom {
+	display: flex;
+	align-items: center;
+	gap: 0.125rem;
+}
+
+/* Zoom only means something with a drawing to zoom. */
+.notes-editor .notes-mermaid-preview:not([data-view="diagram"]) .notes-mermaid-zoom,
+.notes-history-preview
+	.notes-mermaid-preview:not([data-view="diagram"])
+	.notes-mermaid-zoom {
+	display: none;
+}
+
+.notes-editor .notes-mermaid-button,
+.notes-history-preview .notes-mermaid-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 1.75rem;
+	min-height: 1.75rem;
+	padding-inline: 0.5rem;
+	border-radius: calc(var(--radius-md) - 2px);
+	font-size: 0.75rem;
+	line-height: 1;
+	color: var(--muted-foreground);
+	transition:
+		color 120ms ease-out,
+		background-color 120ms ease-out;
+}
+
+.notes-editor .notes-mermaid-button:hover,
+.notes-history-preview .notes-mermaid-button:hover {
+	color: var(--foreground);
+	background: var(--muted);
+}
+
+.notes-editor .notes-mermaid-button:focus-visible,
+.notes-history-preview .notes-mermaid-button:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 1px;
+}
+
+.notes-editor .notes-mermaid-button:disabled,
+.notes-history-preview .notes-mermaid-button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* The drawing keeps its natural size and scrolls both ways inside a capped box,
+   so a tall or wide chart never takes the note over. Zoom grows the SVG's real
+   width, which is what makes the box scroll. */
+.notes-editor .notes-mermaid-diagram,
+.notes-history-preview .notes-mermaid-diagram {
+	max-height: 28rem;
+	overflow: auto;
+	overscroll-behavior: contain;
+	padding: 1rem;
+}
+
+.notes-editor .notes-mermaid-preview:not([data-view="diagram"]) > .notes-mermaid-diagram,
+.notes-history-preview
+	.notes-mermaid-preview:not([data-view="diagram"])
+	> .notes-mermaid-diagram {
+	display: none;
+}
+
 .notes-editor .notes-mermaid-diagram > svg,
 .notes-history-preview .notes-mermaid-diagram > svg {
 	display: block;
 	margin-inline: auto;
-	max-width: 100%;
 	height: auto;
 }
 
 .notes-editor .notes-mermaid-status,
 .notes-history-preview .notes-mermaid-status {
 	margin: 0;
+	padding: 0 0.75rem 0.5rem;
 	font-size: 0.875rem;
 	color: var(--destructive);
-}
-
-.notes-editor .notes-mermaid-diagram:not(:empty) + .notes-mermaid-status,
-.notes-history-preview .notes-mermaid-diagram:not(:empty) + .notes-mermaid-status {
-	margin-top: 0.75rem;
 }
 
 /* The library hides the picker until hover and delays it a second, which on a

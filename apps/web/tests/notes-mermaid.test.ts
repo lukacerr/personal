@@ -47,6 +47,18 @@ function previewOf(root: HTMLElement, language: string) {
 	);
 }
 
+function viewOf(root: HTMLElement) {
+	return root
+		.querySelector('.notes-mermaid-preview')
+		?.getAttribute('data-view');
+}
+
+function toggleOf(root: HTMLElement) {
+	const button = root.querySelector('.notes-mermaid-toggle');
+	if (!(button instanceof HTMLButtonElement)) throw new Error('no toggle');
+	return button;
+}
+
 function renderedSource(root: HTMLElement, language = 'mermaid') {
 	return previewOf(root, language)
 		?.querySelector('svg')
@@ -160,6 +172,84 @@ describe('mermaid previews in Notes', () => {
 		await vi.waitFor(() =>
 			expect(renderedSource(root)).toBe('flowchart LR\n  A --> Z'),
 		);
+	});
+
+	it('shows the drawing instead of the source once it renders, and toggles between them', async () => {
+		const { root } = mountNote([codeBlock('mermaid', FLOWCHART)]);
+		await vi.waitFor(() => expect(viewOf(root)).toBe('diagram'));
+		expect(toggleOf(root).textContent).toBe('Show code');
+
+		toggleOf(root).click();
+		await vi.waitFor(() => expect(viewOf(root)).toBe('code'));
+		expect(toggleOf(root).textContent).toBe('Show diagram');
+
+		toggleOf(root).click();
+		await vi.waitFor(() => expect(viewOf(root)).toBe('diagram'));
+	});
+
+	it('zooms the drawing by resizing it, so a wide chart scrolls instead of clipping', async () => {
+		vi.mocked(renderMermaid).mockResolvedValueOnce({
+			kind: 'ok',
+			svg: '<svg viewBox="0 0 400 200" width="100%" style="max-width: 400px;"></svg>',
+		});
+		const { root } = mountNote([codeBlock('mermaid', FLOWCHART)]);
+		await vi.waitFor(() => expect(viewOf(root)).toBe('diagram'));
+		const svg = () =>
+			root.querySelector('.notes-mermaid-diagram svg') as SVGElement;
+		const button = (name: string) => {
+			const found = root.querySelector(
+				`.notes-mermaid-preview button[aria-label="${name}"]`,
+			);
+			if (!(found instanceof HTMLButtonElement)) throw new Error(name);
+			return found;
+		};
+		expect(svg().style.width).toBe('');
+
+		button('Zoom in').click();
+		expect(svg().style.width).toBe('500px');
+		expect(svg().style.maxWidth).toBe('none');
+
+		button('Zoom in').click();
+		expect(svg().style.width).toBe('625px');
+
+		button('Reset zoom').click();
+		expect(svg().style.width).toBe('');
+		expect(svg().style.maxWidth).toBe('400px');
+
+		button('Zoom out').click();
+		expect(svg().style.width).toBe('320px');
+	});
+
+	it('shows the source while the caret is inside the block, and the drawing again when it leaves', async () => {
+		const { editor, root } = mountNote([
+			codeBlock('mermaid', FLOWCHART),
+			{ type: 'paragraph', content: 'after' },
+		]);
+		await vi.waitFor(() => expect(viewOf(root)).toBe('diagram'));
+		const [code, paragraph] = editor.document;
+		if (!code || !paragraph) throw new Error('missing blocks');
+
+		editor.setTextCursorPosition(code, 'start');
+		editor.focus();
+		await vi.waitFor(() => expect(viewOf(root)).toBe('code'));
+
+		editor.setTextCursorPosition(paragraph, 'start');
+		await vi.waitFor(() => expect(viewOf(root)).toBe('diagram'));
+	});
+
+	it('has nothing but the source to show until a first drawing exists', async () => {
+		const { editor, root } = mountNote([codeBlock('mermaid', 'boom')]);
+		await vi.waitFor(() =>
+			expect(previewOf(root, 'mermaid')?.textContent).toContain(
+				'Invalid diagram',
+			),
+		);
+		expect(viewOf(root)).toBe('code');
+
+		const block = editor.document[0];
+		if (!block) throw new Error('missing block');
+		editor.updateBlock(block, { content: FLOWCHART });
+		await vi.waitFor(() => expect(viewOf(root)).toBe('diagram'));
 	});
 
 	it('removes the preview when the block stops being mermaid', async () => {
