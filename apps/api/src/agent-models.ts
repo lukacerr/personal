@@ -113,7 +113,7 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 		provider: 'anthropic',
 		attachments: VISION,
 		label: 'Claude Opus 5',
-		// Thinking is always on for Opus 5 and Fable 5: `off` does not exist.
+		// Thinking is always on for Opus 5 and Fable 5.1: `off` does not exist.
 		reasoning: { levels: ANTHROPIC_EFFORTS, default: 'high' },
 		temperature: null,
 		mapping: 'anthropic-adaptive',
@@ -128,10 +128,15 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 		mapping: 'anthropic-adaptive',
 	},
 	{
-		id: 'claude-fable-5',
+		id: 'claude-fable-5-1',
 		provider: 'anthropic',
 		attachments: VISION,
-		label: 'Claude Fable 5',
+		label: 'Claude Fable 5.1',
+		/**
+		 * Successor to Fable 5 in the same tier. Beyond always-on thinking it
+		 * rejects forced `tool_choice` (`any`/`tool`) with a 400; the Agent only
+		 * ever runs `auto`, so nothing here depends on forcing a call.
+		 */
 		reasoning: { levels: ANTHROPIC_EFFORTS, default: 'high' },
 		temperature: null,
 		mapping: 'anthropic-adaptive',
@@ -146,12 +151,16 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 		mapping: 'anthropic-budget',
 	},
 	{
-		id: 'gpt-5.6-sol',
+		id: 'gpt-6-astra',
 		provider: 'openai',
 		attachments: VISION,
-		label: 'GPT-5.6 Sol',
+		label: 'GPT-6 Astra',
+		/**
+		 * Astra dropped `none`: OpenAI's migration guide moves `none`/`minimal`
+		 * users to `low`. The rest of the GPT-5.6 scale carries over.
+		 */
 		reasoning: {
-			levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+			levels: ['low', 'medium', 'high', 'xhigh', 'max'],
 			default: 'medium',
 		},
 		temperature: null,
@@ -182,10 +191,11 @@ export const AGENT_MODELS: readonly AgentModel[] = [
 		mapping: 'openai-effort',
 	},
 	{
-		id: 'gemini-3.7-flash',
+		id: 'gemini-3.8-flash',
 		provider: 'google',
 		attachments: VISION,
-		label: 'Gemini 3.7 Flash',
+		label: 'Gemini 3.8 Flash',
+		// Like 3.7 Flash before it: `minimal` returns an error on this tier.
 		reasoning: { levels: ['low', 'medium', 'high'], default: 'medium' },
 		temperature: null,
 		mapping: 'google-thinking',
@@ -426,7 +436,7 @@ export function buildProviderOptions(
 			// MiniMax M3's only "on" is adaptive; it has no effort scale.
 			if (level === 'adaptive')
 				return { novita: { thinking: { type: 'adaptive' } } };
-			// Qwen3.7 Max's only "on" is the bare toggle.
+			// Qwen3.8 Max's only "on" is the bare toggle.
 			if (level === 'on') return { novita: { enable_thinking: true } };
 			return level === undefined ? {} : { novita: { reasoningEffort: level } };
 	}

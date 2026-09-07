@@ -12,10 +12,10 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@ai-sdk/anthropic": "^4.0.41",
-		"@ai-sdk/google": "^4.0.50",
-		"@ai-sdk/openai": "^4.0.46",
-		"@ai-sdk/openai-compatible": "^3.0.35",
+		"@ai-sdk/anthropic": "^4.0.49",
+		"@ai-sdk/google": "^4.0.64",
+		"@ai-sdk/openai": "^4.0.60",
+		"@ai-sdk/openai-compatible": "^3.0.44",
 		"@blocknote/core": "catalog:",
 		"@elysia/cors": "^1.4.2",
 		"@elysia/jwt": "^1.4.2",

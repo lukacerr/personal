@@ -16,12 +16,12 @@ describe('agent model registry', () => {
 		expect(AGENT_MODELS.map((model) => model.id)).toEqual([
 			'claude-opus-5',
 			'claude-sonnet-5',
-			'claude-fable-5',
+			'claude-fable-5-1',
 			'claude-haiku-4-5',
-			'gpt-5.6-sol',
+			'gpt-6-astra',
 			'gpt-5.6-terra',
 			'gpt-5.6-luna',
-			'gemini-3.7-flash',
+			'gemini-3.8-flash',
 			'gemini-3.5-flash-lite',
 			'gemini-3.1-pro-preview',
 			'deepseek/deepseek-v4-pro-0813',
@@ -52,12 +52,15 @@ describe('agent model registry', () => {
 	test.each([
 		// Thinking is always on for these; `off` does not exist.
 		['claude-opus-5', 'off'],
-		['claude-fable-5', 'off'],
+		['claude-fable-5-1', 'off'],
 		['moonshotai/kimi-k3', 'off'],
-		['gemini-3.7-flash', 'off'],
+		['gemini-3.8-flash', 'off'],
 		['gemini-3.5-flash-lite', 'off'],
 		['gemini-3.1-pro-preview', 'off'],
-		// Gemini 3.1 Pro Preview is the one Gemini that rejects `minimal`.
+		// GPT-6 Astra dropped `none`; the migration guide says start at `low`.
+		['gpt-6-astra', 'none'],
+		// Gemini 3.8 Flash and 3.1 Pro Preview reject `minimal`.
+		['gemini-3.8-flash', 'minimal'],
 		['gemini-3.1-pro-preview', 'minimal'],
 		// DeepSeek collapses these onto `high`, so they are not declared.
 		['deepseek/deepseek-v4-pro-0813', 'medium'],
@@ -69,7 +72,7 @@ describe('agent model registry', () => {
 	test('finds models by id and rejects strangers', () => {
 		expect(findModel('claude-sonnet-5')?.provider).toBe('anthropic');
 		expect(findModel('gpt-5.6-terra')?.provider).toBe('openai');
-		expect(findModel('gemini-3.7-flash')?.provider).toBe('google');
+		expect(findModel('gemini-3.8-flash')?.provider).toBe('google');
 		expect(findModel('nope')).toBeUndefined();
 	});
 
@@ -137,7 +140,7 @@ describe('buildProviderOptions', () => {
 			},
 		],
 		[
-			'claude-fable-5',
+			'claude-fable-5-1',
 			undefined,
 			{
 				anthropic: {
@@ -169,7 +172,7 @@ describe('buildProviderOptions', () => {
 		['claude-haiku-4-5', 'off', {}],
 		['claude-haiku-4-5', undefined, {}],
 		[
-			'gpt-5.6-sol',
+			'gpt-5.6-terra',
 			'none',
 			{ openai: { reasoningEffort: 'none', promptCacheKey: 'thread-1' } },
 		],
@@ -179,7 +182,17 @@ describe('buildProviderOptions', () => {
 			{ openai: { reasoningEffort: 'medium', promptCacheKey: 'thread-1' } },
 		],
 		[
-			'gemini-3.7-flash',
+			'gpt-6-astra',
+			undefined,
+			{ openai: { reasoningEffort: 'medium', promptCacheKey: 'thread-1' } },
+		],
+		[
+			'gpt-6-astra',
+			'max',
+			{ openai: { reasoningEffort: 'max', promptCacheKey: 'thread-1' } },
+		],
+		[
+			'gemini-3.8-flash',
 			'high',
 			{
 				google: {
@@ -198,7 +211,7 @@ describe('buildProviderOptions', () => {
 		],
 		// An absent level resolves to each model's own default, which differs.
 		[
-			'gemini-3.7-flash',
+			'gemini-3.8-flash',
 			undefined,
 			{
 				google: {

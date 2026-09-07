@@ -199,9 +199,9 @@ Lee este archivo antes de modificar:
   El boundary también exige alineación a `step` desde `min`, con tolerancia solo
   para el error binario de punto flotante: `0.3` alinea con step `0.1`, `0.05`
   no. El rango por sí solo no valida un valor que la UI no puede representar.
-  La matriz conservadora no infiere por provider: Claude 5, GPT-5.6, Gemini 3.x,
-  Kimi K3 y Qwen3.7 Max no exponen; Haiku 4.5 y DeepSeek V4 solo con `off`; GLM
-  5.2 y MiniMax M3 en sus niveles declarados. Ausente se omite de `streamText`;
+  La matriz conservadora no infiere por provider: Claude 5, GPT-5.6, GPT-6,
+  Gemini 3.x, Kimi K3 y Qwen3.8 no exponen; Haiku 4.5 y DeepSeek V4 solo con
+  `off`; GLM 5.3 y MiniMax M3 en sus niveles declarados. Ausente se omite de `streamText`;
   ambos controles quedan auditados en metadata.
 - **Novita es un endpoint con seis vendors detrás, así que el knob es por
   modelo y no por provider.** `@ai-sdk/openai-compatible` hace *spread* de
@@ -220,9 +220,9 @@ Lee este archivo antes de modificar:
   thinking prendido en la mitad de los modelos.
 - Los niveles Novita son por modelo y cada rareza está comentada en el
   registry: DeepSeek colapsa `medium`/`xhigh` sobre `high` (no se declaran),
-  Kimi K3 no se puede apagar (sin `off`), GLM 5.2 solo tiene `high`/`max`
-  confirmados, MiniMax M3 no acepta `reasoning_effort` (su nivel "on" es
-  `adaptive`) y Qwen3.7 Max lleva el toggle pelado — su `thinking_budget`
+  Kimi K3 no se puede apagar (sin `off`), GLM 5.3 solo tiene `high`/`max`
+  confirmados (heredados de 5.2), MiniMax M3 no acepta `reasoning_effort` (su
+  nivel "on" es `adaptive`) y Qwen3.8 Max lleva el toggle pelado — su `thinking_budget`
   existe pero no está verificado que Novita lo reenvíe, así que **no se expone:
   un knob que no hace nada es peor que ninguno**. Lo verificado empíricamente
   es solo el transporte (qué keys sobreviven al body); el probe contra
@@ -230,10 +230,17 @@ Lee este archivo antes de modificar:
   confirmar.
 - **Google AI Studio usa `thinkingConfig.thinkingLevel`**, nunca el legacy
   `thinkingBudget`, y `includeThoughts: true` conserva los resúmenes de
-  razonamiento para el renderer. Gemini 3.7 Flash acepta `low`/`medium`/`high`
-  (default `medium`); Gemini 3.5 Flash-Lite agrega `minimal` (default), y
-  Gemini 3.1 Pro Preview no acepta `minimal` (default `high`). No existe un
-  `off` real para Gemini 3: `minimal` sigue pudiendo razonar.
+  razonamiento para el renderer. Gemini 3.8 Flash acepta `low`/`medium`/`high`
+  (default `medium`) y devuelve error ante `minimal`; Gemini 3.5 Flash-Lite
+  agrega `minimal` (default), y Gemini 3.1 Pro Preview tampoco acepta `minimal`
+  (default `high`). No existe un `off` real para Gemini 3: `minimal` sigue
+  pudiendo razonar.
+- **Los niveles OpenAI también son por modelo**: GPT-5.6 Terra/Luna aceptan
+  `none`, GPT-6 Astra no (su guía de migración mueve `none`/`minimal` a
+  `low`). Astra solo llama tools por la Responses API, que es la que
+  `@ai-sdk/openai` usa por defecto para `openai(id)`; no lo muevas a
+  `openai.chat`. Claude Fable 5.1 rechaza forzar `tool_choice` (`any`/`tool`)
+  con 400: el Agent solo corre `auto`, y conviene que siga así.
 - La `metadata` del mensaje es lo que alimenta la barra de stats de la web, y
   se arma en dos mitades que la SDK **mergea**: en `start` van `model`,
   `reasoning` y `tools` (la selección del request), en `finish` van
