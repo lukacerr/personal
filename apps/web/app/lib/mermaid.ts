@@ -9,6 +9,15 @@ import type { MermaidConfig, MermaidInstance } from '@streamdown/mermaid';
  */
 export const MERMAID_CONFIG = {
 	theme: 'dark',
+	// Flowcharts label nodes with HTML inside `<foreignObject>` by default and
+	// size each node from a `getBoundingClientRect` of that HTML. On Windows
+	// (Chromium and WebView2 alike) those boxes came out far wider than their
+	// text, the viewBox grew with them and a chart fit into the note as an
+	// unreadable thumbnail, while sequence diagrams — plain SVG text — were
+	// fine on the same machine. SVG text measured with `getBBox` does not
+	// depend on the HTML font or scaling of the page around it. Neither Notes
+	// nor Agent uses markdown inside labels, which is what HTML labels buy.
+	flowchart: { htmlLabels: false },
 } as const satisfies MermaidConfig;
 
 export type MermaidRender =
