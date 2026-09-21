@@ -77,6 +77,24 @@ describe('Note versions', () => {
 			expect(reconstructVersion(head, rows, at(index))).toEqual(document);
 	});
 
+	it('walks through a save that changed nothing in the document', () => {
+		// jsondiffpatch reports no delta between identical documents, and the
+		// stored row carries only its base pointer. That row and every older one
+		// chained through it must still reconstruct.
+		const unchanged = [paragraph('a', 'Same'), paragraph('b', 'Two')];
+		const documents = [
+			[paragraph('a', 'Same'), paragraph('c', 'Newest')],
+			unchanged,
+			structuredClone(unchanged),
+			[paragraph('a', 'Same'), paragraph('b', 'Old')],
+		];
+		const { head, rows } = storedNote(documents);
+
+		expect(rows[1]?.delta).toBeUndefined();
+		for (const [index, document] of documents.entries())
+			expect(reconstructVersion(head, rows, at(index))).toEqual(document);
+	});
+
 	it('survives a chain as long as a full keyframe interval', () => {
 		const documents = Array.from({ length: KEYFRAME_INTERVAL }, (_, index) => [
 			paragraph('a', `Revision ${KEYFRAME_INTERVAL - index}`),

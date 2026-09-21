@@ -17,9 +17,11 @@ import type { Delta } from 'jsondiffpatch';
  * `baseCreatedAt` yields this version, and a `baseCreatedAt` equal to the
  * note's `updatedAt` means the chain is anchored at the current document.
  *
- * Exactly one of `content` or (`delta` + `baseCreatedAt`) is set. `content` is
- * used for keyframes and for saves that arrive out of order, which stay
- * standalone instead of being spliced into someone else's chain.
+ * Exactly one of `content` or `baseCreatedAt` is set. `content` is used for
+ * keyframes and for saves that arrive out of order, which stay standalone
+ * instead of being spliced into someone else's chain. A row with
+ * `baseCreatedAt` and a null `delta` is identical to its base: jsondiffpatch
+ * yields no delta between equal documents.
  */
 export const noteMutation = pgTable(
 	'note_mutation',

@@ -69,7 +69,10 @@ export function reconstructVersion(
 			anchor = current.content;
 			break;
 		}
-		if (!current.delta || !current.baseCreatedAt) return undefined;
+		// jsondiffpatch yields no delta between identical documents, so a save
+		// that left the content untouched stores only its base pointer. That row
+		// is the same document as its base; only a missing pointer breaks the chain.
+		if (!current.baseCreatedAt) return undefined;
 		chain.push(current);
 		if (current.baseCreatedAt.getTime() === head.updatedAt.getTime()) {
 			anchor = head.content;
@@ -85,7 +88,7 @@ export function reconstructVersion(
 
 	let document = anchor;
 	for (const link of chain.reverse()) {
-		if (!link.delta) return undefined;
+		if (!link.delta) continue;
 		const patched = differ.patch(structuredClone(document), link.delta);
 		if (!Array.isArray(patched)) return undefined;
 		document = patched as Block[];
