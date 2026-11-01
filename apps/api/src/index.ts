@@ -10,6 +10,7 @@ import { authRouter } from './auth';
 import { credentialsRouter } from './credentials';
 import { eventsRouter } from './events';
 import { filesRouter } from './files';
+import { lockinRouter } from './lockin';
 import { notesRouter } from './notes';
 import { paymentsRouter } from './payments';
 import { publicFilesRouter } from './public-files';
@@ -115,6 +116,7 @@ export const app = new Elysia()
 	.use(credentialsRouter)
 	.use(eventsRouter)
 	.use(filesRouter)
+	.use(lockinRouter)
 	.use(notesRouter)
 	.use(paymentsRouter)
 	.use(publicFilesRouter)

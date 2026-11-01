@@ -7,6 +7,7 @@ import {
 	KeyRoundIcon,
 	type LucideIcon,
 	NotebookPenIcon,
+	TargetIcon,
 } from 'lucide-react';
 
 export const appNavigation = [
@@ -21,6 +22,12 @@ export const appNavigation = [
 		path: '/calendar',
 		description: 'Schedule and organize tasks by day.',
 		icon: CalendarDaysIcon,
+	},
+	{
+		label: 'Lock-in',
+		path: '/lockin',
+		description: 'Log each day of the challenge and keep every streak alive.',
+		icon: TargetIcon,
 	},
 	{
 		label: 'Notes',

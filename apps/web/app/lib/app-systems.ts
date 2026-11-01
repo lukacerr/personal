@@ -7,6 +7,7 @@ import {
 	type IndexLoadOutcome,
 	indexLoadSucceeded,
 } from '@web/lib/index-store';
+import { lockinSystem } from '@web/lib/lockin-system';
 import { notesSystem } from '@web/lib/notes-system';
 import {
 	type SessionWorkGuard,
@@ -191,6 +192,7 @@ export const appSystems: AppSystem[] = [
 	calendarSystem,
 	credentialsSystem,
 	financeSystem,
+	lockinSystem,
 	notesSystem,
 	storageSystem,
 ];

@@ -117,12 +117,13 @@ describe('the system registry', () => {
 		expect(groups.map((group) => group.system.key)).toEqual([
 			'agent',
 			'calendar',
+			'lockin',
 			'finance',
 			'storage',
 			'credentials',
 		]);
 		// The overflow comes out of the last group, never the earlier ones.
-		expect(groups.at(-1)?.commands).toHaveLength(12);
+		expect(groups.at(-1)?.commands).toHaveLength(11);
 	});
 
 	/**

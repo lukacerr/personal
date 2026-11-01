@@ -13,6 +13,7 @@ Lee este archivo antes de modificar:
 | Calendar | `src/events.ts`, `src/schema/event.ts`, `src/schema/event-completion.ts` |
 | Credentials | `src/credentials.ts`, `src/credentials-crypto.ts`, `src/schema/credential.ts` |
 | Finance | `src/payments.ts`, `src/dolar.ts`, `src/schema/payment.ts` |
+| Lock-in | `src/lockin.ts`, `src/schema/lockin-day.ts` |
 | Notes | `src/notes.ts`, `src/note-versions.ts`, `src/public-notes.ts`, `src/schema/note.ts`, `src/schema/note-mutation.ts` |
 | Storage | `src/files.ts`, `src/files-multipart.ts`, `src/files-storage.ts`, `src/public-files.ts`, `src/schema/file.ts` |
 
@@ -529,6 +530,17 @@ Lee este archivo antes de modificar:
 - `GET /payments/settings` distingue **tres** respuestas y las tres importan: `null` es "la caché no tiene nada" y deja que el dispositivo siembre con lo suyo; `{}` es "alguien la vació" y es cómo viaja el borrado de un budget; y un objeto con datos es la copia a adoptar. Una forma que el schema no puede leer se reporta como `null` y no como error: un dispositivo con su espejo intacto debe resembrar, no adoptar algo que esta versión no entiende.
 - Las dos rutas van declaradas **antes** de `/:id`, igual que `/rate`, que parsea su parámetro como uuid y respondería 422.
 - Un fallo de escritura en Redis sale como `503 FINANCE_SETTINGS_UNAVAILABLE` y no como 500: el cliente ya guardó en su espejo y lo único que necesita saber es que la copia compartida no se actualizó.
+
+## Lock-in
+
+- `lockin_day` tiene **una fila por día**, con PK en la fecha local `YYYY-MM-DD` (columna `date` en modo string, como Calendar). Cada respuesta es nullable porque un día se llena de a partes, y `null` es "sin responder", nunca cero.
+- **La API no juzga.** Si una respuesta cumplió su meta es una lectura de la fila que vive en `apps/web/app/lib/lockin.ts` junto a las metas; acá solo se guardan respuestas y se custodia el orden. No agregues columnas de veredicto ni metas server-side.
+- La ventana (`LOCKIN_WINDOW`, 1 nov – 5 dic 2026, cinco semanas domingo-primero) viaja **en el payload del índice** para que el cliente no tenga una segunda copia de las fechas. Está tipada `string` a propósito: con `as const` el literal se filtraba al contrato de Eden.
+- **Los días se cargan en orden**, y es la regla que el usuario pidió para que el log no tenga huecos donde esconder un mal día: un `PUT` abre un día solo si el anterior está completo (`409 LOCKIN_PREVIOUS_DAY_INCOMPLETE`) y no deja vaciar un día que ya tiene siguiente (`409 LOCKIN_LATER_DAY_LOGGED`); corregir valores sigue permitido. "Completo" excluye el gym del domingo, que es día de descanso y **debe** quedar `null` (`422 LOCKIN_SUNDAY_IS_REST`). La misma regla está en el form de la web.
+- Las dos lecturas y el upsert son sentencias separadas y la carrera entre ellas queda abierta a propósito: necesita dos guardados de días contiguos en el mismo instante, y el producto es una persona con un form.
+- **El orden es la única compuerta: no hay cota contra "hoy".** El usuario pidió poder cargar y editar días pasados y futuros por igual; existió un `LOCKIN_DAY_NOT_STARTED` acotado a UTC+14 y se sacó. No lo reintroduzcas: un día futuro se carga apenas el anterior está completo.
+- El `PUT` recibe **el día entero** cada vez: una respuesta omitida sería ambigua entre "no la toqué" y "la borré".
+- Los tests escriben las fechas reales del desafío en la base que `.env` comparte, así que guardan las filas existentes en `beforeAll` y las restauran en `afterAll`.
 
 ## Notes
 

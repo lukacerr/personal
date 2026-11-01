@@ -18,6 +18,7 @@ describe('app navigation', () => {
 		expect(appNavigation.map(({ label, path }) => ({ label, path }))).toEqual([
 			{ label: 'Agent', path: '/agent' },
 			{ label: 'Calendar', path: '/calendar' },
+			{ label: 'Lock-in', path: '/lockin' },
 			{ label: 'Notes', path: '/notes' },
 			{ label: 'Finance', path: '/finance' },
 			{ label: 'Storage', path: '/storage' },

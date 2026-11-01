@@ -4,7 +4,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 describe('Offline app shell', () => {
 	it('serves the service worker without browser or CDN caching', async () => {
-		const headers = await readFile('public/_headers', 'utf8');
+		// A checkout with `core.autocrlf` turns the file's newlines into CRLF;
+		// the rule is the same either way, so compare it with LF.
+		const headers = (await readFile('public/_headers', 'utf8')).replaceAll(
+			'\r\n',
+			'\n',
+		);
 
 		expect(headers).toContain(
 			'/sw.js\n  Cache-Control: no-cache, no-store, must-revalidate',
