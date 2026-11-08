@@ -35,7 +35,7 @@ const TICK_LABELS = {
 
 /**
  * Where the challenge stands: which day it is, and the one action that keeps
- * it honest — logging the next day. The 35 ticks are the log itself, so a gap
+ * it honest — logging the next day. The ticks are the log itself, so a gap
  * left behind shows from across the room.
  */
 export function LockinHero({
@@ -89,7 +89,7 @@ export function LockinHero({
 							? `Week ${week} of ${weeks.length} · ${progress.total - progress.day} days to go`
 							: progress.phase === 'finished'
 								? 'Finished.'
-								: `${progress.total} days, ${weeks.length} weeks, Sunday first.`}
+								: `${progress.total} days, weeks Monday to Sunday.`}
 						<span className="hidden sm:inline">
 							{' · '}
 							{formatDay(window.from).replace(/^w+ /, '')} –{' '}
@@ -119,7 +119,12 @@ export function LockinHero({
 
 			<ol aria-label="Days logged" className="flex gap-1.5 sm:gap-2">
 				{weeks.map((dates, index) => (
-					<li key={dates[0]} className="flex flex-1 gap-0.5 sm:gap-1">
+					<li
+						key={dates[0]}
+						className="flex gap-0.5 sm:gap-1"
+						// Grows by its days, so the short tail's ticks match the others.
+						style={{ flexGrow: dates.length, flexBasis: 0 }}
+					>
 						<span className="sr-only">Week {index + 1}</span>
 						{dates.map((date) => {
 							const state = tickState(date, log, today);

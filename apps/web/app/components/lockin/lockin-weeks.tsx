@@ -28,26 +28,48 @@ const SESSION_LABELS: Record<NonNullable<LockinDay['gym']>, string> = {
 	skipped: 'Skip',
 };
 
-const WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+/** Monday first. Seven slots always, so a short week keeps its bars in place. */
+const WEEKDAYS = [
+	{ key: 'mon', initial: 'M' },
+	{ key: 'tue', initial: 'T' },
+	{ key: 'wed', initial: 'W' },
+	{ key: 'thu', initial: 'T' },
+	{ key: 'fri', initial: 'F' },
+	{ key: 'sat', initial: 'S' },
+	{ key: 'sun', initial: 'S' },
+];
 
 /** The pace that spends the week's budget evenly, as a share of the daily cap. */
 const PACE = LOCKIN_TARGETS.caloriesPerWeek / 7 / LOCKIN_TARGETS.caloriesPerDay;
 
-function CalorieBars({ dates, log }: { dates: string[]; log: LockinLog }) {
+function CalorieBars({
+	dates,
+	log,
+	pace,
+}: {
+	dates: string[];
+	log: LockinLog;
+	/** Whether to draw the weekly pace: a week without a budget has none. */
+	pace: boolean;
+}) {
 	const cap = LOCKIN_TARGETS.caloriesPerDay;
 	return (
 		<div aria-hidden className="flex flex-col gap-1">
 			<div className="relative flex h-10 items-end gap-1">
-				<span
-					className="absolute inset-x-0 border-foreground/30 border-t border-dashed"
-					style={{ bottom: `${PACE * 100}%` }}
-				/>
-				{dates.map((date) => {
+				{pace ? (
+					<span
+						className="absolute inset-x-0 border-foreground/30 border-t border-dashed"
+						style={{ bottom: `${PACE * 100}%` }}
+					/>
+				) : null}
+				{WEEKDAYS.map((weekday, slot) => {
+					const date = dates[slot];
+					if (!date) return <span key={weekday.key} className="flex-1" />;
 					const kcal = log.get(date)?.calories ?? null;
 					const over = kcal !== null && kcal > cap;
 					return (
 						<span
-							key={date}
+							key={weekday.key}
 							title={`${formatDay(date)} · ${kcal === null ? 'not logged' : `${formatCount(kcal)} kcal`}`}
 							className="relative flex h-full flex-1 items-end"
 						>
@@ -73,9 +95,9 @@ function CalorieBars({ dates, log }: { dates: string[]; log: LockinLog }) {
 				})}
 			</div>
 			<div className="flex gap-1 text-center text-[10px] text-muted-foreground">
-				{WEEKDAY_INITIALS.map((initial, index) => (
-					<span key={dates[index]} className="flex-1">
-						{initial}
+				{WEEKDAYS.map((weekday) => (
+					<span key={weekday.key} className="flex-1">
+						{weekday.initial}
 					</span>
 				))}
 			</div>
@@ -121,6 +143,9 @@ function SessionCells({ dates, log }: { dates: string[]; log: LockinLog }) {
  * One row per week in a single card. Each rule shows its days, not only its
  * total: which day ate the budget, which day had no session — the bars run
  * against the daily cap, with the even pace for the week dashed across them.
+ *
+ * The two-day tail holds neither rule — the user chose daily targets alone for
+ * it — so it shows its days without a budget, a quota or a verdict.
  */
 export function LockinWeeks({
 	window,
@@ -195,30 +220,38 @@ export function LockinWeeks({
 												{formatCount(total)}
 											</span>
 											<span className="text-muted-foreground text-xs">
-												/ {formatCount(budget)} kcal
+												{report.judged
+													? `/ ${formatCount(budget)} kcal`
+													: 'kcal'}
 											</span>
 										</span>
-										<span className="flex items-center gap-2">
-											<span
-												className={cn(
-													'font-mono text-xs tabular-nums',
-													over
-														? 'font-medium text-destructive'
-														: 'text-muted-foreground',
-												)}
-											>
-												{over
-													? `${formatCount(total - budget)} over`
-													: `${formatCount(budget - total)} left`}
+										{report.judged ? (
+											<span className="flex items-center gap-2">
+												<span
+													className={cn(
+														'font-mono text-xs tabular-nums',
+														over
+															? 'font-medium text-destructive'
+															: 'text-muted-foreground',
+													)}
+												>
+													{over
+														? `${formatCount(total - budget)} over`
+														: `${formatCount(budget - total)} left`}
+												</span>
+												<VerdictMark
+													mark={report.calories.verdict}
+													label={`Week ${index + 1} calories: ${MARK_LABELS[report.calories.verdict]}`}
+													className="size-5 shrink-0"
+												/>
 											</span>
-											<VerdictMark
-												mark={report.calories.verdict}
-												label={`Week ${index + 1} calories: ${MARK_LABELS[report.calories.verdict]}`}
-												className="size-5 shrink-0"
-											/>
-										</span>
+										) : (
+											<span className="text-muted-foreground text-xs">
+												Daily targets only
+											</span>
+										)}
 									</div>
-									<CalorieBars dates={dates} log={log} />
+									<CalorieBars dates={dates} log={log} pace={report.judged} />
 								</div>
 
 								<div className="flex flex-col gap-2">
@@ -230,33 +263,40 @@ export function LockinWeeks({
 											/>
 											Sessions
 										</span>
-										<span className="flex items-center gap-2">
-											<span className="font-mono text-xs tabular-nums">
-												{REQUIRED_SESSIONS.map((session, position) => {
-													const done = Math.min(
-														report.gym.counts[session],
-														quota[session],
-													);
-													return (
-														<span
-															key={session}
-															className={cn(
-																done < quota[session] &&
-																	'text-muted-foreground',
-															)}
-														>
-															{position > 0 ? ' · ' : ''}
-															{SESSION_LABELS[session]} {done}/{quota[session]}
-														</span>
-													);
-												})}
+										{report.judged ? (
+											<span className="flex items-center gap-2">
+												<span className="font-mono text-xs tabular-nums">
+													{REQUIRED_SESSIONS.map((session, position) => {
+														const done = Math.min(
+															report.gym.counts[session],
+															quota[session],
+														);
+														return (
+															<span
+																key={session}
+																className={cn(
+																	done < quota[session] &&
+																		'text-muted-foreground',
+																)}
+															>
+																{position > 0 ? ' · ' : ''}
+																{SESSION_LABELS[session]} {done}/
+																{quota[session]}
+															</span>
+														);
+													})}
+												</span>
+												<VerdictMark
+													mark={report.gym.verdict}
+													label={`Week ${index + 1} sessions: ${MARK_LABELS[report.gym.verdict]}`}
+													className="size-5 shrink-0"
+												/>
 											</span>
-											<VerdictMark
-												mark={report.gym.verdict}
-												label={`Week ${index + 1} sessions: ${MARK_LABELS[report.gym.verdict]}`}
-												className="size-5 shrink-0"
-											/>
-										</span>
+										) : (
+											<span className="text-muted-foreground text-xs">
+												No weekly mix
+											</span>
+										)}
 									</div>
 									<SessionCells dates={dates} log={log} />
 								</div>

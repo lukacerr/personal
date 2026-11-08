@@ -88,7 +88,7 @@ function answerOf(kpi: KpiKey, day: LockinDay | undefined) {
 
 /**
  * One card per KPI, each on its own: its streak, its record, and the whole
- * challenge as a Sunday-first grid, so a bad week of one habit does not hide
+ * challenge as a Monday-first grid, so a bad week of one habit does not hide
  * behind four good ones.
  */
 export function LockinKpis({

@@ -61,10 +61,11 @@ export function lockinSummaryRows(
 			to: LOG_NEXT_DAY_PATH,
 		});
 
+	// The short tail has no weekly budget, so there is nothing left to count.
 	const week = challengeWeeks(window).find((dates) => dates.includes(today));
-	if (week) {
-		const left =
-			LOCKIN_TARGETS.caloriesPerWeek - weekReport(week, log).calories.total;
+	const report = week && weekReport(week, log);
+	if (report?.judged) {
+		const left = LOCKIN_TARGETS.caloriesPerWeek - report.calories.total;
 		rows.push(
 			left >= 0
 				? {

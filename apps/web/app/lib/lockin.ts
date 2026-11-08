@@ -7,7 +7,7 @@ import type { LockinDay, LockinWindow } from '@web/lib/lockin-api';
  */
 export const LOCKIN_TARGETS = {
 	caloriesPerDay: 4000,
-	caloriesPerWeek: 16_800,
+	caloriesPerWeek: 18_900,
 	proteinGrams: 180,
 	steps: 14_000,
 	sleepMinutes: 7 * 60 + 30,
@@ -104,12 +104,18 @@ export function challengeDates(window: LockinWindow) {
 	return dates;
 }
 
-/** Sunday-first weeks: the window opens on a Sunday and runs whole weeks. */
+/**
+ * Monday-first weeks, Sunday last. Split on Mondays rather than counted off in
+ * sevens, so a week is a calendar week wherever the window starts or ends: the
+ * thirty days from Monday 9 November make four whole weeks and a two-day tail.
+ */
 export function challengeWeeks(window: LockinWindow) {
-	const dates = challengeDates(window);
 	const weeks: string[][] = [];
-	for (let start = 0; start < dates.length; start += 7)
-		weeks.push(dates.slice(start, start + 7));
+	for (const date of challengeDates(window)) {
+		const current = weeks.at(-1);
+		if (!current || atUtcMidnight(date).getUTCDay() === 1) weeks.push([date]);
+		else current.push(date);
+	}
 	return weeks;
 }
 
@@ -217,6 +223,13 @@ export function nextDayToLog(
 }
 
 export type WeekReport = {
+	/**
+	 * Whether the weekly rules apply at all. Only a whole week holds them: the
+	 * two-day tail could neither fit the sessions nor sensibly split the
+	 * budget, so it is judged by the daily targets alone, by the user's call.
+	 * Its verdicts are `rest` — not a question, like Sunday's gym.
+	 */
+	judged: boolean;
 	calories: { total: number; verdict: Verdict };
 	gym: {
 		counts: Record<NonNullable<LockinDay['gym']>, number>;
@@ -255,7 +268,15 @@ export function weekReport(week: string[], log: LockinLog): WeekReport {
 	};
 	const owed = needed.push + needed.pull + needed['legs-core'];
 
+	if (week.length < 7)
+		return {
+			judged: false,
+			calories: { total, verdict: 'rest' },
+			gym: { counts, needed, verdict: 'rest' },
+		};
+
 	return {
+		judged: true,
 		calories: {
 			total,
 			verdict:

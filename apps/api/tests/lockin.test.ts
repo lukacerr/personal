@@ -50,10 +50,13 @@ const EMPTY = {
 const put = (date: string, body: Record<string, unknown>) =>
 	json(`/lockin/${date}`, 'PUT', body);
 
-/** Logs 1 November (a Sunday, so no gym) through `last`, each one complete. */
+/** Monday 9 November, the first day of the window. */
+const START = '2026-11-09';
+
+/** Logs every day from the start through `last`, each one complete. */
 async function logThrough(last: string) {
 	for (
-		let date = new Date('2026-11-01T00:00:00Z');
+		let date = new Date(`${START}T00:00:00Z`);
 		date.toISOString().slice(0, 10) <= last;
 		date.setUTCDate(date.getUTCDate() + 1)
 	) {
@@ -90,7 +93,7 @@ afterAll(async () => {
 
 describe('lock-in', () => {
 	it('lists the window and the logged days in order', async () => {
-		await logThrough('2026-11-02');
+		await logThrough('2026-11-10');
 
 		const response = await request('/lockin');
 		const body = (await response.json()) as {
@@ -100,23 +103,24 @@ describe('lock-in', () => {
 		};
 
 		expect(response.status).toBe(200);
-		expect(body.from).toBe('2026-11-01');
-		expect(body.to).toBe('2026-12-05');
+		// Monday 9 November through Tuesday 8 December: thirty days exactly.
+		expect(body.from).toBe('2026-11-09');
+		expect(body.to).toBe('2026-12-08');
 		expect(body.days.map((day) => day.date)).toEqual([
-			'2026-11-01',
-			'2026-11-02',
+			'2026-11-09',
+			'2026-11-10',
 		]);
-		expect(body.days[1]).toMatchObject({ ...COMPLETE, date: '2026-11-02' });
+		expect(body.days[1]).toMatchObject({ ...COMPLETE, date: '2026-11-10' });
 	});
 
 	it('keeps a partly answered day, and serves the change past a held tag', async () => {
 		const before = await request('/lockin');
 		const tag = before.headers.get('etag') ?? '';
 
-		const saved = await put('2026-11-01', { ...EMPTY, weightKg: 83.15 });
+		const saved = await put(START, { ...EMPTY, weightKg: 83.15 });
 		expect(saved.status).toBe(200);
 		expect(await saved.json()).toMatchObject({
-			date: '2026-11-01',
+			date: START,
 			weightKg: 83.15,
 			calories: null,
 		});
@@ -129,8 +133,8 @@ describe('lock-in', () => {
 		expect(body.days).toHaveLength(1);
 	});
 
-	it('refuses a day outside the five weeks', async () => {
-		for (const date of ['2026-10-31', '2026-12-06']) {
+	it('refuses a day outside the thirty', async () => {
+		for (const date of ['2026-11-08', '2026-12-09']) {
 			const response = await put(date, EMPTY);
 			expect(response.status).toBe(422);
 			expect(await response.json()).toEqual({ error: 'LOCKIN_OUTSIDE_WINDOW' });
@@ -140,10 +144,10 @@ describe('lock-in', () => {
 	it('takes a day that has not happened yet, once the one before is complete', async () => {
 		// Before the challenge even starts: the order is the only gate.
 		setSystemTime(new Date('2026-10-20T12:00:00Z'));
-		await logThrough('2026-11-03');
+		await logThrough('2026-11-11');
 
-		expect((await put('2026-11-04', COMPLETE)).status).toBe(200);
-		const skipped = await put('2026-11-06', COMPLETE);
+		expect((await put('2026-11-12', COMPLETE)).status).toBe(200);
+		const skipped = await put('2026-11-14', COMPLETE);
 		expect(skipped.status).toBe(409);
 		expect(await skipped.json()).toEqual({
 			error: 'LOCKIN_PREVIOUS_DAY_INCOMPLETE',
@@ -151,24 +155,26 @@ describe('lock-in', () => {
 	});
 
 	it('keeps Sunday a rest day', async () => {
-		const session = await put('2026-11-01', { ...COMPLETE, gym: 'cardio' });
+		await logThrough('2026-11-14');
+
+		const session = await put('2026-11-15', { ...COMPLETE, gym: 'cardio' });
 		expect(session.status).toBe(422);
 		expect(await session.json()).toEqual({ error: 'LOCKIN_SUNDAY_IS_REST' });
 
-		// With no gym to answer, Sunday is complete and the week can go on.
-		expect((await put('2026-11-01', { ...COMPLETE, gym: null })).status).toBe(
+		// With no gym to answer, Sunday is complete and the next week can start.
+		expect((await put('2026-11-15', { ...COMPLETE, gym: null })).status).toBe(
 			200,
 		);
-		expect((await put('2026-11-02', COMPLETE)).status).toBe(200);
+		expect((await put('2026-11-16', COMPLETE)).status).toBe(200);
 	});
 
 	it('requires a weekday to say whether there was a session', async () => {
-		await logThrough('2026-11-01');
-		expect((await put('2026-11-02', { ...COMPLETE, gym: null })).status).toBe(
+		await logThrough(START);
+		expect((await put('2026-11-10', { ...COMPLETE, gym: null })).status).toBe(
 			200,
 		);
 
-		const response = await put('2026-11-03', COMPLETE);
+		const response = await put('2026-11-11', COMPLETE);
 
 		expect(response.status).toBe(409);
 		expect(await response.json()).toEqual({
@@ -177,37 +183,29 @@ describe('lock-in', () => {
 	});
 
 	it('logs days in order: each one only once the one before is complete', async () => {
-		const skipped = await put('2026-11-02', COMPLETE);
+		const skipped = await put('2026-11-10', COMPLETE);
 		expect(skipped.status).toBe(409);
 		expect(await skipped.json()).toEqual({
 			error: 'LOCKIN_PREVIOUS_DAY_INCOMPLETE',
 		});
 
-		await put('2026-11-01', { ...EMPTY, weightKg: 83 });
-		const halfway = await put('2026-11-02', COMPLETE);
+		await put(START, { ...EMPTY, weightKg: 83 });
+		const halfway = await put('2026-11-10', COMPLETE);
 		expect(halfway.status).toBe(409);
 
-		await put('2026-11-01', { ...COMPLETE, gym: null });
-		expect((await put('2026-11-02', COMPLETE)).status).toBe(200);
+		await put(START, COMPLETE);
+		expect((await put('2026-11-10', COMPLETE)).status).toBe(200);
 	});
 
 	it('will not reopen a day once the next one is logged', async () => {
-		await logThrough('2026-11-02');
+		await logThrough('2026-11-10');
 
-		const cleared = await put('2026-11-01', {
-			...COMPLETE,
-			gym: null,
-			steps: null,
-		});
+		const cleared = await put(START, { ...COMPLETE, steps: null });
 		expect(cleared.status).toBe(409);
 		expect(await cleared.json()).toEqual({ error: 'LOCKIN_LATER_DAY_LOGGED' });
 
 		// Correcting a value is still fine, as long as the day stays complete.
-		const corrected = await put('2026-11-01', {
-			...COMPLETE,
-			gym: null,
-			steps: 9_000,
-		});
+		const corrected = await put(START, { ...COMPLETE, steps: 9_000 });
 		expect(corrected.status).toBe(200);
 		expect(await corrected.json()).toMatchObject({ steps: 9_000 });
 	});
@@ -220,7 +218,7 @@ describe('lock-in', () => {
 			{ ...EMPTY, weightKg: 0 },
 			{ ...EMPTY, gym: 'chest' },
 		]) {
-			const response = await put('2026-11-01', body);
+			const response = await put(START, body);
 			expect(response.status).toBe(422);
 		}
 	});

@@ -127,6 +127,13 @@
       "when": 1793498820285,
       "tag": "20261101020700_lame_unus",
       "breakpoints": false
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794149225514,
+      "tag": "20261108144705_clear_lockin_days",
+      "breakpoints": false
     }
   ]
 }

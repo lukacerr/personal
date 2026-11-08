@@ -15,7 +15,7 @@ import type { LockinWindow } from '@web/lib/lockin-api';
 import { cn } from '@web/lib/utils';
 import { CheckIcon, LockIcon } from 'lucide-react';
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const dayNumber = (date: string) => Number(date.slice(8));
 

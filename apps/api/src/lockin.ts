@@ -8,13 +8,13 @@ import Elysia, { status } from 'elysia';
 import { z } from 'zod';
 
 /**
- * Sunday 1 November through Saturday 5 December 2026: five whole weeks, each
- * opening on its rest day. Sent with the index so the client never keeps a
- * second copy of the dates it has to agree with.
+ * Monday 9 November through Tuesday 8 December 2026: thirty days exactly.
+ * Sent with the index so the client never keeps a second copy of the dates it
+ * has to agree with.
  */
 export const LOCKIN_WINDOW: { from: string; to: string } = {
-	from: '2026-11-01',
-	to: '2026-12-05',
+	from: '2026-11-09',
+	to: '2026-12-08',
 };
 
 /** Counts are whole and bounded well past anything a real day reaches. */
