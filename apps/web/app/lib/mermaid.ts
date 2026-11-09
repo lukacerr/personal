@@ -10,14 +10,19 @@ import type { MermaidConfig, MermaidInstance } from '@streamdown/mermaid';
 export const MERMAID_CONFIG = {
 	theme: 'dark',
 	// Flowcharts label nodes with HTML inside `<foreignObject>` by default and
-	// size each node from a `getBoundingClientRect` of that HTML. On Windows
-	// (Chromium and WebView2 alike) those boxes came out far wider than their
-	// text, the viewBox grew with them and a chart fit into the note as an
-	// unreadable thumbnail, while sequence diagrams — plain SVG text — were
-	// fine on the same machine. SVG text measured with `getBBox` does not
-	// depend on the HTML font or scaling of the page around it. Neither Notes
-	// nor Agent uses markdown inside labels, which is what HTML labels buy.
-	flowchart: { htmlLabels: false },
+	// lay them out from a `getBoundingClientRect` of that HTML. On Windows
+	// (Chromium and WebView2 alike) that layout fell apart: in Edge 157 a
+	// fourteen-node chart spread its nodes about 2000 units apart, a 5513×18979
+	// viewBox, and fit into the note as an unreadable thumbnail, while
+	// sequence diagrams — plain SVG text — were fine on the same machine. With
+	// SVG text, measured with `getBBox`, the same chart is 749×1231 at every
+	// display scale. It has to be the global flag — mermaid 11 nodes read only
+	// this one, and `flowchart.htmlLabels` (now deprecated) switched nothing but
+	// subgraph titles. The bug also depends on the Chromium version: the
+	// Electron browser in T3 Code (Chromium 152) draws the HTML labels fine, so
+	// check a change here in Edge. Neither Notes nor Agent uses markdown or
+	// icons inside labels, which is what HTML labels buy.
+	htmlLabels: false,
 } as const satisfies MermaidConfig;
 
 export type MermaidRender =
