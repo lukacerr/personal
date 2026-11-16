@@ -595,6 +595,14 @@ body {
 	}
 }
 
+/* Transitions go to 0s, not to the usual 0.01ms: every element has
+   `transition-property: all`, so a nonzero duration turns every style change
+   into a transition, and a transition reports its starting value until the
+   next frame. Mermaid sets each node's `transform` and measures with `getBBox`
+   in the same tick, so on Windows with animation effects off every node read
+   as sitting at the origin and the chart came out clipped. Animations keep
+   0.01ms: they only exist where an `animation-name` is set, and Base UI waits
+   on `getAnimations()`, not on `transitionend`. */
 @media (prefers-reduced-motion: reduce) {
 	*,
 	*::before,
@@ -602,6 +610,6 @@ body {
 		animation-duration: 0.01ms !important;
 		animation-iteration-count: 1 !important;
 		scroll-behavior: auto !important;
-		transition-duration: 0.01ms !important;
+		transition-duration: 0s !important;
 	}
 }
